@@ -31,9 +31,9 @@ export class Broadcast {
   @Column({ name: 'created_at' })
   createdAt!: Date;
 
-  @Column({ name: 'scheduled_at', nullable: true, type: 'datetime' })
+  @Column({ name: 'scheduled_at', nullable: true, type: 'timestamp' })
   scheduledAt!: Date | null;
 
-  @Column({ name: 'sent_at', nullable: true, type: 'datetime' })
+  @Column({ name: 'sent_at', nullable: true, type: 'timestamp' })
   sentAt!: Date | null;
 }
