@@ -87,7 +87,7 @@ export class AuthController {
   @Get('me')
   async me(@CurrentUser() user: AuthenticatedUser | undefined) {
     if (!user) throw new UnauthorizedException('not_authenticated');
-    const profile = await this.auth.profile(user.sub);
+    const profile = await this.auth.profile(user.sub, user.email);
     return { ...user, profile };
   }
 

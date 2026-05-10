@@ -1,0 +1,55 @@
+apiVersion: nola.app/v1
+id: nola-hq
+version: 0.1.0
+
+display:
+  name: Nola Studio HQ
+  tagline: Console méta-plateforme Nola
+  color: "#1F4D3A"
+  docs: https://nola.studio/docs
+  support: ops@nola.studio
+
+# Realm Keycloak dédié à l'équipe interne Nola.
+auth:
+  realm: nola-hq
+  scopes: [openid, profile, email]
+
+# La console interne n'a pas d'offre commerciale — un seul plan "admin".
+modules:
+  - id: console
+    name: Console interne
+    description: Vue d'ensemble des tenants, finance, support
+    plans: [admin]
+
+plans:
+  admin:
+    price_monthly_usd: 0
+    annual_discount_percent: 0
+    trial_days: 0
+    commitment: none
+    limits: {}
+    features:
+      audit_trail: full
+      support: internal
+
+admin_actions: []
+
+# Le HQ consomme les événements de l'écosystème pour son flux d'activité.
+events:
+  emits: []
+  consumes:
+    - tenant.provisioned
+    - tenant.suspended
+    - tenant.reactivated
+    - invoice.issued
+    - payment.succeeded
+    - payment.failed
+    - deploy.completed
+
+notification_templates: []
+
+endpoints:
+  health: /api/v1/health/ping
+  manifest: /.well-known/nola-manifest.yaml
+  auth_login: /api/v1/auth/login
+  auth_logout: /api/v1/auth/logout

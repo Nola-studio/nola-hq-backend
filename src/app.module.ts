@@ -3,7 +3,12 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { APP_GUARD } from '@nestjs/core';
 
+import { NolaSdkModule } from '@nola-hq/nola-sdk';
+
 import { JwtAuthGuard } from './common/auth/jwt-auth.guard';
+import { ManifestModule } from './manifest/manifest.module';
+import { HqConfigModule } from './config/hq-config.module';
+import { HqConfigService } from './config/hq-config.service';
 import { AuthModule } from './auth/auth.module';
 import { CountriesModule } from './countries/countries.module';
 import { AppsModule } from './apps/apps.module';
@@ -55,6 +60,13 @@ import { entities } from './entities';
           logging: false,
         };
       },
+    }),
+    ManifestModule,
+    HqConfigModule,
+    NolaSdkModule.forRootAsync({
+      imports: [HqConfigModule],
+      inject: [HqConfigService],
+      useFactory: (config: HqConfigService) => config.nola(),
     }),
     AuthModule,
     CountriesModule,

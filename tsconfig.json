@@ -18,8 +18,15 @@
     "strictBindCallApply": false,
     "forceConsistentCasingInFileNames": false,
     "noFallthroughCasesInSwitch": false,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "paths": {
+      "@nola-hq/nola-sdk": ["libs/nola-sdk/src"],
+      "@nola-hq/nola-sdk/*": ["libs/nola-sdk/src/*"],
+      "@nola-studio/sdk/commands": ["node_modules/@nola-studio/sdk/dist/commands"],
+      "@nola-studio/sdk/notify":   ["node_modules/@nola-studio/sdk/dist/notify"],
+      "@nola-studio/sdk/events":   ["node_modules/@nola-studio/sdk/dist/events"]
+    }
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "libs/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }

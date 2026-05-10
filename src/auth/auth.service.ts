@@ -1,21 +1,17 @@
 import {
   Injectable,
   Logger,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import * as bcrypt from 'bcryptjs';
+import { NolaAuthService, SilentLoginError } from '@nola-hq/nola-sdk';
+import type { NolaJwtPayload } from '@nola-hq/nola-sdk';
 
 import { TeamMember } from '../team/team-member.entity';
 import { CookieConfigService } from './cookie-config';
 import { SessionStoreService } from './session-store.service';
-import type { NolaJwtPayload } from '../common/auth/nola-jwt-payload';
-
-const HQ_REALM = 'nola-hq';
-const HQ_TENANT = 'nola-studio';
-const HQ_PLAN = 'admin';
-const HQ_APPS_ACTIVES = ['nola-hq'];
 
 export interface LoginInput {
   email: string;
@@ -31,16 +27,19 @@ export interface LoginResult {
 }
 
 /**
- * Auth HQ — port du pattern `kelasi-backend` :
- *  - même forme de claims (`NolaJwtPayload`)
- *  - même cookie chiffré stateless (AES-256-GCM)
- *  - mêmes codes d'erreur (`invalid_credentials`, `missing_session`,
- *    `session_expired`, `user_missing_tenant_id`).
+ * Auth HQ — port direct du pattern `kelasi-backend/apps/api-gateway/src/auth`.
  *
- * Différence : pas de Keycloak. Les utilisateurs HQ sont l'équipe interne
- * Nola Studio, on vérifie le mot de passe contre `team_members.password_hash`
- * (bcrypt, factor 8). Si plus tard on bascule sur Keycloak, seule cette
- * couche change — le reste du backend consomme déjà la même forme de claims.
+ *  1. `NolaAuthService.silentLogin()` fait un OIDC password grant côté
+ *     Keycloak (realm `nola-hq`) via le BFF client retourné par le
+ *     bootstrap NATS.
+ *  2. Le JWT est vérifié contre les JWKS du realm.
+ *  3. On chiffre le payload dans un cookie stateless AES-256-GCM
+ *     (`nola_hq_session`) — la session HQ ne touche pas la DB à chaque
+ *     requête, et un redéploy ne déconnecte personne.
+ *
+ *  La table `team_members` reste utilisée pour l'affichage du profil
+ *  (avatar, role label, permissions UI) — mais ne gère plus de mot de
+ *  passe : Keycloak est l'autorité.
  */
 @Injectable()
 export class AuthService {
@@ -49,38 +48,49 @@ export class AuthService {
   constructor(
     @InjectRepository(TeamMember)
     private readonly members: Repository<TeamMember>,
+    private readonly nolaAuth: NolaAuthService,
     private readonly sessions: SessionStoreService,
     private readonly cookies: CookieConfigService,
   ) {}
 
   async login(input: LoginInput): Promise<LoginResult> {
-    const member = await this.members.findOne({
-      where: { email: input.email },
-    });
-    if (!member || !member.passwordHash) {
-      throw new UnauthorizedException('invalid_credentials');
+    let tokens: { accessToken: string; refreshToken: string; expiresIn: number };
+    let claims: NolaJwtPayload;
+
+    try {
+      tokens = await this.nolaAuth.silentLogin({
+        email: input.email,
+        password: input.password,
+        ipAddress: input.ipAddress,
+      });
+      claims = await this.nolaAuth.verifyToken(tokens.accessToken);
+    } catch (err) {
+      if (err instanceof SilentLoginError) {
+        if (err.status === 400 || err.status === 401) {
+          throw new UnauthorizedException('invalid_credentials');
+        }
+        this.logger.warn(`silent_login http_${err.status}: ${err.body}`);
+        throw new ServiceUnavailableException('auth_unavailable');
+      }
+      const isBootstrapErr =
+        err instanceof Error &&
+        /bootstrap|issuer|registration/i.test(err.message);
+      if (isBootstrapErr) {
+        this.logger.warn(`Login unavailable: ${(err as Error).message}`);
+        throw new ServiceUnavailableException('auth_unavailable');
+      }
+      throw err;
     }
-    const ok = await bcrypt.compare(input.password, member.passwordHash);
-    if (!ok) throw new UnauthorizedException('invalid_credentials');
+
+    if (!claims.tenant_id) {
+      // La console HQ n'a qu'un seul « tenant » logique (la plateforme
+      // elle-même). On force la valeur pour rester homogène avec les
+      // autres services qui exigent un tenant_id non-vide.
+      claims.tenant_id = 'nola-studio';
+    }
 
     const ttl = this.cookies.cookie().ttlSeconds;
     const expiresAt = new Date(Date.now() + ttl * 1000).toISOString();
-
-    const claims: NolaJwtPayload = {
-      sub: member.id,
-      realm: HQ_REALM,
-      tenant_id: HQ_TENANT,
-      email: member.email,
-      name: member.name,
-      roles: member.perms,
-      apps_actives: HQ_APPS_ACTIVES,
-      modules_actifs: [],
-      plan: HQ_PLAN,
-    };
-
-    if (!claims.tenant_id) {
-      throw new UnauthorizedException('user_missing_tenant_id');
-    }
 
     const sessionId = this.sessions.create({
       userId: claims.sub,
@@ -88,16 +98,16 @@ export class AuthService {
       tenantId: claims.tenant_id,
       email: claims.email,
       name: claims.name,
-      roles: claims.roles,
-      appsActives: claims.apps_actives,
-      modulesActifs: claims.modules_actifs,
-      plan: claims.plan,
+      roles: claims.roles ?? [],
+      appsActives: claims.apps_actives ?? ['nola-hq'],
+      modulesActifs: claims.modules_actifs ?? [],
+      plan: claims.plan ?? 'admin',
       expiresAt,
       ipAddress: input.ipAddress,
       userAgent: input.userAgent,
     });
 
-    this.logger.log(`Login OK: ${member.email} (${member.id})`);
+    this.logger.log(`Login OK: ${claims.email ?? claims.sub} (${claims.sub})`);
     return { sessionId, user: claims, expiresIn: ttl };
   }
 
@@ -130,19 +140,39 @@ export class AuthService {
     return this.cookies.cookie().name;
   }
 
-  async profile(userId: string) {
-    const m = await this.members.findOne({ where: { id: userId } });
-    if (!m) throw new UnauthorizedException('not_authenticated');
+  /**
+   * Profil affichable côté UI. Lookup best-effort sur `team_members` par
+   * email (Keycloak est l'autorité, la table locale ne sert qu'au display) ;
+   * si le membre n'existe pas encore localement, on renvoie une projection
+   * minimale construite depuis les claims.
+   */
+  async profile(userId: string, email?: string) {
+    const m = email
+      ? await this.members.findOne({ where: { email } })
+      : await this.members.findOne({ where: { id: userId } });
+    if (m) {
+      return {
+        id: m.id,
+        name: m.name,
+        email: m.email,
+        role: m.role,
+        tag: m.tag,
+        avatar: m.avatar,
+        country: m.country,
+        perms: m.perms,
+        online: m.online,
+      };
+    }
     return {
-      id: m.id,
-      name: m.name,
-      email: m.email,
-      role: m.role,
-      tag: m.tag,
-      avatar: m.avatar,
-      country: m.country,
-      perms: m.perms,
-      online: m.online,
+      id: userId,
+      name: email ?? userId,
+      email: email ?? '',
+      role: 'member',
+      tag: '',
+      avatar: (email ?? userId).slice(0, 2).toUpperCase(),
+      country: '',
+      perms: [],
+      online: true,
     };
   }
 }

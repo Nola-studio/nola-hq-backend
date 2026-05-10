@@ -53,7 +53,7 @@ export class JwtAuthGuard implements CanActivate {
       tenantId: claims.tenant_id,
       roles: claims.roles ?? [],
       impersonator: claims.impersonator
-        ? { sub: claims.impersonator.sub, email: claims.impersonator.email ?? '' }
+        ? { sub: claims.impersonator.sub, email: '' }
         : undefined,
     };
     req.tenantId = claims.tenant_id;

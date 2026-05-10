@@ -1,0 +1,34 @@
+export const NOLA_CONFIG = Symbol('NOLA_CONFIG');
+
+export interface NolaConfig {
+  serviceName: string;
+  serviceVersion: string;
+  natsUrl: string;
+  /**
+   * Direct NATS credentials. When set, the SDK connects with these and
+   * skips the bootstrap announce. Used after the first onboarding once
+   * dedicated user/password are known (typically committed in
+   * `nats-server.conf` or issued by nola-auth's registry handler).
+   */
+  natsUser?: string;
+  natsPass?: string;
+  bootstrap?: {
+    bootstrapUser: string;
+    bootstrapPass: string;
+    bootstrapSecret: string;
+    realm: string;
+    displayName?: string;
+    consumes?: string[];
+    emits?: string[];
+    manifest?: Record<string, unknown>;
+  };
+  authIssuer?: string;
+  authAudience?: string;
+  authSessionEndpoint: string;
+  enableTracing?: boolean;
+  /**
+   * Si `true` (dev), le module ne tente pas de se connecter à NATS au boot.
+   * Permet de lancer le gateway sans infra externe pour /health & manifest.
+   */
+  offline?: boolean;
+}

@@ -11,7 +11,9 @@ async function bootstrap() {
   const config = app.get(ConfigService);
   const logger = new Logger('Bootstrap');
 
-  app.setGlobalPrefix('api/v1');
+  app.setGlobalPrefix('api/v1', {
+    exclude: ['.well-known/nola-manifest.yaml'],
+  });
   app.use(cookieParser());
 
   const origins = (config.get<string>('CORS_ORIGINS') ?? '')
