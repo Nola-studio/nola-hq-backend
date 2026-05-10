@@ -31,13 +31,30 @@ import { entities } from './entities';
     ConfigModule.forRoot({ isGlobal: true }),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        type: 'sqlite',
-        database: config.get<string>('DB_PATH') ?? './data/nola.sqlite',
-        entities,
-        synchronize: true,
-        logging: false,
-      }),
+      useFactory: (config: ConfigService) => {
+        const url = config.get<string>('DATABASE_URL');
+        if (url) {
+          // Postgres en prod (Railway). SSL désactivé sur le réseau privé
+          // Railway (`*.railway.internal`) ; sinon SSL sans vérif. de chaîne
+          // (certif managé Railway).
+          const isInternal = /\.railway\.internal/.test(url);
+          return {
+            type: 'postgres' as const,
+            url,
+            entities,
+            synchronize: true,
+            logging: false,
+            ssl: isInternal ? false : { rejectUnauthorized: false },
+          };
+        }
+        return {
+          type: 'sqlite' as const,
+          database: config.get<string>('DB_PATH') ?? './data/nola.sqlite',
+          entities,
+          synchronize: true,
+          logging: false,
+        };
+      },
     }),
     AuthModule,
     CountriesModule,
