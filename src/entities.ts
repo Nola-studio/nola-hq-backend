@@ -11,6 +11,7 @@ import { MomoEntry } from './momo/momo-entry.entity';
 import { PipelineItem } from './pipeline/pipeline-item.entity';
 import { TeamMember } from './team/team-member.entity';
 import { Tenant } from './tenants/tenant.entity';
+import { TenantCrm } from './tenants/tenant-crm.entity';
 import { Ticket } from './tickets/ticket.entity';
 
 // Le registry des apps n'a PAS de table — c'est une projection in-memory
@@ -30,5 +31,6 @@ export const entities = [
   PipelineItem,
   TeamMember,
   Tenant,
+  TenantCrm,
   Ticket,
 ];

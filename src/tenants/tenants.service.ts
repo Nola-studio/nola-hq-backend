@@ -1,209 +1,265 @@
 import {
-  BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
+  NotImplementedException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, Repository } from 'typeorm';
-import { Tenant, TenantStatus } from './tenant.entity';
-import { CreateTenantDto } from './dto/create-tenant.dto';
-import { UpdateTenantDto } from './dto/update-tenant.dto';
+import { Repository } from 'typeorm';
+import { NolaCommandsService } from '@nola-hq/nola-sdk';
+import { TenantCrm } from './tenant-crm.entity';
+import { TenantStatus } from './tenant.entity';
 import { ListTenantsDto } from './dto/list-tenants.dto';
-import { Invoice } from '../invoices/invoice.entity';
 import { MomoEntry } from '../momo/momo-entry.entity';
 import { Ticket } from '../tickets/ticket.entity';
 import { ActivityEvent } from '../activity/activity.entity';
+import { Invoice } from '../invoices/invoice.entity';
 import type { PaginatedResult } from '../common/dto/pagination.dto';
+
+/**
+ * Canonical tenant fields owned by nola-billing, fetched via NATS admin
+ * commands (`nola.commands.billing.admin.tenant.*`).
+ */
+interface BillingTenant {
+  id: string;
+  externalId: string;
+  name: string;
+  email: string;
+  phone?: string | null;
+  realm: string;
+  lifecycleState:
+    | 'active'
+    | 'grace_period'
+    | 'suspended'
+    | 'blocked'
+    | 'soft_deleted'
+    | 'hard_deleted';
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+  subscriptions?: Array<{
+    id: string;
+    app: string;
+    planId: string;
+    status: string;
+    plan?: { id: string; name: string; price?: string | number };
+  }>;
+}
+
+/**
+ * Read view returned by the HQ console. Merges canonical billing data
+ * with the local CRM augmentation. Field names match what the existing
+ * frontend already expects.
+ */
+export interface TenantView {
+  id: string;
+  name: string;
+  country: string;
+  city: string;
+  apps: string[];
+  plan: string;
+  mrr_cdf: number;
+  status: TenantStatus;
+  since: string;
+  users: number;
+  owner: string;
+  whatsapp: string;
+  mobile_money: string;
+  ar_days: number;
+  nps: number | null;
+}
+
+const NOT_IMPLEMENTED_HINT =
+  'nola-hq is read-only in CQRS mode — perform this operation via nola-billing (HTTP API or admin command).';
 
 @Injectable()
 export class TenantsService {
+  private readonly logger = new Logger(TenantsService.name);
+
   constructor(
-    @InjectRepository(Tenant) private readonly repo: Repository<Tenant>,
+    @InjectRepository(TenantCrm) private readonly crm: Repository<TenantCrm>,
     @InjectRepository(Invoice) private readonly invoices: Repository<Invoice>,
     @InjectRepository(MomoEntry) private readonly momo: Repository<MomoEntry>,
     @InjectRepository(Ticket) private readonly tickets: Repository<Ticket>,
     @InjectRepository(ActivityEvent)
     private readonly activity: Repository<ActivityEvent>,
+    private readonly commands: NolaCommandsService,
   ) {}
 
-  async list(query: ListTenantsDto): Promise<PaginatedResult<Tenant>> {
+  // ─── Reads (merge nola-billing canonical + local CRM) ────────────
+
+  async list(query: ListTenantsDto): Promise<PaginatedResult<TenantView>> {
     const page = query.page ?? 1;
     const limit = query.limit ?? 50;
 
-    const qb = this.repo.createQueryBuilder('t');
+    const tenants = await this.fetchBillingTenants({
+      app: query.app,
+      state: query.status,
+      search: query.q,
+    });
 
-    if (query.country) qb.andWhere('t.country = :country', { country: query.country });
-    if (query.plan) qb.andWhere('t.plan = :plan', { plan: query.plan });
-    if (query.status) qb.andWhere('t.status = :status', { status: query.status });
-    if (query.app) {
-      qb.andWhere(`t.apps LIKE :app`, { app: `%"${query.app}"%` });
-    }
-    if (query.q) {
-      const q = `%${query.q.toLowerCase()}%`;
-      qb.andWhere(
-        new Brackets((b) => {
-          b.where('LOWER(t.name) LIKE :q', { q })
-            .orWhere('LOWER(t.city) LIKE :q', { q })
-            .orWhere('LOWER(t.owner) LIKE :q', { q });
-        }),
-      );
-    }
+    const crms = await this.crm.find();
+    const crmByExternalId = new Map(crms.map((c) => [c.tenantId, c]));
 
-    const sortField = query.sort ?? 'mrr_cdf';
-    const sortColumn = mapSortColumn(sortField);
-    const order = (query.order ?? 'desc').toUpperCase() as 'ASC' | 'DESC';
-    qb.orderBy(sortColumn, order);
+    const views = tenants.map((t) =>
+      this.merge(t, crmByExternalId.get(t.externalId)),
+    );
 
-    const total = await qb.getCount();
-    const items = await qb
-      .skip((page - 1) * limit)
-      .take(limit)
-      .getMany();
+    // Country filter applies post-merge (canonical doesn't store it).
+    const filtered = query.country
+      ? views.filter((v) => v.country === query.country)
+      : views;
 
+    // Plan filter applies post-merge (we derive plan from active sub).
+    const planFiltered = query.plan
+      ? filtered.filter((v) => v.plan === query.plan)
+      : filtered;
+
+    const sorted = sortViews(planFiltered, query.sort, (query as { order?: string }).order);
+
+    const total = sorted.length;
+    const start = (page - 1) * limit;
+    const items = sorted.slice(start, start + limit);
     return { items, total, page, limit };
   }
 
-  async findOne(id: string) {
-    const t = await this.repo.findOne({ where: { id } });
-    if (!t) throw new NotFoundException(`Tenant ${id} introuvable`);
-    return t;
+  async findOne(id: string): Promise<TenantView> {
+    const t = await this.findBillingTenantByExternalId(id);
+    const crm = await this.crm.findOne({ where: { tenantId: id } });
+    return this.merge(t, crm ?? null);
   }
 
   async detail(id: string) {
     const tenant = await this.findOne(id);
     const [invoices, payments, tickets, activity] = await Promise.all([
-      this.invoices.find({
-        where: { tenant: id },
-        order: { issued: 'DESC' },
-        take: 12,
-      }),
+      // TODO Phase 2b: fetch invoices via nola.commands.billing.admin.invoice.list
+      this.invoices.find({ where: { tenant: id }, order: { issued: 'DESC' }, take: 12 }),
+      // TODO Phase 2b: fetch payments via nola.commands.billing.admin.payment.list
       this.momo.find({ where: { tenant: id }, order: { ts: 'DESC' }, take: 12 }),
-      this.tickets.find({
-        where: { tenant: id },
-        order: { createdAt: 'DESC' },
-        take: 8,
-      }),
-      this.activity.find({
-        where: { ref: id },
-        order: { createdAt: 'DESC' },
-        take: 12,
-      }),
+      this.tickets.find({ where: { tenant: id }, order: { createdAt: 'DESC' }, take: 8 }),
+      this.activity.find({ where: { ref: id }, order: { createdAt: 'DESC' }, take: 12 }),
     ]);
     return { tenant, invoices, payments, tickets, activity };
   }
 
-  async create(dto: CreateTenantDto) {
-    const id = dto.id ?? (await this.nextTenantId());
-    if (await this.repo.findOne({ where: { id } })) {
-      throw new BadRequestException(`Tenant ${id} existe déjà`);
-    }
-    const tenant = this.repo.create({
-      id,
-      name: dto.name,
-      country: dto.country,
-      city: dto.city,
-      apps: dto.apps,
-      plan: dto.plan,
-      mrrCdf: dto.mrr_cdf ?? 0,
-      status: dto.status as TenantStatus,
-      since: dto.since,
-      users: dto.users ?? 0,
-      owner: dto.owner,
-      whatsapp: dto.whatsapp,
-      mobileMoney: dto.mobile_money,
-      arDays: dto.ar_days ?? 0,
-      nps: dto.nps ?? null,
-    });
-    return this.repo.save(tenant);
+  async recoveryList(): Promise<TenantView[]> {
+    const { items } = await this.list({ page: 1, limit: 500 } as ListTenantsDto);
+    return items
+      .filter(
+        (v) =>
+          v.ar_days > 0 ||
+          ['attention', 'churn-risk', 'suspended'].includes(v.status),
+      )
+      .sort((a, b) => b.ar_days - a.ar_days);
   }
 
-  async update(id: string, dto: UpdateTenantDto) {
-    const t = await this.findOne(id);
-    if (dto.mrr_cdf !== undefined) t.mrrCdf = dto.mrr_cdf;
-    if (dto.mobile_money !== undefined) t.mobileMoney = dto.mobile_money;
-    if (dto.ar_days !== undefined) t.arDays = dto.ar_days;
-    if (dto.nps !== undefined) t.nps = dto.nps;
-    if (dto.name !== undefined) t.name = dto.name;
-    if (dto.country !== undefined) t.country = dto.country;
-    if (dto.city !== undefined) t.city = dto.city;
-    if (dto.apps !== undefined) t.apps = dto.apps;
-    if (dto.plan !== undefined) t.plan = dto.plan;
-    if (dto.status !== undefined) t.status = dto.status as TenantStatus;
-    if (dto.since !== undefined) t.since = dto.since;
-    if (dto.users !== undefined) t.users = dto.users;
-    if (dto.owner !== undefined) t.owner = dto.owner;
-    if (dto.whatsapp !== undefined) t.whatsapp = dto.whatsapp;
-    return this.repo.save(t);
+  // ─── Writes — disabled in CQRS mode ──────────────────────────────
+  // Signatures preserved so the existing controller still type-checks.
+  // Body always throws — the right place for these ops is nola-billing.
+
+  async create(_dto: unknown): Promise<never> {
+    throw new NotImplementedException(NOT_IMPLEMENTED_HINT);
+  }
+  async update(_id: string, _dto: unknown): Promise<never> {
+    throw new NotImplementedException(NOT_IMPLEMENTED_HINT);
+  }
+  async remove(_id: string): Promise<never> {
+    throw new NotImplementedException(NOT_IMPLEMENTED_HINT);
+  }
+  async changePlan(_id: string, _plan: string): Promise<never> {
+    throw new NotImplementedException(NOT_IMPLEMENTED_HINT);
+  }
+  async suspend(_id: string): Promise<never> {
+    throw new NotImplementedException(NOT_IMPLEMENTED_HINT);
+  }
+  async resume(_id: string): Promise<never> {
+    throw new NotImplementedException(NOT_IMPLEMENTED_HINT);
+  }
+  async setStatus(_id: string, _status: unknown): Promise<never> {
+    throw new NotImplementedException(NOT_IMPLEMENTED_HINT);
   }
 
-  async remove(id: string) {
-    const t = await this.findOne(id);
-    await this.repo.remove(t);
-    return { ok: true };
-  }
-
-  async changePlan(id: string, plan: string) {
-    const t = await this.findOne(id);
-    const previous = t.plan;
-    t.plan = plan;
-    if (t.status === 'trial' && plan !== 'free') t.status = 'onboarding';
-    await this.repo.save(t);
-    await this.recordActivity('commercial', `tenant.plan_changed`, id, `${previous} → ${plan}`);
-    return t;
-  }
-
-  async suspend(id: string) {
-    const t = await this.findOne(id);
-    t.status = 'suspended';
-    await this.repo.save(t);
-    await this.recordActivity('commercial', 'tenant.suspended', id, `tenant=${id}`);
-    return t;
-  }
-
-  async resume(id: string) {
-    const t = await this.findOne(id);
-    t.status = t.arDays > 0 ? 'attention' : 'healthy';
-    await this.repo.save(t);
-    await this.recordActivity('commercial', 'tenant.resumed', id, `tenant=${id}`);
-    return t;
-  }
-
+  // Reminders stay local (just appends to the activity log).
   async sendReminder(id: string, channel: string) {
     const t = await this.findOne(id);
     await this.recordActivity(
       'finance',
       'tenant.reminder_sent',
       id,
-      `via ${channel} (J+${t.arDays})`,
+      `via ${channel} (J+${t.ar_days})`,
     );
     return { ok: true, tenant: t.id, channel, sentAt: new Date().toISOString() };
   }
 
-  async setStatus(id: string, status: TenantStatus) {
-    const t = await this.findOne(id);
-    t.status = status;
-    await this.repo.save(t);
+  // ─── NATS calls + merge ──────────────────────────────────────────
+
+  private async fetchBillingTenants(filters: {
+    app?: string;
+    state?: string;
+    search?: string;
+  }): Promise<BillingTenant[]> {
+    const reply = await this.commands
+      .send<typeof filters, BillingTenant[]>(
+        'nola.commands.billing.admin.tenant.list',
+        filters,
+        { issuedBy: 'nola-hq', timeoutMs: 5_000 },
+      )
+      .catch((err: Error) => {
+        this.logger.error(
+          `tenant.list NATS call failed: ${err.message} — returning empty list`,
+        );
+        throw new ServiceUnavailableException({
+          code: 'BILLING_UNAVAILABLE',
+          message: 'nola-billing is unreachable',
+        });
+      });
+
+    if (!reply.success) {
+      this.logger.warn(
+        `tenant.list returned error: ${reply.error?.code} ${reply.error?.message}`,
+      );
+      throw new ServiceUnavailableException({
+        code: reply.error?.code ?? 'BILLING_ERROR',
+        message: reply.error?.message ?? 'tenant.list failed',
+      });
+    }
+    return reply.data ?? [];
+  }
+
+  private async findBillingTenantByExternalId(
+    externalId: string,
+  ): Promise<BillingTenant> {
+    // No dedicated admin.tenant.get yet — list with no filter and search by id.
+    // Phase 2b will add a `.get` handler to nola-billing if this becomes a hot path.
+    const all = await this.fetchBillingTenants({});
+    const t = all.find((x) => x.externalId === externalId || x.id === externalId);
+    if (!t) throw new NotFoundException(`Tenant "${externalId}" not found in nola-billing`);
     return t;
   }
 
-  async recoveryList() {
-    const list = await this.repo
-      .createQueryBuilder('t')
-      .where('t.ar_days > 0')
-      .orWhere(`t.status IN ('attention','churn-risk','suspended')`)
-      .orderBy('t.ar_days', 'DESC')
-      .getMany();
-    return list;
-  }
+  private merge(t: BillingTenant, crm: TenantCrm | null | undefined): TenantView {
+    const activeSub = (t.subscriptions ?? []).find((s) => s.status === 'active');
+    const apps = Array.from(new Set((t.subscriptions ?? []).map((s) => s.app)));
+    const plan = activeSub?.plan?.name ?? activeSub?.planId ?? 'free';
+    const mrr = activeSub?.plan?.price ? Number(activeSub.plan.price) : 0;
 
-  private async nextTenantId() {
-    const last = await this.repo
-      .createQueryBuilder('t')
-      .orderBy('t.id', 'DESC')
-      .getOne();
-    if (!last) return 't-001';
-    const num = parseInt(last.id.replace(/[^0-9]/g, ''), 10) || 0;
-    return 't-' + String(num + 1).padStart(3, '0');
+    return {
+      id: t.externalId,
+      name: t.name,
+      country: crm?.country ?? '',
+      city: crm?.city ?? '',
+      apps,
+      plan,
+      mrr_cdf: mrr,
+      status: mapLifecycleToStatus(t.lifecycleState),
+      since: t.createdAt?.slice(0, 10) ?? '',
+      users: 0, // TODO Phase 2b: count realm users via nola-auth /users command
+      owner: crm?.owner ?? '',
+      whatsapp: crm?.whatsapp ?? '',
+      mobile_money: crm?.mobileMoney ?? '',
+      ar_days: 0, // TODO Phase 2b: compute from outstanding invoices
+      nps: crm?.nps ?? null,
+    };
   }
 
   private async recordActivity(
@@ -225,27 +281,37 @@ export class TenantsService {
   }
 }
 
-function mapSortColumn(field: string): string {
-  switch (field) {
-    case 'mrr_cdf':
-      return 't.mrr_cdf';
-    case 'ar_days':
-      return 't.ar_days';
-    case 'name':
-      return 't.name';
-    case 'country':
-      return 't.country';
-    case 'plan':
-      return 't.plan';
-    case 'users':
-      return 't.users';
-    case 'status':
-      return 't.status';
-    case 'since':
-      return 't.since';
-    case 'nps':
-      return 't.nps';
+function mapLifecycleToStatus(
+  state: BillingTenant['lifecycleState'],
+): TenantStatus {
+  switch (state) {
+    case 'active':
+      return 'healthy';
+    case 'grace_period':
+      return 'attention';
+    case 'suspended':
+    case 'blocked':
+    case 'soft_deleted':
+    case 'hard_deleted':
+      return 'suspended';
     default:
-      return 't.mrr_cdf';
+      return 'healthy';
   }
+}
+
+function sortViews(
+  views: TenantView[],
+  field: string | undefined,
+  order: string | undefined,
+): TenantView[] {
+  const dir = (order ?? 'desc').toLowerCase() === 'asc' ? 1 : -1;
+  const f = (field ?? 'mrr_cdf') as keyof TenantView;
+  return [...views].sort((a, b) => {
+    const va = a[f] ?? 0;
+    const vb = b[f] ?? 0;
+    if (typeof va === 'number' && typeof vb === 'number') {
+      return (va - vb) * dir;
+    }
+    return String(va).localeCompare(String(vb)) * dir;
+  });
 }

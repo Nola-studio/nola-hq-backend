@@ -109,4 +109,54 @@ export class NolaCommandsService {
       this.bus = new CommandBus(this.nolaClient.getClient());
     }
   }
+
+  /**
+   * Send a NATS request-reply command and return the typed CommandResult.
+   * Use for cross-service calls — e.g. `nola.commands.billing.admin.tenant.list`.
+   *
+   * Throws if the bus is disabled or the NATS connection isn't ready: callers
+   * that can degrade gracefully should catch and fall back. Throws on transport
+   * error or timeout; non-2xx-equivalent results come back as `{ success:
+   * false, error }` and are NOT thrown.
+   */
+  async send<TPayload, TResult>(
+    subject: string,
+    payload: TPayload,
+    options: {
+      issuedBy: string;
+      correlationId?: string;
+      realm?: string;
+      tenantId?: string;
+      timeoutMs?: number;
+    },
+  ): Promise<CommandResult<TResult>> {
+    if (this.disabled) {
+      throw new Error(`NOLA_COMMAND_BUS_DISABLED — cannot send "${subject}"`);
+    }
+    if (!this.nolaClient.isReady()) {
+      throw new Error(`NolaClient not ready — cannot send "${subject}"`);
+    }
+    await this.ensureBus();
+    const { issuedBy, correlationId, realm, tenantId, timeoutMs } = options;
+    return this.bus!.send<TPayload, TResult>(
+      subject,
+      payload,
+      {
+        correlationId: correlationId ?? cryptoRandomUuid(),
+        issuedBy,
+        realm,
+        tenantId,
+      },
+      timeoutMs ?? 5_000,
+    );
+  }
+}
+
+function cryptoRandomUuid(): string {
+  // Browser/Node 18+ globally exposes crypto.randomUUID; fall back to Math
+  // only if it's truly missing (shouldn't happen on our Node runtimes).
+  const c: { randomUUID?: () => string } | undefined =
+    (globalThis as unknown as { crypto?: { randomUUID?: () => string } }).crypto;
+  if (c?.randomUUID) return c.randomUUID();
+  return Math.random().toString(36).slice(2);
 }
