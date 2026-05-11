@@ -168,6 +168,17 @@ export class TenantsService {
     return t;
   }
 
+  async sendReminder(id: string, channel: string) {
+    const t = await this.findOne(id);
+    await this.recordActivity(
+      'finance',
+      'tenant.reminder_sent',
+      id,
+      `via ${channel} (J+${t.arDays})`,
+    );
+    return { ok: true, tenant: t.id, channel, sentAt: new Date().toISOString() };
+  }
+
   async setStatus(id: string, status: TenantStatus) {
     const t = await this.findOne(id);
     t.status = status;

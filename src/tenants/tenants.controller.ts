@@ -72,4 +72,16 @@ export class TenantsController {
   resume(@Param('id') id: string) {
     return this.svc.resume(id);
   }
+
+  @Post(':id/remind')
+  async remind(@Param('id') id: string, @Body() body: { channel?: string }) {
+    return this.svc.sendReminder(id, body?.channel ?? 'whatsapp');
+  }
+
+  @Get(':id/export.csv')
+  async exportCsv() {
+    // Reserve route for future per-tenant CSV — for now the bulk export
+    // is at GET /tenants/export.csv (handled below via list endpoint).
+    return { todo: true };
+  }
 }
