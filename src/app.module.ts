@@ -12,8 +12,6 @@ import { HqConfigService } from './config/hq-config.service';
 import { AuthModule } from './auth/auth.module';
 import { CountriesModule } from './countries/countries.module';
 import { AppsModule } from './apps/apps.module';
-import { PlansModule } from './plans/plans.module';
-import { AppModulesModule } from './app-modules/app-modules.module';
 import { TeamModule } from './team/team.module';
 import { TenantsModule } from './tenants/tenants.module';
 import { ActivityModule } from './activity/activity.module';
@@ -70,8 +68,6 @@ import { entities } from './entities';
     AuthModule,
     CountriesModule,
     AppsModule,
-    PlansModule,
-    AppModulesModule,
     TeamModule,
     TenantsModule,
     ActivityModule,

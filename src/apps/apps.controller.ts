@@ -1,7 +1,6 @@
-import { Body, Controller, Get, Param, Patch } from '@nestjs/common';
+import { Controller, Get, Param } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { AppsService } from './apps.service';
-import { UpdateAppDto } from './dto/update-app.dto';
 
 @ApiBearerAuth()
 @ApiTags('apps')
@@ -9,18 +8,20 @@ import { UpdateAppDto } from './dto/update-app.dto';
 export class AppsController {
   constructor(private readonly svc: AppsService) {}
 
+  /** Liste les apps actuellement enregistrées sur le bus (projection live). */
   @Get()
-  findAll() {
-    return this.svc.findAll();
+  list() {
+    return this.svc.listApps();
   }
 
   @Get(':id')
   findOne(@Param('id') id: string) {
-    return this.svc.findOne(id);
+    return this.svc.getApp(id);
   }
 
-  @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateAppDto) {
-    return this.svc.update(id, dto);
+  /** Historique des manifestes (jusqu'à 10 versions). */
+  @Get(':id/manifests')
+  history(@Param('id') id: string) {
+    return this.svc.listManifestHistory(id);
   }
 }

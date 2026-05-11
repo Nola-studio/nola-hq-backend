@@ -8,7 +8,7 @@ import { Invoice } from '../invoices/invoice.entity';
 import { MomoEntry } from '../momo/momo-entry.entity';
 import { Ticket } from '../tickets/ticket.entity';
 import { HealthEntry } from '../health/health-entry.entity';
-import { AppEntity } from '../apps/app.entity';
+import { AppsService } from '../apps/apps.service';
 
 @Injectable()
 export class AnalyticsService {
@@ -22,7 +22,7 @@ export class AnalyticsService {
     @InjectRepository(Ticket) private readonly tickets: Repository<Ticket>,
     @InjectRepository(HealthEntry)
     private readonly health: Repository<HealthEntry>,
-    @InjectRepository(AppEntity) private readonly apps: Repository<AppEntity>,
+    private readonly apps: AppsService,
   ) {}
 
   kpiList() {
@@ -30,7 +30,7 @@ export class AnalyticsService {
   }
 
   async dashboard() {
-    const [tenants, activity, invoices, payments, tickets, health, apps] =
+    const [tenants, activity, invoices, payments, tickets, health] =
       await Promise.all([
         this.tenants.find(),
         this.activity.find({ order: { createdAt: 'DESC' }, take: 12 }),
@@ -38,8 +38,8 @@ export class AnalyticsService {
         this.momo.find(),
         this.tickets.find(),
         this.health.find(),
-        this.apps.find(),
       ]);
+    const apps = this.apps.listApps();
 
     const kpis = await this.kpiList();
 
@@ -117,7 +117,7 @@ export class AnalyticsService {
 
   async growth() {
     const tenants = await this.tenants.find();
-    const apps = await this.apps.find();
+    const apps = this.apps.listApps();
     const byCountry: Record<string, { count: number; mrr_cdf: number }> = {};
     const byPlan: Record<string, { count: number; mrr_cdf: number }> = {};
     for (const t of tenants) {
@@ -134,9 +134,9 @@ export class AnalyticsService {
       apps: apps.map((a) => ({
         id: a.id,
         name: a.name,
-        tenants: a.tenants,
-        mrr_cdf: a.mrrCdf,
-        growth30: a.growth30,
+        version: a.version,
+        status: a.status,
+        registeredAt: a.registeredAt,
       })),
     };
   }

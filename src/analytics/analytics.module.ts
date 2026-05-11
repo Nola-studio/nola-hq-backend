@@ -7,7 +7,7 @@ import { Invoice } from '../invoices/invoice.entity';
 import { MomoEntry } from '../momo/momo-entry.entity';
 import { Ticket } from '../tickets/ticket.entity';
 import { HealthEntry } from '../health/health-entry.entity';
-import { AppEntity } from '../apps/app.entity';
+import { AppsModule } from '../apps/apps.module';
 import { AnalyticsController } from './analytics.controller';
 import { AnalyticsService } from './analytics.service';
 
@@ -21,8 +21,8 @@ import { AnalyticsService } from './analytics.service';
       MomoEntry,
       Ticket,
       HealthEntry,
-      AppEntity,
     ]),
+    AppsModule,
   ],
   controllers: [AnalyticsController],
   providers: [AnalyticsService],
