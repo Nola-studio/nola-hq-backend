@@ -105,10 +105,8 @@ export class NolaClientService implements OnModuleInit, OnModuleDestroy {
     const options: NolaClientOptions = {
       serviceName: this.config.serviceName,
       serviceVersion: this.config.serviceVersion,
+      kind: this.config.kind,
       natsUrl: this.config.natsUrl,
-      // TODO: pass `kind: this.config.kind` once @nola-studio/sdk publishes
-      // the field (>= 0.4.x). Until then HQ classifies apps/services in
-      // its own projection — see AppsService.
     };
 
     if (hasDedicated) {
