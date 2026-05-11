@@ -12,22 +12,22 @@ import { Column, Entity, PrimaryColumn } from 'typeorm';
  */
 @Entity('tenant_crm')
 export class TenantCrm {
-  @PrimaryColumn()
+  @PrimaryColumn({ type: 'varchar' })
   tenantId!: string;
 
-  @Column({ length: 2, nullable: true })
+  @Column({ type: 'varchar', length: 2, nullable: true })
   country?: string | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   city?: string | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   owner?: string | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   whatsapp?: string | null;
 
-  @Column({ name: 'mobile_money', nullable: true })
+  @Column({ type: 'varchar', name: 'mobile_money', nullable: true })
   mobileMoney?: string | null;
 
   @Column({ type: 'integer', nullable: true })
