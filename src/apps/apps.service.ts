@@ -90,6 +90,27 @@ export class AppsService implements OnModuleInit, OnModuleDestroy {
         max_age: STREAM_MAX_AGE_NS,
       });
 
+      // Le SDK crée un consumer durable la 1re fois et le réutilise — donc
+      // après un redémarrage du HQ, la projection est vide parce que le
+      // consumer reprend là où il en était (rien de neuf à livrer). On le
+      // supprime avant chaque boot pour qu'`consume()` le recrée avec
+      // `deliver_policy: All` et rejoue le buffer 24h.
+      try {
+        const nc = this.nolaClient.getClient().getConnection();
+        const jsm = await nc.jetstreamManager();
+        await jsm.consumers.delete(STREAM_NAME, CONSUMER_NAME);
+        this.logger.log(
+          `Cleared previous durable consumer ${CONSUMER_NAME} — forcing full JetStream replay`,
+        );
+      } catch (err) {
+        // Première fois ou consumer absent — c'est OK.
+        this.logger.debug(
+          `Consumer ${CONSUMER_NAME} not present (ok on first boot): ${
+            err instanceof Error ? err.message : err
+          }`,
+        );
+      }
+
       await this.eventBus.consume(
         STREAM_NAME,
         CONSUMER_NAME,
