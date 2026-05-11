@@ -54,15 +54,33 @@ export class AppsService implements OnModuleInit, OnModuleDestroy {
 
   constructor(private readonly nolaClient: NolaClientService) {}
 
-  async onModuleInit() {
+  onModuleInit() {
+    // Fire-and-forget : on attend en arrière-plan que NolaClient ait
+    // terminé son bootstrap NATS (qui se passe en parallèle), puis on
+    // installe la projection. Bloquer ici retarderait `app.listen()` et
+    // ferait échouer le healthcheck Railway de 30s.
+    void this.startProjection();
+  }
+
+  private async startProjection() {
+    // NolaClient bootstrap = fire-and-forget côté SDK : `ready()` peut
+    // résoudre avant que `isReady()` ne soit vrai. On poll jusqu'à 30
+    // tentatives (~2 min) pour laisser le temps au phase-1 retry de
+    // converger en cas de NATS / Keycloak qui mettent du temps.
+    const maxAttempts = 30;
+    let attempt = 0;
+    while (!this.nolaClient.isReady() && attempt < maxAttempts) {
+      await this.sleep(4_000);
+      attempt += 1;
+    }
+    if (!this.nolaClient.isReady()) {
+      this.logger.warn(
+        `NolaClient pas prêt après ${attempt} tentatives — registry projection désactivée jusqu'à reconnexion.`,
+      );
+      return;
+    }
+
     try {
-      await this.nolaClient.ready();
-      if (!this.nolaClient.isReady()) {
-        this.logger.warn(
-          'NolaClient pas prêt — registry projection désactivée jusqu\'à connexion NATS.',
-        );
-        return;
-      }
       this.eventBus = new EventBus(this.nolaClient.getClient());
       await this.eventBus.init();
 
@@ -102,6 +120,10 @@ export class AppsService implements OnModuleInit, OnModuleDestroy {
         }`,
       );
     }
+  }
+
+  private sleep(ms: number) {
+    return new Promise((r) => setTimeout(r, ms));
   }
 
   onModuleDestroy() {
