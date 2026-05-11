@@ -106,6 +106,9 @@ export class NolaClientService implements OnModuleInit, OnModuleDestroy {
       serviceName: this.config.serviceName,
       serviceVersion: this.config.serviceVersion,
       natsUrl: this.config.natsUrl,
+      // TODO: pass `kind: this.config.kind` once @nola-studio/sdk publishes
+      // the field (>= 0.4.x). Until then HQ classifies apps/services in
+      // its own projection — see AppsService.
     };
 
     if (hasDedicated) {
@@ -197,6 +200,7 @@ export class NolaClientService implements OnModuleInit, OnModuleDestroy {
       serviceVersion: this.config.serviceVersion,
       natsUrl: this.config.natsUrl,
       bootstrap: this.config.bootstrap,
+      // kind forwarding: see TODO in connectAsync().
     });
     this.logger.log(
       `Bootstrap (Phase 1) attempt #${this.bootstrapAttempts} with realm ` +

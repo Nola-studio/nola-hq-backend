@@ -1,8 +1,16 @@
 export const NOLA_CONFIG = Symbol('NOLA_CONFIG');
 
+export type NolaKind = 'app' | 'service';
+
 export interface NolaConfig {
   serviceName: string;
   serviceVersion: string;
+  /**
+   * Topology kind — 'app' (customer-facing SaaS with tenants/plans) or
+   * 'service' (platform-internal infra). Forwarded to the registry so HQ
+   * can render apps vs services separately. Default: 'app'.
+   */
+  kind?: NolaKind;
   natsUrl: string;
   /**
    * Direct NATS credentials. When set, the SDK connects with these and

@@ -1,5 +1,6 @@
 apiVersion: nola.app/v1
 id: nola-hq
+kind: service
 version: 0.1.0
 
 display:

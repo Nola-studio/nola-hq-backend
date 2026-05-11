@@ -19,14 +19,42 @@ import { NolaClientService } from '@nola-hq/nola-sdk';
  * Pas de persistance Postgres pour le registry — le HQ s'aligne sur le
  * studio : un redémarrage = rejeu des 24h via JetStream.
  */
+export type AppKind = 'app' | 'service';
+
 export interface AppProjection {
   id: string;
+  /** Topology kind — distinguishes customer-facing SaaS apps from platform-internal services. */
+  kind: AppKind;
   name: string;
   version: string;
   status: 'online' | 'degraded' | 'offline';
   lastHeartbeat: string;
   manifest?: Record<string, unknown>;
   registeredAt: string;
+}
+
+/**
+ * Hardcoded fallback classification for ids whose register payload doesn't
+ * carry `kind` yet (current @nola-studio/sdk 0.3.5 doesn't forward it). Once
+ * the SDK ships with `kind` support, the register payload becomes the source
+ * of truth and this list is only a backstop for stragglers.
+ */
+const KNOWN_SERVICE_IDS = new Set<string>([
+  'nola-auth',
+  'nola-billing',
+  'nola-notify',
+  'nola-gateway',
+  'nola-studio',
+  'nola-hq',
+]);
+
+function inferKind(id: string, payload: Record<string, unknown>): AppKind {
+  const declared = payload.kind;
+  if (declared === 'app' || declared === 'service') return declared;
+  const manifestKind = (payload.manifest as { kind?: unknown } | undefined)
+    ?.kind;
+  if (manifestKind === 'app' || manifestKind === 'service') return manifestKind;
+  return KNOWN_SERVICE_IDS.has(id) ? 'service' : 'app';
 }
 
 export interface ManifestVersion {
@@ -153,8 +181,9 @@ export class AppsService implements OnModuleInit, OnModuleDestroy {
 
   // ── Read API ──────────────────────────────────────────
 
-  listApps(): AppProjection[] {
-    return [...this.apps.values()];
+  listApps(kind?: AppKind): AppProjection[] {
+    const all = [...this.apps.values()];
+    return kind ? all.filter((a) => a.kind === kind) : all;
   }
 
   getApp(id: string): AppProjection {
@@ -202,6 +231,7 @@ export class AppsService implements OnModuleInit, OnModuleDestroy {
 
     this.apps.set(id, {
       id,
+      kind: inferKind(id, data),
       name: displayName,
       version,
       status: 'online',
