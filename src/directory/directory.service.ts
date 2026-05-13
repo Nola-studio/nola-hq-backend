@@ -84,6 +84,28 @@ export class DirectoryService {
     return REALMS;
   }
 
+  /**
+   * Reverse index : pour chaque `tenant_id` rencontré dans n'importe
+   * quel realm Keycloak, retourne la liste des apps de ces realms. Sert
+   * à enrichir `tenant.apps` côté HQ quand `nola-billing` n'a pas
+   * encore les subscriptions (cas dev).
+   */
+  async tenantAppsMap(): Promise<Record<string, string[]>> {
+    const out = new Map<string, Set<string>>();
+    for (const realm of REALMS) {
+      const users = await this.kc.listUsers(realm.id, { max: 500 });
+      for (const u of users) {
+        const tid = u.attributes?.[this.tenantAttribute]?.[0];
+        if (!tid) continue;
+        if (!out.has(tid)) out.set(tid, new Set());
+        for (const app of realm.apps) out.get(tid)!.add(app);
+      }
+    }
+    const obj: Record<string, string[]> = {};
+    for (const [tid, apps] of out) obj[tid] = Array.from(apps);
+    return obj;
+  }
+
   async realmSummaries(): Promise<RealmSummary[]> {
     return Promise.all(
       REALMS.map(async (r) => {

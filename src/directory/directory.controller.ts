@@ -32,4 +32,10 @@ export class DirectoryController {
   directory(@Query() q: ListDirectoryDto) {
     return this.svc.directory(q);
   }
+
+  /** Inverse map `tenantId → apps[]` calculée depuis les attributs Keycloak. */
+  @Get('directory/tenant-apps')
+  tenantAppsMap() {
+    return this.svc.tenantAppsMap();
+  }
 }
