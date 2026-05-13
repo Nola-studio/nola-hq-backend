@@ -135,6 +135,29 @@ export class KeycloakAdminService {
     if (params.first != null) qs.set('first', String(params.first));
     if (params.max != null) qs.set('max', String(params.max));
     if (params.enabled != null) qs.set('enabled', String(params.enabled));
+    // briefRepresentation=false → renvoie aussi `attributes` (sinon Keycloak
+    // tronque la réponse à id/username/email/firstName/lastName).
+    qs.set('briefRepresentation', 'false');
+    return (await this.adminGet<KcUser[]>(realm, '/users', qs)) ?? [];
+  }
+
+  /**
+   * Recherche par attribut (Keycloak 18+) : `?q={key}:{value}`.
+   * Note : si `User Profile` est désactivé et qu'aucun mapper n'expose
+   * l'attribut, la recherche peut renvoyer 0. On retombe alors sur un
+   * filtre client-side via `listUsers + matchAttribute`.
+   */
+  async searchByAttribute(
+    realm: string,
+    key: string,
+    value: string,
+    params: { first?: number; max?: number } = {},
+  ): Promise<KcUser[]> {
+    const qs = new URLSearchParams();
+    qs.set('q', `${key}:${value}`);
+    if (params.first != null) qs.set('first', String(params.first));
+    if (params.max != null) qs.set('max', String(params.max));
+    qs.set('briefRepresentation', 'false');
     return (await this.adminGet<KcUser[]>(realm, '/users', qs)) ?? [];
   }
 
@@ -162,6 +185,7 @@ export class KeycloakAdminService {
     const qs = new URLSearchParams();
     if (params.first != null) qs.set('first', String(params.first));
     if (params.max != null) qs.set('max', String(params.max));
+    qs.set('briefRepresentation', 'false');
     return (await this.adminGet<KcUser[]>(realm, `/groups/${groupId}/members`, qs)) ?? [];
   }
 

@@ -64,6 +64,7 @@ interface TenantLike {
 @Injectable()
 export class DirectoryService {
   private readonly tenantGroupPath: string;
+  private readonly tenantAttribute: string;
 
   constructor(
     private readonly kc: KeycloakAdminService,
@@ -72,6 +73,11 @@ export class DirectoryService {
   ) {
     this.tenantGroupPath =
       config.get<string>('KEYCLOAK_TENANT_GROUP_PATH') ?? '/tenants';
+    // Les users existants ont déjà un attribut `tenant_id` posé par les
+    // apps amont. On le lit en parallèle des groupes Keycloak — le
+    // premier non-vide gagne.
+    this.tenantAttribute =
+      config.get<string>('KEYCLOAK_TENANT_ATTRIBUTE') ?? 'tenant_id';
   }
 
   listRealms(): RealmDef[] {
@@ -142,21 +148,46 @@ export class DirectoryService {
 
     const limit = clamp(q.limit ?? 50, 1, 200);
     const offset = Math.max(0, q.offset ?? 0);
-
-    const group = await this.kc.groupByPath(realm.id, `${this.tenantGroupPath}/${tenantId}`);
-    if (!group) return { items: [], total: 0, limit, offset };
-
-    const members = await this.kc.groupMembers(realm.id, group.id, {
-      first: offset,
-      max: limit,
-    });
     const tenantsByName = new Map<string, string>([[tenantId, tenant.name]]);
+
+    // 1) Si un group `/tenants/{id}` existe, on l'utilise (pattern Keycloak natif).
+    const group = await this.kc.groupByPath(realm.id, `${this.tenantGroupPath}/${tenantId}`);
+    if (group) {
+      const members = await this.kc.groupMembers(realm.id, group.id, {
+        first: offset,
+        max: limit,
+      });
+      const items = await Promise.all(
+        members.map((u) => this.adapt(u, realm, tenantsByName)),
+      );
+      return {
+        items: items.filter((it): it is DirectoryUser => it !== null),
+        total:
+          members.length === limit
+            ? offset + members.length + 1
+            : offset + members.length,
+        limit,
+        offset,
+      };
+    }
+
+    // 2) Sinon on cherche par attribut `tenant_id` (cas actuel — apps amont
+    //    posent l'attribut directement, pas de groupes).
+    const matches = await this.kc.searchByAttribute(
+      realm.id,
+      this.tenantAttribute,
+      tenantId,
+      { first: offset, max: limit },
+    );
     const items = await Promise.all(
-      members.map((u) => this.adapt(u, realm, tenantsByName)),
+      matches.map((u) => this.adapt(u, realm, tenantsByName)),
     );
     return {
       items: items.filter((it): it is DirectoryUser => it !== null),
-      total: members.length === limit ? offset + members.length + 1 : offset + members.length,
+      total:
+        matches.length === limit
+          ? offset + matches.length + 1
+          : offset + matches.length,
       limit,
       offset,
     };
@@ -216,13 +247,21 @@ export class DirectoryService {
       this.kc.userRealmRoles(realm.id, u.id),
     ]);
 
+    // Résolution tenant : group `/tenants/{id}` en priorité, puis attribut
+    // `tenant_id` (cas par défaut aujourd'hui — les apps amont posent
+    // l'attribut directement). On garde même un tenantId inconnu de la
+    // table HQ pour ne pas masquer un user — on l'affiche tel quel.
     let tenantId: string | null = null;
     for (const g of groups) {
       const m = g.path.match(/^\/tenants\/([^/]+)/);
-      if (m && tenantsByName.has(m[1])) {
+      if (m) {
         tenantId = m[1];
         break;
       }
+    }
+    if (!tenantId) {
+      const attr = u.attributes?.[this.tenantAttribute];
+      if (attr && attr.length > 0) tenantId = attr[0];
     }
     if (filterTenantId && tenantId !== filterTenantId) return null;
 
