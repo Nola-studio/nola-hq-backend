@@ -1,12 +1,13 @@
 /**
- * Mapping statique realm ↔ apps. La page Auth de la console listait
- * déjà cette segmentation en dur — on la centralise ici pour que
- * backend et front partagent la même source de vérité.
+ * Mapping statique realm Keycloak ↔ apps Nola.
  *
- * Chaque realm Keycloak héberge les identités d'un ou plusieurs apps
- * de l'écosystème. Un tenant (une organisation cliente) est
- * matérialisé par un *group* Keycloak sous `/tenants/{tenantId}` dans
- * son realm.
+ * Source de vérité : les realms réellement présents dans l'instance
+ * Keycloak `keycloak-dev-3f61.up.railway.app` (constatés via l'API
+ * admin). Les apps déclarées ici correspondent aux `AppId` connus
+ * côté front (`kelasi`, `mycv`, `stock`, `vente`, `nola-hq`).
+ *
+ * Convention tenants : chaque tenant = un *group* Keycloak sous
+ * `/tenants/{tenantId}` dans son realm.
  */
 export interface RealmDef {
   id: string;
@@ -17,28 +18,28 @@ export interface RealmDef {
 
 export const REALMS: RealmDef[] = [
   {
-    id: 'realm-edu',
-    label: 'Realm éducation',
+    id: 'kelasi',
+    label: 'Kelasi',
     apps: ['kelasi'],
     description: 'Écoles, profs et élèves (Kelasi)',
   },
   {
-    id: 'realm-rh',
-    label: 'Realm RH',
+    id: 'mycvmatcher',
+    label: 'MyCVMatcher',
     apps: ['mycv'],
     description: 'Recruteurs et candidats (MyCVMatcher)',
   },
   {
-    id: 'realm-sme',
-    label: 'Realm PME',
-    apps: ['stock', 'vente'],
-    description: 'PME et commerçants (Nola Stock, Vente)',
+    id: 'nola-hq',
+    label: 'Nola HQ',
+    apps: ['nola-hq'],
+    description: 'Console interne Nola Studio',
   },
   {
-    id: 'realm-internal',
-    label: 'Realm interne',
+    id: 'nola-staff',
+    label: 'Nola Staff',
     apps: ['nola-hq'],
-    description: 'Équipe Nola Studio (console HQ)',
+    description: 'Équipes terrain Nola (support, ops)',
   },
 ];
 

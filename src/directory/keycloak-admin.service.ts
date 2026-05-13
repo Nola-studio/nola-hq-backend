@@ -58,7 +58,11 @@ export class KeycloakAdminService {
   constructor(private readonly config: ConfigService) {}
 
   private baseUrl(): string | null {
-    return this.config.get<string>('KEYCLOAK_ADMIN_BASE_URL') ?? null;
+    return (
+      this.config.get<string>('KEYCLOAK_ADMIN_BASE_URL') ??
+      this.config.get<string>('KEYCLOAK_BASE_URL') ??
+      null
+    );
   }
 
   private authRealm(): string {
