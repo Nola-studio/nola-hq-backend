@@ -57,4 +57,46 @@ export class PlansService {
     }
     return reply.data ?? [];
   }
+
+  /**
+   * Push an edit to nola-billing. The billing handler flips
+   * `manuallyEdited=true` automatically (use `unlock: true` to clear it
+   * and re-enable manifest sync). Returns the updated row so the HQ
+   * console can refresh its view without re-listing the whole catalogue.
+   */
+  async update(
+    id: string,
+    patch: {
+      displayName?: string;
+      price?: number;
+      currency?: string;
+      interval?: string;
+      limits?: Record<string, unknown>;
+      features?: unknown[];
+      isActive?: boolean;
+      unlock?: boolean;
+    },
+  ): Promise<BillingPlanRow> {
+    const payload = { id, ...patch };
+    const reply = await this.commands
+      .send<typeof payload, BillingPlanRow>(
+        'nola.commands.billing.admin.plan.update',
+        payload,
+        { issuedBy: 'nola-hq', timeoutMs: 5_000 },
+      )
+      .catch((err: Error) => {
+        this.logger.warn(`plan.update NATS call failed: ${err.message}`);
+        throw new ServiceUnavailableException({
+          code: 'BILLING_UNAVAILABLE',
+          message: 'nola-billing is unreachable',
+        });
+      });
+    if (!reply.success) {
+      throw new ServiceUnavailableException({
+        code: reply.error?.code ?? 'BILLING_ERROR',
+        message: reply.error?.message ?? 'plan.update failed',
+      });
+    }
+    return reply.data as BillingPlanRow;
+  }
 }

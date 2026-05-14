@@ -1,4 +1,4 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { PlansService } from './plans.service';
 
@@ -17,5 +17,28 @@ export class PlansController {
   @ApiQuery({ name: 'app', required: false, type: String })
   list(@Query('app') app?: string) {
     return this.plans.listAll({ app });
+  }
+
+  /**
+   * Edit a plan in billing. The billing handler flips `manuallyEdited`
+   * to true automatically — pass `{ unlock: true }` to release the lock
+   * and let the manifest-driven sync take over again.
+   */
+  @Patch(':id')
+  update(
+    @Param('id') id: string,
+    @Body()
+    body: {
+      displayName?: string;
+      price?: number;
+      currency?: string;
+      interval?: string;
+      limits?: Record<string, unknown>;
+      features?: unknown[];
+      isActive?: boolean;
+      unlock?: boolean;
+    },
+  ) {
+    return this.plans.update(id, body);
   }
 }
