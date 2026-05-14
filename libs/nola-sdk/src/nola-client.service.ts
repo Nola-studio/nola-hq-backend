@@ -107,6 +107,11 @@ export class NolaClientService implements OnModuleInit, OnModuleDestroy {
       serviceVersion: this.config.serviceVersion,
       kind: this.config.kind,
       natsUrl: this.config.natsUrl,
+      // Always carry the manifest into the runtime client — the registry
+      // projection on the HQ side wants it on every `register` event,
+      // and after Phase-1 the SDK drops the bootstrap block so the
+      // manifest needs its own top-level slot.
+      manifest: this.config.bootstrap?.manifest,
     };
 
     if (hasDedicated) {
