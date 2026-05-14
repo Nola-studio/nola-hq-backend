@@ -1,38 +1,453 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { HealthEntry } from './health-entry.entity';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  OnApplicationBootstrap,
+  OnModuleDestroy,
+} from '@nestjs/common';
+import { EventBus } from '@nola-studio/sdk';
+import { NolaClientService } from '@nola-hq/nola-sdk';
+import { AppsService, type AppProjection } from '../apps/apps.service';
 
+/* ─── public read model ─────────────────────────────────────── */
+
+export type HealthStatus = 'operational' | 'degraded' | 'down';
+
+export interface HealthRow {
+  id: string;
+  name: string;
+  uptime: number; // 0-100
+  p50: number;
+  p99: number;
+  errors24h: number;
+  status: HealthStatus;
+  /** 24 hourly buckets, oldest → newest. 0-100 wellness score per bucket. */
+  series: number[];
+}
+
+export interface HealthIncident {
+  id: string;
+  serviceId: string;
+  serviceName: string;
+  severity: 'P1' | 'P2' | 'P3';
+  state: 'open' | 'closed';
+  reason: string;
+  openedAt: string;
+  closedAt: string | null;
+  /** Milliseconds between openedAt and closedAt (or now if still open). */
+  durationMs: number;
+}
+
+/* ─── implementation ────────────────────────────────────────── */
+
+const BUCKETS_24H = 24;
+const BUCKET_MS = 60 * 60 * 1000;
+const SAMPLE_INTERVAL_MS = 5 * 60 * 1000;
+const MAX_RECENT_INCIDENTS = 200;
+const HEALTH_STREAM = 'NOLA_EVENTS';
+const SNAPSHOT_CONSUMER = 'nola-hq-health-snapshot-projection';
+const INCIDENT_CONSUMER = 'nola-hq-health-incident-projection';
+
+interface RingBuffer {
+  bucketStartMs: number;
+  cursor: number;
+  series: number[];
+}
+
+interface SnapshotEvent {
+  serviceId: string;
+  serviceName: string;
+  status: AppProjection['status'];
+  score: number;
+  timestamp: string;
+}
+
+/**
+ * HealthService — "lite Datadog" projection layer.
+ *
+ * Two data flows, both backed by JetStream so state survives nola-hq
+ * restarts:
+ *
+ *   1. **Snapshots** — every 5 min the sampler observes the registry's
+ *      `online | degraded | offline` for each service and emits one
+ *      `nola.events.nola.health.snapshot.<id>`. The replay consumer at
+ *      boot rebuilds the 24h ring buffer from these.
+ *
+ *   2. **Incidents** — status transitions away from `online` open an
+ *      incident, transitions back close it. Both states are emitted as
+ *      `nola.events.nola.health.incident.<id>` so the HQ console can
+ *      render a real (not hardcoded) incident feed.
+ *
+ * Latency / error counters stay at 0 until a real OTEL collector is
+ * wired in — that's the next slice.
+ */
 @Injectable()
-export class HealthService {
+export class HealthService
+  implements OnApplicationBootstrap, OnModuleDestroy
+{
+  private readonly logger = new Logger(HealthService.name);
+  private readonly rings = new Map<string, RingBuffer>();
+  private readonly lastStatus = new Map<string, AppProjection['status']>();
+  private readonly openIncidents = new Map<string, HealthIncident>();
+  private readonly recentIncidents: HealthIncident[] = [];
+  private eventBus: EventBus | null = null;
+  private samplerTimer: ReturnType<typeof setInterval> | null = null;
+
   constructor(
-    @InjectRepository(HealthEntry)
-    private readonly repo: Repository<HealthEntry>,
+    private readonly apps: AppsService,
+    private readonly nolaClient: NolaClientService,
   ) {}
 
-  findAll() {
-    return this.repo.find();
+  onApplicationBootstrap(): void {
+    void this.bootstrap();
   }
 
-  async findOne(id: string) {
-    const h = await this.repo.findOne({ where: { id } });
-    if (!h) throw new NotFoundException(`Health ${id} introuvable`);
-    return h;
+  onModuleDestroy(): void {
+    if (this.samplerTimer) clearInterval(this.samplerTimer);
   }
 
-  async overall() {
-    const entries = await this.repo.find();
-    const operational = entries.filter((e) => e.status === 'operational').length;
-    const degraded = entries.filter((e) => e.status === 'degraded').length;
-    const avgUptime = entries.length
-      ? entries.reduce((s, e) => s + e.uptime, 0) / entries.length
+  private async bootstrap(): Promise<void> {
+    // Wait for NATS (apps.service does the same dance — it can take a
+    // minute after boot before NolaClient is connected via bootstrap).
+    for (let i = 0; i < 30 && !this.nolaClient.isReady(); i += 1) {
+      await this.sleep(4_000);
+    }
+    if (!this.nolaClient.isReady()) {
+      this.logger.warn(
+        'NolaClient not ready after 30 attempts — health persistence disabled',
+      );
+      this.startSampler(false);
+      return;
+    }
+
+    try {
+      this.eventBus = new EventBus(this.nolaClient.getClient());
+      await this.eventBus.init();
+
+      // Replay history. The NOLA_EVENTS stream is already ensured by
+      // nola-iam / nola-billing at boot (30d retention), so we just
+      // attach consumers filtered to our two health subjects.
+      //
+      // The consumers ARE durable — after a nola-hq restart they pick
+      // up where they left off. We delete + recreate them on every boot
+      // so we always get a fresh replay (cheap on the volume we have).
+      await this.recreateConsumers();
+
+      await this.eventBus.consume<SnapshotEvent>(
+        HEALTH_STREAM,
+        SNAPSHOT_CONSUMER,
+        'nola.events.nola.health.snapshot.>',
+        async (env) => {
+          if (env.payload) this.applySnapshot(env.payload);
+        },
+      );
+      await this.eventBus.consume<HealthIncident>(
+        HEALTH_STREAM,
+        INCIDENT_CONSUMER,
+        'nola.events.nola.health.incident.>',
+        async (env) => {
+          if (env.payload) this.applyIncident(env.payload);
+        },
+      );
+
+      this.logger.log('Health projection ready — consumers attached');
+    } catch (err) {
+      this.logger.error(
+        `Health bootstrap failed: ${err instanceof Error ? err.message : err}`,
+      );
+    }
+
+    this.startSampler(true);
+  }
+
+  private async recreateConsumers(): Promise<void> {
+    if (!this.nolaClient.isReady()) return;
+    try {
+      const nc = this.nolaClient.getClient().getConnection();
+      const jsm = await nc.jetstreamManager();
+      for (const name of [SNAPSHOT_CONSUMER, INCIDENT_CONSUMER]) {
+        await jsm.consumers.delete(HEALTH_STREAM, name).catch(() => undefined);
+      }
+    } catch (err) {
+      this.logger.debug(
+        `Could not pre-clear health consumers: ${err instanceof Error ? err.message : err}`,
+      );
+    }
+  }
+
+  private startSampler(persist: boolean): void {
+    // Take one snapshot at boot so the page isn't all zeros immediately
+    // after deploy. After that, every 5 min.
+    setTimeout(() => void this.sample(persist), 1_000);
+    this.samplerTimer = setInterval(
+      () => void this.sample(persist),
+      SAMPLE_INTERVAL_MS,
+    );
+  }
+
+  // Exposed so tests / dev tools can force a sample synchronously.
+  async sample(persist = true): Promise<void> {
+    const now = new Date();
+    for (const app of this.apps.listApps()) {
+      const status = app.status;
+      const prev = this.lastStatus.get(app.id);
+      this.lastStatus.set(app.id, status);
+
+      // Update ring buffer (in-memory snapshot).
+      this.applySnapshot({
+        serviceId: app.id,
+        serviceName: app.name,
+        status,
+        score: scoreFromStatus(status),
+        timestamp: now.toISOString(),
+      });
+
+      // Persist to JetStream.
+      if (persist && this.eventBus) {
+        await this.eventBus.emit<SnapshotEvent>(
+          `nola.events.nola.health.snapshot.${app.id}`,
+          {
+            serviceId: app.id,
+            serviceName: app.name,
+            status,
+            score: scoreFromStatus(status),
+            timestamp: now.toISOString(),
+          },
+          'nola-hq',
+        );
+      }
+
+      // Detect status transitions → emit incident events.
+      if (prev !== undefined && prev !== status) {
+        await this.handleTransition(app, prev, status, now, persist);
+      } else if (prev === undefined && status !== 'online') {
+        // First observation lands in a bad state — open an incident
+        // immediately so the operator sees the issue.
+        await this.handleTransition(app, 'online', status, now, persist);
+      }
+    }
+  }
+
+  /* ─── reads ──────────────────────────────────────────────── */
+
+  findAll(): HealthRow[] {
+    const apps = this.apps.listApps();
+    // Force a fresh in-memory sample so the response reflects the
+    // current registry status, even between scheduled ticks.
+    const now = new Date();
+    for (const a of apps) {
+      this.applySnapshot({
+        serviceId: a.id,
+        serviceName: a.name,
+        status: a.status,
+        score: scoreFromStatus(a.status),
+        timestamp: now.toISOString(),
+      });
+    }
+    return apps.map((a) => this.toRow(a));
+  }
+
+  findOne(id: string): HealthRow {
+    try {
+      return this.toRow(this.apps.getApp(id));
+    } catch {
+      throw new NotFoundException(`Health ${id} introuvable`);
+    }
+  }
+
+  overall(): {
+    total: number;
+    operational: number;
+    degraded: number;
+    down: number;
+    avg_uptime: number;
+    total_errors_24h: number;
+    open_incidents: number;
+  } {
+    const rows = this.findAll();
+    const operational = rows.filter((r) => r.status === 'operational').length;
+    const degraded = rows.filter((r) => r.status === 'degraded').length;
+    const down = rows.filter((r) => r.status === 'down').length;
+    const avgUptime = rows.length
+      ? rows.reduce((s, r) => s + r.uptime, 0) / rows.length
       : 0;
     return {
-      total: entries.length,
+      total: rows.length,
       operational,
       degraded,
+      down,
       avg_uptime: Number(avgUptime.toFixed(3)),
-      total_errors_24h: entries.reduce((s, e) => s + e.errors24h, 0),
+      total_errors_24h: rows.reduce((s, r) => s + r.errors24h, 0),
+      open_incidents: this.openIncidents.size,
     };
   }
+
+  listIncidents(opts: { limit?: number; open?: boolean } = {}): HealthIncident[] {
+    const limit = Math.max(1, Math.min(opts.limit ?? 50, MAX_RECENT_INCIDENTS));
+    const now = Date.now();
+    const open = Array.from(this.openIncidents.values()).map((i) => ({
+      ...i,
+      durationMs: now - new Date(i.openedAt).getTime(),
+    }));
+    if (opts.open === true) return open.slice(0, limit);
+    const merged = [...open, ...this.recentIncidents];
+    merged.sort((a, b) => (b.openedAt > a.openedAt ? 1 : -1));
+    return merged.slice(0, limit);
+  }
+
+  /* ─── projection ─────────────────────────────────────────── */
+
+  private applySnapshot(s: SnapshotEvent): void {
+    const ts = new Date(s.timestamp).getTime();
+    if (Number.isNaN(ts)) return;
+    const ring = this.rings.get(s.serviceId) ?? this.newRing(ts);
+    this.advance(ring, ts);
+    ring.series[ring.cursor] = Math.max(ring.series[ring.cursor], s.score);
+    this.rings.set(s.serviceId, ring);
+  }
+
+  private applyIncident(inc: HealthIncident): void {
+    if (inc.state === 'open') {
+      this.openIncidents.set(inc.serviceId, inc);
+    } else {
+      this.openIncidents.delete(inc.serviceId);
+      // De-dupe by id when replaying — a closed event may arrive after
+      // the open event during boot replay.
+      if (!this.recentIncidents.find((i) => i.id === inc.id)) {
+        this.recentIncidents.unshift(inc);
+      } else {
+        const idx = this.recentIncidents.findIndex((i) => i.id === inc.id);
+        this.recentIncidents[idx] = inc;
+      }
+      if (this.recentIncidents.length > MAX_RECENT_INCIDENTS) {
+        this.recentIncidents.length = MAX_RECENT_INCIDENTS;
+      }
+    }
+  }
+
+  private async handleTransition(
+    app: AppProjection,
+    prev: AppProjection['status'],
+    next: AppProjection['status'],
+    when: Date,
+    persist: boolean,
+  ): Promise<void> {
+    const wasUp = prev === 'online';
+    const isUp = next === 'online';
+    if (wasUp === isUp) return;
+
+    if (!isUp) {
+      // online → degraded/offline → open incident. Registry status uses
+      // "offline" (heartbeat lost); the public `HealthStatus` calls it
+      // "down" — we map across here.
+      const severity: HealthIncident['severity'] = next === 'offline' ? 'P2' : 'P3';
+      const incident: HealthIncident = {
+        id: `inc_${app.id}_${when.getTime()}`,
+        serviceId: app.id,
+        serviceName: app.name,
+        severity,
+        state: 'open',
+        reason: next === 'offline' ? 'service offline (heartbeat lost)' : 'service degraded',
+        openedAt: when.toISOString(),
+        closedAt: null,
+        durationMs: 0,
+      };
+      this.openIncidents.set(app.id, incident);
+      this.logger.warn(
+        `[INCIDENT OPEN] ${app.id} → ${next} · sev=${severity}`,
+      );
+      if (persist && this.eventBus) {
+        await this.eventBus.emit<HealthIncident>(
+          `nola.events.nola.health.incident.${app.id}`,
+          incident,
+          'nola-hq',
+        );
+      }
+    } else {
+      // back to online → close any open incident.
+      const open = this.openIncidents.get(app.id);
+      if (!open) return;
+      const closed: HealthIncident = {
+        ...open,
+        state: 'closed',
+        closedAt: when.toISOString(),
+        durationMs: when.getTime() - new Date(open.openedAt).getTime(),
+      };
+      this.openIncidents.delete(app.id);
+      this.recentIncidents.unshift(closed);
+      if (this.recentIncidents.length > MAX_RECENT_INCIDENTS) {
+        this.recentIncidents.length = MAX_RECENT_INCIDENTS;
+      }
+      this.logger.log(
+        `[INCIDENT CLOSE] ${app.id} · ${Math.round(closed.durationMs / 1000)}s`,
+      );
+      if (persist && this.eventBus) {
+        await this.eventBus.emit<HealthIncident>(
+          `nola.events.nola.health.incident.${app.id}`,
+          closed,
+          'nola-hq',
+        );
+      }
+    }
+  }
+
+  /* ─── helpers ────────────────────────────────────────────── */
+
+  private toRow(app: AppProjection): HealthRow {
+    const ring = this.rings.get(app.id) ?? this.newRing(Date.now());
+    const ordered: number[] = [];
+    for (let i = 1; i <= BUCKETS_24H; i += 1) {
+      ordered.push(ring.series[(ring.cursor + i) % BUCKETS_24H]);
+    }
+    const uptime =
+      (ordered.reduce((s, v) => s + v, 0) / (ordered.length * 100)) * 100;
+    return {
+      id: app.id,
+      name: app.name,
+      uptime: Number(uptime.toFixed(2)),
+      p50: 0,
+      p99: 0,
+      errors24h: 0,
+      status: statusFromRegistry(app.status),
+      series: ordered,
+    };
+  }
+
+  private newRing(nowMs: number): RingBuffer {
+    return {
+      bucketStartMs: Math.floor(nowMs / BUCKET_MS) * BUCKET_MS,
+      cursor: 0,
+      series: new Array(BUCKETS_24H).fill(100),
+    };
+  }
+
+  private advance(ring: RingBuffer, nowMs: number): void {
+    const currentBucketStart = Math.floor(nowMs / BUCKET_MS) * BUCKET_MS;
+    let hoursAdvanced = Math.floor(
+      (currentBucketStart - ring.bucketStartMs) / BUCKET_MS,
+    );
+    if (hoursAdvanced <= 0) return;
+    if (hoursAdvanced > BUCKETS_24H) hoursAdvanced = BUCKETS_24H;
+    for (let i = 0; i < hoursAdvanced; i += 1) {
+      ring.cursor = (ring.cursor + 1) % BUCKETS_24H;
+      ring.series[ring.cursor] = 0;
+    }
+    ring.bucketStartMs = currentBucketStart;
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((r) => setTimeout(r, ms));
+  }
+}
+
+function scoreFromStatus(status: AppProjection['status']): number {
+  if (status === 'online') return 100;
+  if (status === 'degraded') return 50;
+  return 0;
+}
+
+function statusFromRegistry(status: AppProjection['status']): HealthStatus {
+  if (status === 'online') return 'operational';
+  if (status === 'degraded') return 'degraded';
+  return 'down';
 }

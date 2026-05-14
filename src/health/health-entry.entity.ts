@@ -21,7 +21,7 @@ export class HealthEntry {
   errors24h!: number;
 
   @Column({ type: 'varchar' })
-  status!: 'operational' | 'degraded';
+  status!: 'operational' | 'degraded' | 'down';
 
   @Column({ type: 'simple-json' })
   series!: number[];
