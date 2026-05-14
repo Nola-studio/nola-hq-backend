@@ -263,7 +263,14 @@ export class AppsService implements OnModuleInit, OnModuleDestroy {
     if (!id) return;
     const now = new Date().toISOString();
     const version = (data.version as string) ?? '0.0.0';
+    // SDK 0.5+ ships the manifest as a nested field. Older SDK versions
+    // and platform services without a manifest send no `manifest` key —
+    // we tolerate both by falling back to the outer payload (which still
+    // exposes display / kind at the top level for legacy clients).
+    const innerManifest =
+      (data.manifest as Record<string, unknown> | undefined) ?? undefined;
     const displayName =
+      ((innerManifest?.display as Record<string, unknown> | undefined)?.name as string) ??
       ((data.display as Record<string, unknown> | undefined)?.name as string) ??
       id;
 
@@ -274,19 +281,19 @@ export class AppsService implements OnModuleInit, OnModuleDestroy {
       version,
       status: 'online',
       lastHeartbeat: now,
-      manifest: data,
+      manifest: innerManifest,
       registeredAt: now,
     });
 
     const history = this.manifestHistory.get(id) ?? [];
     const last = history[history.length - 1]?.version;
-    if (last !== version) {
-      history.push({ version, manifest: data, registeredAt: now });
+    if (last !== version && innerManifest) {
+      history.push({ version, manifest: innerManifest, registeredAt: now });
       if (history.length > MAX_MANIFEST_HISTORY) history.shift();
       this.manifestHistory.set(id, history);
     }
     this.logger.log(
-      `Registered "${id}" v${version} (${history.length} manifest version(s))`,
+      `Registered "${id}" v${version} (manifest ${innerManifest ? 'present' : 'absent'})`,
     );
   }
 
