@@ -26,6 +26,7 @@ import { LogsModule } from './logs/logs.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { BroadcastModule } from './broadcast/broadcast.module';
 import { DirectoryModule } from './directory/directory.module';
+import { IamModule } from './iam/iam.module';
 
 import { entities } from './entities';
 
@@ -83,6 +84,7 @@ import { entities } from './entities';
     AnalyticsModule,
     BroadcastModule,
     DirectoryModule,
+    IamModule,
   ],
   // JwtAuthGuard est fourni par AuthModule (qui l'exporte). On le branche ici
   // comme guard global avec `useExisting` pour partager la même instance.
