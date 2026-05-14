@@ -10,6 +10,8 @@ import {
 import { ApiBearerAuth, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { IamClientService } from './iam-client.service';
 import { IamError } from './iam.types';
+import { HqRoles } from '../common/auth/hq-roles.decorator';
+import { HqRole } from '../common/auth/hq-role.enum';
 
 /**
  * Admin endpoints exposing nola-iam state to the HQ console. Every call
@@ -68,6 +70,7 @@ export class IamController {
   }
 
   @Post('orgs/:id/suspend')
+  @HqRoles(HqRole.Owner)
   async suspendOrg(@Param('id') id: string, @Query('reason') reason?: string) {
     if (!reason) {
       throw new BadRequestException('reason is required');
@@ -76,6 +79,7 @@ export class IamController {
   }
 
   @Post('orgs/:id/reactivate')
+  @HqRoles(HqRole.Owner)
   async reactivateOrg(@Param('id') id: string) {
     return this.iam.reactivateOrg(id);
   }

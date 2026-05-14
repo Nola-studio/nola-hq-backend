@@ -6,6 +6,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { NolaSdkModule } from '@nola-hq/nola-sdk';
 
 import { JwtAuthGuard } from './common/auth/jwt-auth.guard';
+import { HqRolesGuard } from './common/auth/hq-roles.guard';
 import { ManifestModule } from './manifest/manifest.module';
 import { HqConfigModule } from './config/hq-config.module';
 import { HqConfigService } from './config/hq-config.service';
@@ -88,8 +89,13 @@ import { entities } from './entities';
     IamModule,
     PlansModule,
   ],
-  // JwtAuthGuard est fourni par AuthModule (qui l'exporte). On le branche ici
-  // comme guard global avec `useExisting` pour partager la même instance.
-  providers: [{ provide: APP_GUARD, useExisting: JwtAuthGuard }],
+  // Guards globaux dans l'ordre de chaîne :
+  //   1. JwtAuthGuard — hydrate `req.user` depuis la session.
+  //   2. HqRolesGuard — fait respecter `@HqRoles(...)` sur les routes
+  //      mutantes. Routes sans décorateur passent sans contrôle de rôle.
+  providers: [
+    { provide: APP_GUARD, useExisting: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: HqRolesGuard },
+  ],
 })
 export class AppModule {}

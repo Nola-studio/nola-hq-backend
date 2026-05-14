@@ -18,6 +18,29 @@ import {
   CurrentUser,
   type AuthenticatedUser,
 } from '../common/auth/current-user.decorator';
+import { HqRole, hasHqRole } from '../common/auth/hq-role.enum';
+
+/**
+ * Project the user's raw role strings into a frontend-friendly access
+ * descriptor. Centralised here so the UI doesn't have to mirror the
+ * role names (or the hierarchy) — it just reads `hq.canEdit` etc.
+ */
+function deriveHqAccess(roles: string[]): {
+  role: 'owner' | 'operator' | 'viewer' | null;
+  canRead: boolean;
+  canEdit: boolean;
+  canAdminister: boolean;
+} {
+  const isOwner = hasHqRole(roles, HqRole.Owner);
+  const isOperator = isOwner || hasHqRole(roles, HqRole.Operator);
+  const isViewer = isOperator || hasHqRole(roles, HqRole.Viewer);
+  return {
+    role: isOwner ? 'owner' : isOperator ? 'operator' : isViewer ? 'viewer' : null,
+    canRead: isViewer,
+    canEdit: isOperator,
+    canAdminister: isOwner,
+  };
+}
 
 @ApiTags('auth')
 @Controller('auth')
@@ -88,7 +111,7 @@ export class AuthController {
   async me(@CurrentUser() user: AuthenticatedUser | undefined) {
     if (!user) throw new UnauthorizedException('not_authenticated');
     const profile = await this.auth.profile(user.sub, user.email);
-    return { ...user, profile };
+    return { ...user, profile, hq: deriveHqAccess(user.roles) };
   }
 
   private readCookie(req: Request): string | undefined {

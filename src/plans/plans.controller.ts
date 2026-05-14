@@ -1,6 +1,8 @@
 import { Body, Controller, Get, Param, Patch, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { PlansService } from './plans.service';
+import { HqRoles } from '../common/auth/hq-roles.decorator';
+import { HqRole } from '../common/auth/hq-role.enum';
 
 @ApiBearerAuth()
 @ApiTags('plans')
@@ -25,6 +27,7 @@ export class PlansController {
    * and let the manifest-driven sync take over again.
    */
   @Patch(':id')
+  @HqRoles(HqRole.Operator)
   update(
     @Param('id') id: string,
     @Body()
