@@ -1,12 +1,13 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 
 import { NolaSdkModule } from '@nola-hq/nola-sdk';
 
 import { JwtAuthGuard } from './common/auth/jwt-auth.guard';
 import { HqRolesGuard } from './common/auth/hq-roles.guard';
+import { AuditInterceptor } from './audit/audit.interceptor';
 import { ManifestModule } from './manifest/manifest.module';
 import { HqConfigModule } from './config/hq-config.module';
 import { HqConfigService } from './config/hq-config.service';
@@ -93,9 +94,15 @@ import { entities } from './entities';
   //   1. JwtAuthGuard — hydrate `req.user` depuis la session.
   //   2. HqRolesGuard — fait respecter `@HqRoles(...)` sur les routes
   //      mutantes. Routes sans décorateur passent sans contrôle de rôle.
+  //
+  // Interceptor global :
+  //   - AuditInterceptor — capture chaque POST/PATCH/PUT/DELETE
+  //     (succès ou erreur) et persiste un audit trail en local + sur
+  //     JetStream (`nola.events.nola.audit.hq.*`).
   providers: [
     { provide: APP_GUARD, useExisting: JwtAuthGuard },
     { provide: APP_GUARD, useClass: HqRolesGuard },
+    { provide: APP_INTERCEPTOR, useExisting: AuditInterceptor },
   ],
 })
 export class AppModule {}
