@@ -162,6 +162,19 @@ export class AppsService implements OnModuleInit, OnModuleDestroy {
       this.logger.log(
         `Registry projection started (stream=${STREAM_NAME}, consumer=${CONSUMER_NAME})`,
       );
+
+      // Ask every connected SDK client to re-announce itself. The stream's
+      // 24h retention means original register events for long-running apps
+      // have already aged out — without this broadcast a brand-new nola-hq
+      // boot would only ever see heartbeats (name + timestamp), never the
+      // full manifest. Each NolaClient subscribes to `nola.registry.discover`
+      // and re-publishes its `register` event with the manifest attached.
+      //
+      // Small delay before publishing so the consumer above is fully bound
+      // and will catch the responses landing in the stream a few ms later.
+      setTimeout(() => {
+        void this.broadcastDiscover();
+      }, 500);
     } catch (err) {
       this.logger.error(
         `Failed to start registry projection: ${
@@ -173,6 +186,31 @@ export class AppsService implements OnModuleInit, OnModuleDestroy {
 
   private sleep(ms: number) {
     return new Promise((r) => setTimeout(r, ms));
+  }
+
+  /**
+   * Fire-and-forget broadcast on `nola.registry.discover`. Each connected
+   * NolaClient SDK responds by re-publishing its `nola.registry.register`
+   * event (carrying the manifest). The JetStream subscription installed
+   * just above captures those re-announces and feeds them into the
+   * in-memory projection like any other register event.
+   *
+   * Safe to call on every boot — apps treat the message as a hint, not a
+   * command; a noop on the client side just means we lose this round.
+   */
+  private async broadcastDiscover(): Promise<void> {
+    if (!this.nolaClient.isReady()) return;
+    try {
+      await this.nolaClient.getClient().publish('nola.registry.discover', {
+        requestedBy: 'nola-hq',
+        timestamp: new Date().toISOString(),
+      });
+      this.logger.log('Broadcast nola.registry.discover — waiting for app re-announces');
+    } catch (err) {
+      this.logger.warn(
+        `Failed to broadcast discover: ${err instanceof Error ? err.message : err}`,
+      );
+    }
   }
 
   onModuleDestroy() {

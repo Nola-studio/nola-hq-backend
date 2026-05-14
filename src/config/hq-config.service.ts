@@ -22,6 +22,9 @@ export class HqConfigService {
     return {
       serviceName: manifest.id,
       serviceVersion: manifest.version,
+      // nola-hq is the meta-platform console — pure ops UI on top of
+      // the bus, no customer-facing SaaS concept.
+      kind: 'service',
       natsUrl:
         this.config.get<string>('NATS_URL') ?? 'nats://localhost:4222',
       natsUser: this.config.get<string>('NATS_USER') || undefined,
