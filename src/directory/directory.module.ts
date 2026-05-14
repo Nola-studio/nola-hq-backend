@@ -3,6 +3,7 @@ import { DirectoryController } from './directory.controller';
 import { DirectoryService } from './directory.service';
 import { KeycloakAdminService } from './keycloak-admin.service';
 import { TenantsModule } from '../tenants/tenants.module';
+import { IamModule } from '../iam/iam.module';
 
 /**
  * Module Directory — vue agrégée des identités Keycloak côté HQ.
@@ -19,7 +20,7 @@ import { TenantsModule } from '../tenants/tenants.module';
  * realm-sme, realm-internal.
  */
 @Module({
-  imports: [TenantsModule],
+  imports: [TenantsModule, IamModule],
   controllers: [DirectoryController],
   providers: [DirectoryService, KeycloakAdminService],
   exports: [DirectoryService],

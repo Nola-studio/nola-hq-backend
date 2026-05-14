@@ -28,6 +28,18 @@ interface BillingTenant {
   email: string;
   phone?: string | null;
   realm: string;
+  /**
+   * Pattern-D cross-DB pointer to nola_iam.organizations.id. Nullable on
+   * legacy tenants (pre-rollout) — the HQ console treats `null` as
+   * "unlinked" and exposes the gap so it can be backfilled.
+   */
+  organizationId?: string | null;
+  /**
+   * ISO-3166-1 alpha-2 country code denormalized from the org. Drives the
+   * tenant page's flag display + country filter without a cross-service
+   * join on every render.
+   */
+  countryCode?: string | null;
   lifecycleState:
     | 'active'
     | 'grace_period'
@@ -67,6 +79,12 @@ export interface TenantView {
   mobile_money: string;
   ar_days: number;
   nps: number | null;
+  /**
+   * Pattern-D pointer into nola-iam.organizations. Surfaced so the HQ
+   * console can navigate to the org detail (memberships, audit trail)
+   * without resolving it through a side channel.
+   */
+  organizationId: string | null;
 }
 
 const NOT_IMPLEMENTED_HINT =
@@ -243,10 +261,14 @@ export class TenantsService {
     const plan = activeSub?.plan?.name ?? activeSub?.planId ?? 'free';
     const mrr = activeSub?.plan?.price ? Number(activeSub.plan.price) : 0;
 
+    // Country precedence: billing canonical (set at signup via tenant.upsert)
+    // wins over the local CRM augmentation. CRM is the legacy fallback for
+    // tenants created before Pattern D landed the column in billing.
+    const country = (t.countryCode ?? crm?.country ?? '').toUpperCase();
     return {
       id: t.externalId,
       name: t.name,
-      country: crm?.country ?? '',
+      country,
       city: crm?.city ?? '',
       apps,
       plan,
@@ -259,6 +281,7 @@ export class TenantsService {
       mobile_money: crm?.mobileMoney ?? '',
       ar_days: 0, // TODO Phase 2b: compute from outstanding invoices
       nps: crm?.nps ?? null,
+      organizationId: t.organizationId ?? null,
     };
   }
 

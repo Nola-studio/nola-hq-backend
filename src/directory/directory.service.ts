@@ -1,8 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { KeycloakAdminService, type KcUser } from './keycloak-admin.service';
 import { REALMS, realmById, realmForApp, type RealmDef } from './realms.config';
 import { TenantsService } from '../tenants/tenants.service';
+import { IamClientService } from '../iam/iam-client.service';
+import type { IamMembershipResponse } from '../iam/iam.types';
 
 export interface RealmSummary {
   id: string;
@@ -65,10 +67,12 @@ interface TenantLike {
 export class DirectoryService {
   private readonly tenantGroupPath: string;
   private readonly tenantAttribute: string;
+  private readonly logger = new Logger(DirectoryService.name);
 
   constructor(
     private readonly kc: KeycloakAdminService,
     private readonly tenants: TenantsService,
+    private readonly iam: IamClientService,
     config: ConfigService,
   ) {
     this.tenantGroupPath =
@@ -162,14 +166,40 @@ export class DirectoryService {
   async usersInTenant(tenantId: string, q: DirectoryQuery = {}): Promise<PaginatedDirectory> {
     const tenant = await this.tenants
       .findOne(tenantId)
-      .catch(() => null as { id: string; name: string; apps: string[] } | null);
+      .catch(() =>
+        null as {
+          id: string;
+          name: string;
+          apps: string[];
+          organizationId?: string | null;
+        } | null,
+      );
     if (!tenant) return empty(q);
+
+    const limit = clamp(q.limit ?? 50, 1, 200);
+    const offset = Math.max(0, q.offset ?? 0);
+
+    // 0) Pattern D — if the tenant carries an organizationId, iam is the
+    //    canonical source of who's on this org at the platform level.
+    //    Memberships include the embedded NolaPerson, so we get email +
+    //    display name without a second hop. This wins over Keycloak.
+    if (tenant.organizationId) {
+      try {
+        const memberships = await this.iam.listMembershipsForOrg(tenant.organizationId, {
+          includeInactive: false,
+          includePerson: true,
+        });
+        return paginateMemberships(memberships, tenant, offset, limit);
+      } catch (err) {
+        this.logger.warn(
+          `iam.listMembershipsForOrg failed for tenant=${tenantId} org=${tenant.organizationId} — falling back to Keycloak: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
 
     const realm = tenant.apps.map(realmForApp).find(Boolean);
     if (!realm) return empty(q);
 
-    const limit = clamp(q.limit ?? 50, 1, 200);
-    const offset = Math.max(0, q.offset ?? 0);
     const tenantsByName = new Map<string, string>([[tenantId, tenant.name]]);
 
     // 1) Si un group `/tenants/{id}` existe, on l'utilise (pattern Keycloak natif).
@@ -320,4 +350,42 @@ function empty(q: DirectoryQuery): PaginatedDirectory {
     limit: clamp(q.limit ?? 50, 1, 200),
     offset: Math.max(0, q.offset ?? 0),
   };
+}
+
+/**
+ * Map iam memberships → DirectoryUser rows so the HQ console can render
+ * them in the same table as the legacy Keycloak path. The platform role
+ * (owner / admin / member / guest) becomes the single role in `roles`;
+ * `enabled` reflects the membership being active.
+ *
+ * No `realm` is set — iam is realm-agnostic at the platform level. The
+ * apps come from the tenant's billing subscriptions, which is fine for
+ * the "Users of this tenant" view.
+ */
+function paginateMemberships(
+  rows: IamMembershipResponse[],
+  tenant: { id: string; name: string; apps: string[] },
+  offset: number,
+  limit: number,
+): PaginatedDirectory {
+  const total = rows.length;
+  const slice = rows.slice(offset, offset + limit);
+  const items = slice.map((m) => {
+    const email = m.person?.primaryEmail ?? '';
+    const fallbackName = email.split('@')[0] ?? m.personId;
+    return {
+      id: m.personId,
+      username: fallbackName,
+      email,
+      name: m.person?.displayName?.trim() || fallbackName || m.personId,
+      realm: '',
+      apps: tenant.apps,
+      tenantId: tenant.id,
+      tenantName: tenant.name,
+      roles: [m.platformRole],
+      enabled: m.status === 'active',
+      createdAt: m.invitedAt,
+    };
+  });
+  return { items, total, limit, offset };
 }
