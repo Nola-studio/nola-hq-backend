@@ -110,18 +110,33 @@ export class TenantsService {
     const page = query.page ?? 1;
     const limit = query.limit ?? 50;
 
-    const tenants = await this.fetchBillingTenants({
-      app: query.app,
-      state: query.status,
-      search: query.q,
-    });
+    // Fan-out in parallel: canonical tenants from billing + local CRM
+    // augmentation + outstanding invoices (drives the real ar_days
+    // value). The invoice fetch is best-effort — if billing is down
+    // for that call we still return tenant rows with ar_days=0.
+    const [tenants, crms, arDaysByTenant] = await Promise.all([
+      this.fetchBillingTenants({
+        app: query.app,
+        state: query.status,
+        search: query.q,
+      }),
+      this.crm.find(),
+      this.fetchOutstandingArDays().catch((err) => {
+        this.logger.warn(
+          `Failed to fetch outstanding invoices for AR days: ${err.message}`,
+        );
+        return new Map<string, number>();
+      }),
+    ]);
 
-    const crms = await this.crm.find();
     const crmByExternalId = new Map(crms.map((c) => [c.tenantId, c]));
 
-    const views = tenants.map((t) =>
-      this.merge(t, crmByExternalId.get(t.externalId)),
-    );
+    const views = tenants.map((t) => {
+      const view = this.merge(t, crmByExternalId.get(t.externalId));
+      // Override the merge() default (0) with the computed value.
+      view.ar_days = arDaysByTenant.get(t.externalId) ?? 0;
+      return view;
+    });
 
     // Country filter applies post-merge (canonical doesn't store it).
     const filtered = query.country
@@ -242,6 +257,39 @@ export class TenantsService {
       });
     }
     return reply.data ?? [];
+  }
+
+  /**
+   * Query nola-billing for every unpaid invoice on the platform, then
+   * group by tenantId and compute the worst (largest) ar_days — the
+   * value the recovery queue sorts on. One NATS round-trip serves the
+   * entire tenant list, so it's cheap to call on every `list()`.
+   *
+   * Statuses considered "unpaid" : `pending`, `late`, `overdue`. Returns
+   * an empty map if billing is unreachable (caller-handled).
+   */
+  private async fetchOutstandingArDays(): Promise<Map<string, number>> {
+    const reply = await this.commands.send<
+      { limit: number },
+      Array<{ tenantId: string; status: string; dueDate?: string }>
+    >(
+      'nola.commands.billing.admin.invoice.list',
+      { limit: 1000 },
+      { issuedBy: 'nola-hq', timeoutMs: 5_000 },
+    );
+    if (!reply.success || !Array.isArray(reply.data)) return new Map();
+    const today = Date.now();
+    const arByTenant = new Map<string, number>();
+    for (const inv of reply.data) {
+      if (!inv.tenantId || !inv.dueDate) continue;
+      if (!['pending', 'late', 'overdue'].includes(inv.status)) continue;
+      const due = Date.parse(inv.dueDate);
+      if (Number.isNaN(due) || due >= today) continue;
+      const days = Math.floor((today - due) / 86_400_000);
+      const prev = arByTenant.get(inv.tenantId) ?? 0;
+      if (days > prev) arByTenant.set(inv.tenantId, days);
+    }
+    return arByTenant;
   }
 
   private async findBillingTenantByExternalId(
