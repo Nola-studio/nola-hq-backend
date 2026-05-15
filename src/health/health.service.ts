@@ -47,6 +47,31 @@ const MAX_RECENT_INCIDENTS = 200;
 const HEALTH_STREAM = 'NOLA_EVENTS';
 const SNAPSHOT_CONSUMER = 'nola-hq-health-snapshot-projection';
 const INCIDENT_CONSUMER = 'nola-hq-health-incident-projection';
+const METRICS_CONSUMER = 'nola-hq-health-metrics-projection';
+
+/** Shape published by the SDK's MetricsRecorder every 60s. */
+interface MetricsSnapshotEvent {
+  service: string;
+  windowStart: string;
+  windowEnd: string;
+  requestCount: number;
+  errorCount: number;
+  p50Ms: number;
+  p95Ms: number;
+  p99Ms: number;
+  maxMs: number;
+}
+
+/**
+ * Per-service rolling error counter — 24 one-hour buckets aligned on
+ * wall-clock. Mirrors the wellness ring's structure so they share the
+ * advance() helper.
+ */
+interface ErrorRing {
+  bucketStartMs: number;
+  cursor: number;
+  buckets: number[];
+}
 
 interface RingBuffer {
   bucketStartMs: number;
@@ -90,6 +115,13 @@ export class HealthService
   private readonly lastStatus = new Map<string, AppProjection['status']>();
   private readonly openIncidents = new Map<string, HealthIncident>();
   private readonly recentIncidents: HealthIncident[] = [];
+  /** Last metrics snapshot received per service — feeds the p50/p99
+   *  columns in the Health page. Reset to the latest 60s window every
+   *  time a fresh snapshot lands. */
+  private readonly lastMetrics = new Map<string, MetricsSnapshotEvent>();
+  /** 24h rolling error counts per service, populated from the
+   *  errorCount field of every snapshot. */
+  private readonly errorRings = new Map<string, ErrorRing>();
   private eventBus: EventBus | null = null;
   private samplerTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -150,6 +182,18 @@ export class HealthService
         },
       );
 
+      // Metrics consumer — pulls every service's p50/p99/error
+      // snapshot published by the SDK's MetricsRecorder. One event
+      // per (service, 60s window).
+      await this.eventBus.consume<MetricsSnapshotEvent>(
+        HEALTH_STREAM,
+        METRICS_CONSUMER,
+        'nola.events.metrics.>',
+        async (env) => {
+          if (env.payload) this.applyMetrics(env.payload);
+        },
+      );
+
       this.logger.log('Health projection ready — consumers attached');
     } catch (err) {
       this.logger.error(
@@ -165,7 +209,7 @@ export class HealthService
     try {
       const nc = this.nolaClient.getClient().getConnection();
       const jsm = await nc.jetstreamManager();
-      for (const name of [SNAPSHOT_CONSUMER, INCIDENT_CONSUMER]) {
+      for (const name of [SNAPSHOT_CONSUMER, INCIDENT_CONSUMER, METRICS_CONSUMER]) {
         await jsm.consumers.delete(HEALTH_STREAM, name).catch(() => undefined);
       }
     } catch (err) {
@@ -306,6 +350,30 @@ export class HealthService
     this.rings.set(s.serviceId, ring);
   }
 
+  /**
+   * Update the per-service metrics window. Two side-effects:
+   *
+   *  - `lastMetrics` is overwritten with the freshest snapshot — the
+   *    Health page reads p50/p99 from here on every request.
+   *  - The error count is added to the rolling 24h ring keyed by the
+   *    snapshot's `windowEnd` hour, so `errors24h` is the sum of the
+   *    last 24 hourly buckets even across restarts (consumer replays
+   *    the stream on boot).
+   */
+  private applyMetrics(snap: MetricsSnapshotEvent): void {
+    if (!snap.service) return;
+    this.lastMetrics.set(snap.service, snap);
+    if (snap.errorCount > 0) {
+      const ts = new Date(snap.windowEnd).getTime();
+      if (Number.isNaN(ts)) return;
+      const ring =
+        this.errorRings.get(snap.service) ?? this.newErrorRing(ts);
+      this.advanceErrors(ring, ts);
+      ring.buckets[ring.cursor] += snap.errorCount;
+      this.errorRings.set(snap.service, ring);
+    }
+  }
+
   private applyIncident(inc: HealthIncident): void {
     if (inc.state === 'open') {
       this.openIncidents.set(inc.serviceId, inc);
@@ -401,16 +469,46 @@ export class HealthService
     }
     const uptime =
       (ordered.reduce((s, v) => s + v, 0) / (ordered.length * 100)) * 100;
+    const metrics = this.lastMetrics.get(app.id);
+    const errorRing = this.errorRings.get(app.id);
+    // Sum the rolling 24h error buckets — fall back to the last
+    // window's count when we haven't accumulated history yet.
+    const errors24h = errorRing
+      ? errorRing.buckets.reduce((s, n) => s + n, 0)
+      : (metrics?.errorCount ?? 0);
+
     return {
       id: app.id,
       name: app.name,
       uptime: Number(uptime.toFixed(2)),
-      p50: 0,
-      p99: 0,
-      errors24h: 0,
+      p50: Math.round(metrics?.p50Ms ?? 0),
+      p99: Math.round(metrics?.p99Ms ?? 0),
+      errors24h,
       status: statusFromRegistry(app.status),
       series: ordered,
     };
+  }
+
+  private newErrorRing(nowMs: number): ErrorRing {
+    return {
+      bucketStartMs: Math.floor(nowMs / BUCKET_MS) * BUCKET_MS,
+      cursor: 0,
+      buckets: new Array(BUCKETS_24H).fill(0),
+    };
+  }
+
+  private advanceErrors(ring: ErrorRing, nowMs: number): void {
+    const currentBucketStart = Math.floor(nowMs / BUCKET_MS) * BUCKET_MS;
+    let hours = Math.floor(
+      (currentBucketStart - ring.bucketStartMs) / BUCKET_MS,
+    );
+    if (hours <= 0) return;
+    if (hours > BUCKETS_24H) hours = BUCKETS_24H;
+    for (let i = 0; i < hours; i += 1) {
+      ring.cursor = (ring.cursor + 1) % BUCKETS_24H;
+      ring.buckets[ring.cursor] = 0;
+    }
+    ring.bucketStartMs = currentBucketStart;
   }
 
   private newRing(nowMs: number): RingBuffer {

@@ -4,6 +4,8 @@ import { ValidationPipe, Logger } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import cookieParser = require('cookie-parser');
+import { createMetricsMiddleware } from '@nola-studio/sdk';
+import { NolaClientService } from '@nola-hq/nola-sdk';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
@@ -15,6 +17,23 @@ async function bootstrap() {
     exclude: ['.well-known/nola-manifest.yaml'],
   });
   app.use(cookieParser());
+
+  // OTEL-lite metrics — wraps every request so the SDK's
+  // MetricsRecorder gathers latency + 5xx flag, then publishes the
+  // window snapshot on `nola.events.metrics.<service>` every 60s.
+  // The HQ Health page consumes those and renders p50/p99/errors24h.
+  //
+  // Installed unconditionally — early requests before NATS is
+  // connected are recorded in memory; the first successful flush
+  // (60s after NolaClient comes up) drains the buffer.
+  try {
+    const nolaClient = app.get(NolaClientService);
+    app.use(createMetricsMiddleware(nolaClient.getClient()));
+  } catch (err) {
+    logger.warn(
+      `Metrics middleware not installed: ${err instanceof Error ? err.message : err}`,
+    );
+  }
 
   const origins = (config.get<string>('CORS_ORIGINS') ?? '')
     .split(',')
