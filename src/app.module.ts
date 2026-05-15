@@ -30,6 +30,7 @@ import { BroadcastModule } from './broadcast/broadcast.module';
 import { DirectoryModule } from './directory/directory.module';
 import { IamModule } from './iam/iam.module';
 import { PlansModule } from './plans/plans.module';
+import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 
 import { entities } from './entities';
 
@@ -89,6 +90,7 @@ import { entities } from './entities';
     DirectoryModule,
     IamModule,
     PlansModule,
+    SubscriptionsModule,
   ],
   // Guards globaux dans l'ordre de chaîne :
   //   1. JwtAuthGuard — hydrate `req.user` depuis la session.
