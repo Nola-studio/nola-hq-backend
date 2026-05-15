@@ -23,6 +23,12 @@ export interface HealthRow {
   status: HealthStatus;
   /** 24 hourly buckets, oldest → newest. 0-100 wellness score per bucket. */
   series: number[];
+  /**
+   * 24 hourly buckets of the worst-case p99 latency observed in each
+   * hour, in milliseconds. 0 means no metrics received yet for that
+   * hour. Drives the cross-service latency chart on the Health page.
+   */
+  p99Series: number[];
 }
 
 export interface HealthIncident {
@@ -122,6 +128,11 @@ export class HealthService
   /** 24h rolling error counts per service, populated from the
    *  errorCount field of every snapshot. */
   private readonly errorRings = new Map<string, ErrorRing>();
+  /** 24h rolling worst-case p99 latency per service (ms). Each hourly
+   *  bucket stores the max p99 observed across the snapshots that
+   *  landed in that hour — keeps the spikes visible instead of
+   *  averaging them out. */
+  private readonly latencyRings = new Map<string, ErrorRing>();
   private eventBus: EventBus | null = null;
   private samplerTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -363,14 +374,28 @@ export class HealthService
   private applyMetrics(snap: MetricsSnapshotEvent): void {
     if (!snap.service) return;
     this.lastMetrics.set(snap.service, snap);
+    const ts = new Date(snap.windowEnd).getTime();
+    if (Number.isNaN(ts)) return;
+
     if (snap.errorCount > 0) {
-      const ts = new Date(snap.windowEnd).getTime();
-      if (Number.isNaN(ts)) return;
       const ring =
         this.errorRings.get(snap.service) ?? this.newErrorRing(ts);
       this.advanceErrors(ring, ts);
       ring.buckets[ring.cursor] += snap.errorCount;
       this.errorRings.set(snap.service, ring);
+    }
+
+    // Latency history — keep worst-case p99 per hour so a single spike
+    // remains visible 24h later instead of being averaged into oblivion.
+    if (snap.p99Ms > 0) {
+      const ring =
+        this.latencyRings.get(snap.service) ?? this.newErrorRing(ts);
+      this.advanceErrors(ring, ts);
+      ring.buckets[ring.cursor] = Math.max(
+        ring.buckets[ring.cursor],
+        Math.round(snap.p99Ms),
+      );
+      this.latencyRings.set(snap.service, ring);
     }
   }
 
@@ -477,6 +502,16 @@ export class HealthService
       ? errorRing.buckets.reduce((s, n) => s + n, 0)
       : (metrics?.errorCount ?? 0);
 
+    const latencyRing = this.latencyRings.get(app.id);
+    const p99Series: number[] = [];
+    if (latencyRing) {
+      for (let i = 1; i <= BUCKETS_24H; i += 1) {
+        p99Series.push(latencyRing.buckets[(latencyRing.cursor + i) % BUCKETS_24H]);
+      }
+    } else {
+      for (let i = 0; i < BUCKETS_24H; i += 1) p99Series.push(0);
+    }
+
     return {
       id: app.id,
       name: app.name,
@@ -486,6 +521,7 @@ export class HealthService
       errors24h,
       status: statusFromRegistry(app.status),
       series: ordered,
+      p99Series,
     };
   }
 
