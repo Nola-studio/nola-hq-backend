@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   Logger,
   NotFoundException,
@@ -11,6 +12,8 @@ import { NolaCommandsService } from '@nola-hq/nola-sdk';
 import { TenantCrm } from './tenant-crm.entity';
 import { TenantStatus } from './tenant.entity';
 import { ListTenantsDto } from './dto/list-tenants.dto';
+import { CreateTenantDto } from './dto/create-tenant.dto';
+import { KelasiProvisionClient } from './kelasi-provision.client';
 import { MomoEntry } from '../momo/momo-entry.entity';
 import { Ticket } from '../tickets/ticket.entity';
 import { ActivityEvent } from '../activity/activity.entity';
@@ -102,6 +105,7 @@ export class TenantsService {
     @InjectRepository(ActivityEvent)
     private readonly activity: Repository<ActivityEvent>,
     private readonly commands: NolaCommandsService,
+    private readonly kelasiProvision: KelasiProvisionClient,
   ) {}
 
   // ─── Reads (merge nola-billing canonical + local CRM) ────────────
@@ -190,8 +194,109 @@ export class TenantsService {
   // Signatures preserved so the existing controller still type-checks.
   // Body always throws — the right place for these ops is nola-billing.
 
-  async create(_dto: unknown): Promise<never> {
-    throw new NotImplementedException(NOT_IMPLEMENTED_HINT);
+  /**
+   * Onboard a new tenant from the HQ console.
+   *
+   * Two-step pipeline:
+   *   1. Call kelasi-gateway's `POST /api/admin/hq-provision` —
+   *      orchestrates Keycloak (no password) + IAM (Person/Org/Membership)
+   *      + nola-billing (Subscription) + svc-admin (School) + Kriver
+   *      (merchant) + the "Set your password" email through Resend.
+   *
+   *   2. Persist the local CRM augmentation row (city / WhatsApp /
+   *      mobile-money / provisioning state). The billing row is the
+   *      canonical source for the rest (name, plan, lifecycleState…);
+   *      we merge them at read time in `list()`.
+   *
+   * Failures on (1) bubble up to the operator UI as 409 (email taken)
+   * / 400 (validation) / 503 (kelasi unreachable). We don't write the
+   * CRM row on failure — the tenant doesn't really exist yet, and a
+   * retry from the wizard re-attempts the full chain cleanly.
+   */
+  async create(dto: CreateTenantDto): Promise<TenantView> {
+    if (!dto.ownerEmail || !dto.ownerFirstName || !dto.ownerLastName) {
+      throw new BadRequestException(
+        'owner_required: ownerEmail, ownerFirstName, ownerLastName must be set',
+      );
+    }
+    const planSlug = dto.plan as 'free' | 'starter' | 'growth' | 'scale';
+    if (!['free', 'starter', 'growth', 'scale'].includes(planSlug)) {
+      throw new BadRequestException(`unsupported_plan: ${dto.plan}`);
+    }
+    if (planSlug !== 'free' && !dto.mobileMoneyPhone) {
+      throw new BadRequestException('mobile_money_phone_required_for_paid_plans');
+    }
+
+    const targetApp = (dto.apps?.[0] ?? '').trim();
+    if (targetApp !== 'kelasi') {
+      // V1: only kelasi has the hq-provision endpoint. Add a routing
+      // table later when other customer apps gain the same surface.
+      throw new BadRequestException(`unsupported_app: ${targetApp || '(none)'}`);
+    }
+
+    const result = await this.kelasiProvision.provision({
+      schoolName: dto.name.trim(),
+      countryCode: dto.country.toUpperCase(),
+      city: dto.city?.trim() || undefined,
+      address: dto.address?.trim() || undefined,
+      planSlug,
+      owner: {
+        firstName: dto.ownerFirstName.trim(),
+        lastName: dto.ownerLastName.trim(),
+        email: dto.ownerEmail.trim().toLowerCase(),
+        whatsappPhone: dto.whatsapp?.trim() || undefined,
+        mobileMoneyPhone: dto.mobileMoneyPhone?.trim() || undefined,
+      },
+    });
+
+    // Persist CRM augmentation. We use the kelasi tenantId as the key —
+    // billing's externalId mirrors it once the subscription lands, so
+    // the `list()` merge picks this row up on the next refresh.
+    await this.crm.save(
+      this.crm.create({
+        tenantId: result.tenantId,
+        country: dto.country.toUpperCase(),
+        city: dto.city ?? null,
+        owner: `${dto.ownerFirstName.trim()} ${dto.ownerLastName.trim()}`.trim(),
+        whatsapp: dto.whatsapp ?? '',
+        mobileMoney: dto.mobile_money ?? '',
+        nps: null,
+        kcUserId: result.kcUserId,
+        kelasiSchoolId: result.schoolId,
+        ownerEmail: dto.ownerEmail.trim().toLowerCase(),
+        mobileMoneyPhone: dto.mobileMoneyPhone ?? null,
+        provisionedAt: result.invitationSentAt,
+        provisionError: null,
+      }),
+    );
+
+    await this.recordActivity(
+      'commercial',
+      'tenant.provisioned',
+      result.tenantId,
+      `${dto.name} · ${planSlug} · ${dto.country} · owner=${dto.ownerEmail}`,
+    );
+
+    // Synthetic view; the next `list()` will merge with the live billing
+    // tenant once nola-billing has caught up with the subscription.
+    return {
+      id: result.tenantId,
+      name: dto.name,
+      country: dto.country.toUpperCase(),
+      city: dto.city ?? '',
+      apps: [targetApp],
+      plan: planSlug,
+      mrr_cdf: dto.mrr_cdf ?? 0,
+      status: result.schoolStatus === 'pending_payment' ? 'onboarding' : 'trial',
+      since: new Date().toISOString().slice(0, 10),
+      users: 0,
+      owner: `${dto.ownerFirstName} ${dto.ownerLastName}`.trim(),
+      whatsapp: dto.whatsapp,
+      mobile_money: dto.mobile_money,
+      ar_days: 0,
+      nps: null,
+      organizationId: result.organizationId ?? null,
+    };
   }
   async update(_id: string, _dto: unknown): Promise<never> {
     throw new NotImplementedException(NOT_IMPLEMENTED_HINT);

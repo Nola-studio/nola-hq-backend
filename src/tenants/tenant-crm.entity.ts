@@ -9,6 +9,11 @@ import { Column, Entity, PrimaryColumn } from 'typeorm';
  *
  * Keyed by `tenantId` (matches `Tenant.externalId` on the billing side —
  * the stable Keycloak/business identifier, not the billing-internal UUID).
+ *
+ * Provisioning state (kcUserId / kelasiSchoolId / provisionedAt /
+ * provisionError) lives here too — it tells the HQ console which
+ * tenants were created from the Onboarding wizard (Phase 3) vs.
+ * which arrived from self-signup or legacy import.
  */
 @Entity('tenant_crm')
 export class TenantCrm {
@@ -36,4 +41,31 @@ export class TenantCrm {
   /** Free-form internal notes (HQ team scratch pad). */
   @Column({ type: 'text', nullable: true })
   notes?: string | null;
+
+  // ── HQ-driven provisioning state (Phase 3) ────────────────────────
+
+  /** Keycloak user id of the tenant owner, returned by kelasi-gateway. */
+  @Column({ type: 'varchar', name: 'kc_user_id', nullable: true })
+  kcUserId?: string | null;
+
+  /** svc-admin school.id returned by the provisioning call. */
+  @Column({ type: 'varchar', name: 'kelasi_school_id', nullable: true })
+  kelasiSchoolId?: string | null;
+
+  /** Owner email captured at onboarding (denormalized for the recovery view). */
+  @Column({ type: 'varchar', name: 'owner_email', nullable: true })
+  ownerEmail?: string | null;
+
+  /** Mobile-money phone the owner will receive the first STK push on. */
+  @Column({ type: 'varchar', name: 'mobile_money_phone', nullable: true })
+  mobileMoneyPhone?: string | null;
+
+  /** Set when the kelasi-gateway provisioning call succeeded. */
+  @Column({ type: 'varchar', name: 'provisioned_at', nullable: true })
+  provisionedAt?: string | null;
+
+  /** Last provisioning error, surfaced in the tenant detail page so an
+   *  operator can retry or escalate. Cleared on a successful retry. */
+  @Column({ type: 'varchar', name: 'provision_error', nullable: true, length: 500 })
+  provisionError?: string | null;
 }
