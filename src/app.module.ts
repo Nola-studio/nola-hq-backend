@@ -32,6 +32,7 @@ import { IamModule } from './iam/iam.module';
 import { PlansModule } from './plans/plans.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { KelasiProxyModule } from './kelasi-proxy/kelasi-proxy.module';
 
 import { entities } from './entities';
 
@@ -93,6 +94,7 @@ import { entities } from './entities';
     PlansModule,
     SubscriptionsModule,
     NotificationsModule,
+    KelasiProxyModule,
   ],
   // Guards globaux dans l'ordre de chaîne :
   //   1. JwtAuthGuard — hydrate `req.user` depuis la session.

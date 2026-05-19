@@ -240,6 +240,21 @@ export class TenantsService {
       city: dto.city?.trim() || undefined,
       address: dto.address?.trim() || undefined,
       planSlug,
+      // Forward the optional academic bootstrap. When present,
+      // kelasi-gateway runs school/setup so the owner lands on a
+      // ready admin shell (year + classes + subjects + fees) without
+      // having to run the OnboardingWizard themselves.
+      academic:
+        dto.academic && dto.academic.yearLabel && dto.academic.yearStartDate && dto.academic.yearEndDate
+          ? {
+              yearLabel: dto.academic.yearLabel,
+              yearStartDate: dto.academic.yearStartDate,
+              yearEndDate: dto.academic.yearEndDate,
+              levelCodes: dto.academic.levelCodes ?? [],
+              campusName: dto.academic.campusName,
+              sectionsPerLevel: dto.academic.sectionsPerLevel,
+            }
+          : undefined,
       owner: {
         firstName: dto.ownerFirstName.trim(),
         lastName: dto.ownerLastName.trim(),

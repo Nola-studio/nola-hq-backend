@@ -14,6 +14,40 @@ export interface KelasiProvisionInput {
     whatsappPhone?: string;
     mobileMoneyPhone?: string;
   };
+  /**
+   * Optional academic bootstrap. When present, kelasi-gateway runs
+   * `school/setup` after the school row is created — same path the
+   * self-signup wizard uses. Result: academic year, campus, classes
+   * (one per active level), subjects (per country profile), and
+   * fee structures (per cycle's defaults) are all in place when the
+   * owner first logs in.
+   *
+   * Omit to onboard with just the school row — the owner will have
+   * to run the OnboardingWizard themselves from the admin shell.
+   */
+  academic?: {
+    yearLabel: string;
+    yearStartDate: string;
+    yearEndDate: string;
+    levelCodes: string[];
+    campusName?: string;
+    sectionsPerLevel?: number;
+  };
+}
+
+export interface KelasiCountryProfile {
+  code: string;
+  name: string;
+  timezone: string;
+  defaultCurrency: string;
+  schoolYear: { startMonth: number; endMonth: number; termCount: number; termLabels: string[] };
+  levels: Array<{
+    code: string;
+    name: string;
+    cycle: 'maternelle' | 'primaire' | 'college' | 'lycee' | 'autre';
+    levelOrder: number;
+    subjects: Array<{ code: string; name: string; coefficient: number }>;
+  }>;
 }
 
 export interface KelasiProvisionResult {
@@ -98,6 +132,40 @@ export class KelasiProvisionClient {
     if (res.status === 400) throw new BadRequestException(message);
     if (res.status === 401) throw new ServiceUnavailableException('hq_provision_unauthorized');
     throw new ServiceUnavailableException(`kelasi_provision_failed: ${message}`);
+  }
+
+  /**
+   * Fetch the Kelasi country profile (year shape + levels + subjects).
+   * Public on the kelasi side — no auth required. Used by the HQ
+   * Onboarding wizard to pre-fill the academic step (year dates from
+   * `schoolYear.startMonth/endMonth`, level pickers from `levels[]`).
+   *
+   * Returns null if the country profile doesn't exist on the kelasi
+   * side (e.g. operator picked a country we haven't profiled yet) so
+   * the UI can fall back to manual year/level entry instead of crashing.
+   */
+  async getCountryProfile(code: string): Promise<KelasiCountryProfile | null> {
+    const url = `${this.baseUrl}/api/config/countries/${encodeURIComponent(code.toUpperCase())}`;
+    let res: Response;
+    try {
+      res = await fetch(url, { headers: { Accept: 'application/json' } });
+    } catch (err) {
+      this.logger.warn(
+        `GET ${url} network error: ${err instanceof Error ? err.message : err}`,
+      );
+      return null;
+    }
+    if (res.status === 404) return null;
+    if (!res.ok) {
+      this.logger.warn(`GET ${url} → ${res.status}`);
+      return null;
+    }
+    try {
+      return (await res.json()) as KelasiCountryProfile;
+    } catch (err) {
+      this.logger.warn(`GET ${url} body parse failed: ${err instanceof Error ? err.message : err}`);
+      return null;
+    }
   }
 
   private extractMessage(body: unknown): string | null {

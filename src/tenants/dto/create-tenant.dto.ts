@@ -3,6 +3,7 @@ import {
   IsEmail,
   IsIn,
   IsInt,
+  IsObject,
   IsOptional,
   IsString,
   Length,
@@ -61,4 +62,22 @@ export class CreateTenantDto {
   @IsOptional() @IsString() @MaxLength(80) ownerLastName?: string;
   @IsOptional() @IsEmail() @MaxLength(120) ownerEmail?: string;
   @IsOptional() @IsString() @Matches(/^\+\d{8,15}$/) mobileMoneyPhone?: string;
+
+  /**
+   * Optional academic bootstrap captured at the HQ wizard's
+   * "Configuration académique" step. When present, kelasi-gateway
+   * runs school/setup after school.init so the owner lands on a
+   * fully usable admin (year + classes + subjects + fees in place).
+   * Omit to leave the OnboardingWizard for the owner to run later.
+   */
+  @IsOptional()
+  @IsObject()
+  academic?: {
+    yearLabel: string;
+    yearStartDate: string;
+    yearEndDate: string;
+    levelCodes: string[];
+    campusName?: string;
+    sectionsPerLevel?: number;
+  };
 }
