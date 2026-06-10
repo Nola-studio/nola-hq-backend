@@ -1,5 +1,6 @@
 import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { NolaCommandsService } from '@nola-hq/nola-sdk';
+import { ActivityService } from '../activity/activity.service';
 
 /**
  * Raw subscription shape returned by nola-billing's admin commands.
@@ -36,7 +37,10 @@ export interface BillingSubscriptionRow {
 export class SubscriptionsService {
   private readonly logger = new Logger(SubscriptionsService.name);
 
-  constructor(private readonly commands: NolaCommandsService) {}
+  constructor(
+    private readonly commands: NolaCommandsService,
+    private readonly activity: ActivityService,
+  ) {}
 
   list(filter: {
     app?: string;
@@ -57,28 +61,67 @@ export class SubscriptionsService {
     );
   }
 
-  changePlan(args: {
-    subscriptionId?: string;
-    tenantId?: string;
-    app?: string;
-    newPlanId: string;
-    reason?: string;
-  }): Promise<BillingSubscriptionRow> {
-    return this.send<typeof args, BillingSubscriptionRow>(
+  async changePlan(
+    args: {
+      subscriptionId?: string;
+      tenantId?: string;
+      app?: string;
+      newPlanId: string;
+      reason?: string;
+    },
+    actor = 'nola-hq',
+  ): Promise<BillingSubscriptionRow> {
+    const row = await this.send<typeof args, BillingSubscriptionRow>(
       'nola.commands.billing.admin.subscription.change_plan',
       args,
     );
+    const planLabel =
+      row.plan?.displayName ?? row.plan?.name ?? args.newPlanId;
+    await this.recordActivity(
+      actor,
+      `Plan changé → ${planLabel} sur ${row.app}${args.reason ? ` (${args.reason})` : ''}`,
+      row.tenantId ?? args.tenantId ?? null,
+    );
+    return row;
   }
 
-  cancel(args: {
-    subscriptionId?: string;
-    tenantId?: string;
-    app?: string;
-  }): Promise<BillingSubscriptionRow> {
-    return this.send<typeof args, BillingSubscriptionRow>(
+  async cancel(
+    args: {
+      subscriptionId?: string;
+      tenantId?: string;
+      app?: string;
+    },
+    actor = 'nola-hq',
+  ): Promise<BillingSubscriptionRow> {
+    const row = await this.send<typeof args, BillingSubscriptionRow>(
       'nola.commands.billing.admin.subscription.cancel',
       args,
     );
+    await this.recordActivity(
+      actor,
+      `Abonnement annulé sur ${row.app}`,
+      row.tenantId ?? args.tenantId ?? null,
+    );
+    return row;
+  }
+
+  /**
+   * Append a finance event to the activity timeline for a subscription
+   * mutation. Best-effort: a failed activity write must never roll back
+   * a plan change that billing already committed, so we swallow errors.
+   */
+  private async recordActivity(
+    actor: string,
+    text: string,
+    ref: string | null,
+  ): Promise<void> {
+    await this.activity
+      .record({ cat: 'finance', actor, text, ref })
+      .catch((err: unknown) =>
+        this.logger.warn(
+          `Failed to record subscription activity: ${err instanceof Error ? err.message : String(err)}`,
+        ),
+      );
   }
 
   private async send<TReq, TRes>(subject: string, payload: TReq): Promise<TRes> {

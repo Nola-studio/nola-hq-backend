@@ -11,6 +11,10 @@ import { ApiBearerAuth, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { SubscriptionsService } from './subscriptions.service';
 import { HqRoles } from '../common/auth/hq-roles.decorator';
 import { HqRole } from '../common/auth/hq-role.enum';
+import {
+  CurrentUser,
+  type CurrentUserPayload,
+} from '../common/auth/current-user.decorator';
 
 @ApiBearerAuth()
 @ApiTags('subscriptions')
@@ -64,16 +68,20 @@ export class SubscriptionsController {
     @Param('tenantId') tenantId: string,
     @Param('app') app: string,
     @Body() body: { newPlanId?: string; reason?: string },
+    @CurrentUser() user?: CurrentUserPayload,
   ) {
     if (!body?.newPlanId) {
       throw new BadRequestException('newPlanId is required');
     }
-    return this.subs.changePlan({
-      tenantId,
-      app,
-      newPlanId: body.newPlanId,
-      reason: body.reason,
-    });
+    return this.subs.changePlan(
+      {
+        tenantId,
+        app,
+        newPlanId: body.newPlanId,
+        reason: body.reason,
+      },
+      user?.email || user?.sub,
+    );
   }
 
   /**
@@ -83,7 +91,11 @@ export class SubscriptionsController {
    */
   @Post(':tenantId/:app/cancel')
   @HqRoles(HqRole.Owner)
-  cancel(@Param('tenantId') tenantId: string, @Param('app') app: string) {
-    return this.subs.cancel({ tenantId, app });
+  cancel(
+    @Param('tenantId') tenantId: string,
+    @Param('app') app: string,
+    @CurrentUser() user?: CurrentUserPayload,
+  ) {
+    return this.subs.cancel({ tenantId, app }, user?.email || user?.sub);
   }
 }
