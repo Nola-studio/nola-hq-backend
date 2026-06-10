@@ -31,6 +31,17 @@ export interface AppProjection {
   lastHeartbeat: string;
   manifest?: Record<string, unknown>;
   registeredAt: string;
+  /**
+   * Result of the last HTTP liveness probe (independent of the NATS
+   * heartbeat). `true` = the service answered its HTTP health endpoint,
+   * `false` = it didn't, `null` = never probed (no URL configured). Used
+   * to reconcile "heartbeat lost on the bus" against "process actually
+   * up" — a service that lost its NATS connection but still serves HTTP
+   * is `degraded`, not `offline`.
+   */
+  httpReachable: boolean | null;
+  /** ISO timestamp of the last HTTP probe, or null if never probed. */
+  lastHttpCheck: string | null;
 }
 
 /**
@@ -54,7 +65,14 @@ function inferKind(id: string, payload: Record<string, unknown>): AppKind {
   const manifestKind = (payload.manifest as { kind?: unknown } | undefined)
     ?.kind;
   if (manifestKind === 'app' || manifestKind === 'service') return manifestKind;
-  return KNOWN_SERVICE_IDS.has(id) ? 'service' : 'app';
+  // Naming convention: every platform-internal service is published under a
+  // `nola-` id (nola-auth, nola-billing, …). Customer-facing app backends
+  // (kelasi, kriver, …) never carry that prefix. The KNOWN_SERVICE_IDS set
+  // stays as an explicit allowlist for any internal service that might one
+  // day break the convention.
+  return id.startsWith('nola-') || KNOWN_SERVICE_IDS.has(id)
+    ? 'service'
+    : 'app';
 }
 
 export interface ManifestVersion {
@@ -71,6 +89,35 @@ const CONSUMER_NAME = 'nola-hq-registry-projection';
 const STALENESS_DEGRADED_MS = 90_000;
 const STALENESS_OFFLINE_MS = 180_000;
 const STALENESS_CHECK_MS = 60_000;
+const HTTP_PROBE_INTERVAL_MS = 60_000;
+const HTTP_PROBE_TIMEOUT_MS = 5_000;
+/** Default health path used when a service's manifest doesn't declare one. */
+const DEFAULT_HEALTH_PATH = '/health';
+
+/**
+ * Parse the `HEALTH_PROBE_URLS` env var — a JSON object mapping a service
+ * id to its reachable base URL, e.g.
+ *
+ *   HEALTH_PROBE_URLS={"kelasi":"https://api.kelasi.app","nola-auth":"http://nola-auth.railway.internal:3000"}
+ *
+ * Returns an empty map (probing disabled) when unset or malformed, so the
+ * registry keeps behaving exactly as before unless an operator opts in.
+ */
+function parseProbeUrls(raw: string | undefined): Map<string, string> {
+  const map = new Map<string, string>();
+  if (!raw?.trim()) return map;
+  try {
+    const obj = JSON.parse(raw) as Record<string, unknown>;
+    for (const [id, url] of Object.entries(obj)) {
+      if (typeof url === 'string' && url.trim()) {
+        map.set(id, url.trim().replace(/\/$/, ''));
+      }
+    }
+  } catch {
+    // Malformed config — fall back to heartbeat-only (logged at init).
+  }
+  return map;
+}
 
 @Injectable()
 export class AppsService implements OnModuleInit, OnModuleDestroy {
@@ -79,8 +126,20 @@ export class AppsService implements OnModuleInit, OnModuleDestroy {
   private readonly manifestHistory = new Map<string, ManifestVersion[]>();
   private eventBus: EventBus | null = null;
   private stalenessTimer: ReturnType<typeof setInterval> | null = null;
+  private httpProbeTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly probeUrls = parseProbeUrls(process.env.HEALTH_PROBE_URLS);
 
-  constructor(private readonly nolaClient: NolaClientService) {}
+  constructor(private readonly nolaClient: NolaClientService) {
+    if (this.probeUrls.size > 0) {
+      this.logger.log(
+        `HTTP liveness probe enabled for ${this.probeUrls.size} service(s): ${[...this.probeUrls.keys()].join(', ')}`,
+      );
+    } else if (process.env.HEALTH_PROBE_URLS?.trim()) {
+      this.logger.warn(
+        'HEALTH_PROBE_URLS is set but parsed to zero entries — check it is valid JSON. HTTP probing disabled.',
+      );
+    }
+  }
 
   onModuleInit() {
     // Fire-and-forget : on attend en arrière-plan que NolaClient ait
@@ -159,6 +218,15 @@ export class AppsService implements OnModuleInit, OnModuleDestroy {
         STALENESS_CHECK_MS,
       );
 
+      if (this.probeUrls.size > 0) {
+        // Run one probe shortly after boot, then on a fixed interval.
+        setTimeout(() => void this.probeAll(), 2_000);
+        this.httpProbeTimer = setInterval(
+          () => void this.probeAll(),
+          HTTP_PROBE_INTERVAL_MS,
+        );
+      }
+
       this.logger.log(
         `Registry projection started (stream=${STREAM_NAME}, consumer=${CONSUMER_NAME})`,
       );
@@ -215,6 +283,63 @@ export class AppsService implements OnModuleInit, OnModuleDestroy {
 
   onModuleDestroy() {
     if (this.stalenessTimer) clearInterval(this.stalenessTimer);
+    if (this.httpProbeTimer) clearInterval(this.httpProbeTimer);
+  }
+
+  /**
+   * Probe every service that has a configured base URL by GET-ing its HTTP
+   * health endpoint. Records the result on the projection and softens a
+   * heartbeat-driven `offline` to `degraded` when the process actually
+   * answers — this is what reconciles "down on the bus" against "up in the
+   * infrastructure". A live heartbeat is still authoritative for `online`;
+   * the probe never downgrades a service that is heartbeating.
+   */
+  private async probeAll(): Promise<void> {
+    const targets = [...this.apps.values()].filter((a) =>
+      this.probeUrls.has(a.id),
+    );
+    await Promise.all(targets.map((app) => this.probeOne(app)));
+  }
+
+  private async probeOne(app: AppProjection): Promise<void> {
+    const base = this.probeUrls.get(app.id);
+    if (!base) return;
+    const endpoints = (app.manifest as { endpoints?: Record<string, unknown> } | undefined)
+      ?.endpoints;
+    const path =
+      (typeof endpoints?.health === 'string' && endpoints.health) ||
+      DEFAULT_HEALTH_PATH;
+    const url = `${base}${path.startsWith('/') ? '' : '/'}${path}`;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), HTTP_PROBE_TIMEOUT_MS);
+    let ok = false;
+    try {
+      const res = await fetch(url, {
+        method: 'GET',
+        signal: controller.signal,
+        headers: { 'user-agent': 'nola-hq-health-probe' },
+      });
+      ok = res.ok; // 2xx/3xx → reachable
+    } catch {
+      ok = false; // network error / timeout / DNS → unreachable
+    } finally {
+      clearTimeout(timer);
+    }
+
+    app.httpReachable = ok;
+    app.lastHttpCheck = new Date().toISOString();
+
+    // Soften a heartbeat-driven offline when HTTP confirms the process is
+    // alive. We never touch `online` (the bus already proved liveness) and
+    // never force offline from here (a probe failing from nola-hq's vantage
+    // point isn't proof the service is down for users).
+    if (ok && app.status === 'offline') {
+      app.status = 'degraded';
+      this.logger.log(
+        `"${app.id}" heartbeat lost but HTTP healthy — softened offline → degraded`,
+      );
+    }
   }
 
   // ── Read API ──────────────────────────────────────────
@@ -274,6 +399,7 @@ export class AppsService implements OnModuleInit, OnModuleDestroy {
       ((data.display as Record<string, unknown> | undefined)?.name as string) ??
       id;
 
+    const prev = this.apps.get(id);
     this.apps.set(id, {
       id,
       kind: inferKind(id, data),
@@ -283,6 +409,10 @@ export class AppsService implements OnModuleInit, OnModuleDestroy {
       lastHeartbeat: now,
       manifest: innerManifest,
       registeredAt: now,
+      // Carry the last probe result across re-registers so a re-announce
+      // doesn't wipe HTTP state until the next probe runs.
+      httpReachable: prev?.httpReachable ?? null,
+      lastHttpCheck: prev?.lastHttpCheck ?? null,
     });
 
     const history = this.manifestHistory.get(id) ?? [];
@@ -321,8 +451,13 @@ export class AppsService implements OnModuleInit, OnModuleDestroy {
     for (const app of this.apps.values()) {
       if (app.status === 'offline') continue;
       const age = now - new Date(app.lastHeartbeat).getTime();
-      if (age > STALENESS_OFFLINE_MS) app.status = 'offline';
-      else if (age > STALENESS_DEGRADED_MS) app.status = 'degraded';
+      if (age > STALENESS_OFFLINE_MS) {
+        // Heartbeat lost. If the last HTTP probe says the process still
+        // answers, it's degraded (off the bus) rather than fully down.
+        app.status = app.httpReachable === true ? 'degraded' : 'offline';
+      } else if (age > STALENESS_DEGRADED_MS) {
+        app.status = 'degraded';
+      }
     }
   }
 }

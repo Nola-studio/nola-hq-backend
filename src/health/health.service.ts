@@ -16,6 +16,14 @@ export type HealthStatus = 'operational' | 'degraded' | 'down';
 export interface HealthRow {
   id: string;
   name: string;
+  /** Topology kind — `service` = platform-internal (nola-*), `app` =
+   *  customer-facing application backend (kelasi, kriver, …). Lets the
+   *  HQ Health page group internal services apart from client backends. */
+  kind: AppProjection['kind'];
+  /** Last HTTP liveness probe result: `true` = process answers HTTP,
+   *  `false` = it doesn't, `null` = not probed. Lets the UI flag
+   *  "heartbeat lost on the bus but HTTP still up". */
+  httpReachable: boolean | null;
   uptime: number; // 0-100
   p50: number;
   p99: number;
@@ -515,6 +523,8 @@ export class HealthService
     return {
       id: app.id,
       name: app.name,
+      kind: app.kind,
+      httpReachable: app.httpReachable,
       uptime: Number(uptime.toFixed(2)),
       p50: Math.round(metrics?.p50Ms ?? 0),
       p99: Math.round(metrics?.p99Ms ?? 0),
