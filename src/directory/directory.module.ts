@@ -23,6 +23,6 @@ import { IamModule } from '../iam/iam.module';
   imports: [TenantsModule, IamModule],
   controllers: [DirectoryController],
   providers: [DirectoryService, KeycloakAdminService],
-  exports: [DirectoryService],
+  exports: [DirectoryService, KeycloakAdminService],
 })
 export class DirectoryModule {}

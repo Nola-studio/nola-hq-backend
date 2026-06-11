@@ -120,6 +120,23 @@ export class IamClientService {
     );
   }
 
+  /**
+   * Mint an impersonated token for assisted access (nola-auth provisions the
+   * per-realm impersonator client + does the token-exchange). Returns real
+   * Keycloak tokens for the target user; the read/write mode + operator
+   * identity are carried by the HQ handoff, not the token.
+   */
+  impersonate(input: {
+    realm: string;
+    targetUserId: string;
+    mode: 'read' | 'write';
+    reason: string;
+    actor: string;
+    actorName?: string;
+  }): Promise<{ accessToken: string; refreshToken?: string; expiresIn: number }> {
+    return this.request('nola.iam.commands.auth.impersonate', { ...input });
+  }
+
   // ─── internals ───────────────────────────────────────────────
 
   private async request<T>(
