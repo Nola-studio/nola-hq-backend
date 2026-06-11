@@ -9,6 +9,8 @@ import { AppsService } from '../apps/apps.service';
 import { TenantsService, type TenantView } from '../tenants/tenants.service';
 import { InvoicesService } from '../invoices/invoices.service';
 import { HealthService } from '../health/health.service';
+import { SnapshotsService } from './snapshots.service';
+import { buildKpiList } from './snapshot.metrics';
 
 /**
  * Analytics — every aggregate that drove the legacy HQ Postgres tables
@@ -31,10 +33,22 @@ export class AnalyticsService {
     private readonly tenants: TenantsService,
     private readonly invoices: InvoicesService,
     private readonly health: HealthService,
+    private readonly snapshots: SnapshotsService,
   ) {}
 
-  kpiList() {
-    return this.kpis.find();
+  /**
+   * The KPI cards on Finance + Dashboard. Each KPI's value is the live figure
+   * and its `series` is the real daily history captured by SnapshotsService
+   * (replacing the legacy static `kpis` table, which was never written to and
+   * is no longer read here). Series are sparse until the daily job has run for
+   * a few days — the UI renders that gracefully.
+   */
+  async kpiList() {
+    const [current, series] = await Promise.all([
+      this.snapshots.currentMetrics(),
+      this.snapshots.seriesMany(),
+    ]);
+    return buildKpiList(current, series);
   }
 
   /**
@@ -124,12 +138,16 @@ export class AnalyticsService {
       };
       return acc;
     }, {});
+    // Real NPS history (daily snapshots) — replaces the hardcoded 12-point
+    // trend the Nps screen used to render.
+    const series = await this.snapshots.series('nps', 30);
     return {
       total_responses: scored.length,
       avg: Number(avg.toFixed(1)),
       promoters,
       passives,
       detractors,
+      series,
       by_country: byCountry,
       detailed: scored.map((t) => ({
         id: t.id,

@@ -6,6 +6,7 @@ import { Deploy } from './deploys/deploy.entity';
 import { HealthEntry } from './health/health-entry.entity';
 import { Invoice } from './invoices/invoice.entity';
 import { Kpi } from './analytics/kpi.entity';
+import { MetricSnapshot } from './analytics/metric-snapshot.entity';
 import { LogEntry } from './logs/log.entity';
 import { MomoEntry } from './momo/momo-entry.entity';
 import { PipelineItem } from './pipeline/pipeline-item.entity';
@@ -26,6 +27,7 @@ export const entities = [
   HealthEntry,
   Invoice,
   Kpi,
+  MetricSnapshot,
   LogEntry,
   MomoEntry,
   PipelineItem,
