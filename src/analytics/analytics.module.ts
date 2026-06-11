@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Kpi } from './kpi.entity';
+import { MetricSnapshot } from './metric-snapshot.entity';
+import { SnapshotsService } from './snapshots.service';
 import { Tenant } from '../tenants/tenant.entity';
 import { ActivityEvent } from '../activity/activity.entity';
 import { Invoice } from '../invoices/invoice.entity';
@@ -20,6 +22,7 @@ import { AnalyticsService } from './analytics.service';
     // entries that still live in the HQ Postgres.
     TypeOrmModule.forFeature([
       Kpi,
+      MetricSnapshot,
       Tenant,
       ActivityEvent,
       Invoice,
@@ -37,7 +40,7 @@ import { AnalyticsService } from './analytics.service';
     HealthModule,
   ],
   controllers: [AnalyticsController],
-  providers: [AnalyticsService],
-  exports: [AnalyticsService],
+  providers: [AnalyticsService, SnapshotsService],
+  exports: [AnalyticsService, SnapshotsService],
 })
 export class AnalyticsModule {}
