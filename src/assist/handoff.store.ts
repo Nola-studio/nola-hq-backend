@@ -2,6 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
 
 export interface Handoff {
+  /** Impersonated access token (short-lived) — the app derives the session
+   *  from this. The refresh token is bound to the impersonator client and is
+   *  intentionally not rotatable by the app (impersonation = short-lived). */
+  accessToken: string;
   refreshToken: string;
   realm: string;
   app: string;

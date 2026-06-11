@@ -71,13 +71,14 @@ export class AssistService {
       actor: input.actor,
       actorName: input.actorName,
     });
-    if (!tokens.refreshToken) {
-      throw new BadRequestException('impersonation_no_refresh_token');
+    if (!tokens.accessToken) {
+      throw new BadRequestException('impersonation_no_token');
     }
 
     // 4. Stash behind a one-time code; the app redeems it back-channel.
     const { code, expiresAt } = this.handoffs.create({
-      refreshToken: tokens.refreshToken,
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken ?? '',
       realm,
       app: input.app,
       mode: input.mode,
