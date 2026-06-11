@@ -3,6 +3,8 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { MomoService } from './momo.service';
 import { CreateMomoDto } from './dto/create-momo.dto';
 import { ListMomoDto } from './dto/list-momo.dto';
+import { HqRoles } from '../common/auth/hq-roles.decorator';
+import { HqRole } from '../common/auth/hq-role.enum';
 
 @ApiBearerAuth()
 @ApiTags('momo')
@@ -21,6 +23,7 @@ export class MomoController {
   }
 
   @Post()
+  @HqRoles(HqRole.Operator)
   create(@Body() dto: CreateMomoDto) {
     return this.svc.create(dto);
   }

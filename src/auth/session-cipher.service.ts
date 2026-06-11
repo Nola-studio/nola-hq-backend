@@ -22,6 +22,14 @@ export class SessionCipherService {
         `SESSION_ENCRYPTION_KEY must decode to 32 bytes, got ${raw.length}`,
       );
     }
+    // Refuse the all-zero dev placeholder in production — a predictable key
+    // means anyone can forge a valid session cookie. Fail fast at boot.
+    const isProd = (process.env.NODE_ENV ?? 'development') === 'production';
+    if (isProd && raw.every((b) => b === 0)) {
+      throw new Error(
+        'SESSION_ENCRYPTION_KEY is the all-zero dev placeholder — generate a real key (`openssl rand -base64 32`) before deploying to production',
+      );
+    }
     this.key = raw;
   }
 

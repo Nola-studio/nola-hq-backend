@@ -13,6 +13,8 @@ import { InvoicesService } from './invoices.service';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { ListInvoicesDto } from './dto/list-invoices.dto';
 import type { InvoiceStatus } from './invoice.entity';
+import { HqRoles } from '../common/auth/hq-roles.decorator';
+import { HqRole } from '../common/auth/hq-role.enum';
 
 class UpdateInvoiceStatusDto {
   @IsIn(['paid', 'pending', 'late', 'overdue'])
@@ -48,11 +50,13 @@ export class InvoicesController {
   }
 
   @Post()
+  @HqRoles(HqRole.Operator)
   create(@Body() dto: CreateInvoiceDto) {
     return this.svc.create(dto);
   }
 
   @Patch(':id/status')
+  @HqRoles(HqRole.Operator)
   setStatus(@Param('id') id: string, @Body() dto: UpdateInvoiceStatusDto) {
     return this.svc.setStatus(id, dto.status, dto.method);
   }
