@@ -9,6 +9,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { CookieConfigService } from './cookie-config';
@@ -51,6 +52,8 @@ export class AuthController {
   ) {}
 
   @Public()
+  // Tight cap on login to blunt credential brute-force: 10 attempts/min/IP.
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('login')
   @HttpCode(200)
   async login(

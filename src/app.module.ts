@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 
 import { NolaSdkModule } from '@nola-hq/nola-sdk';
@@ -35,10 +36,15 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { KelasiProxyModule } from './kelasi-proxy/kelasi-proxy.module';
 
 import { entities } from './entities';
+import { validate } from './config/env.validation';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({ isGlobal: true, validate }),
+    // Baseline rate limiting — 120 req/min/IP across the API. Sensitive
+    // routes (login) tighten this with @Throttle. Blunts brute-force +
+    // accidental client loops.
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
@@ -106,6 +112,9 @@ import { entities } from './entities';
   //     (succès ou erreur) et persiste un audit trail en local + sur
   //     JetStream (`nola.events.nola.audit.hq.*`).
   providers: [
+    // Throttler runs first so rate limiting applies even to unauthenticated
+    // requests (login brute-force).
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useExisting: JwtAuthGuard },
     { provide: APP_GUARD, useClass: HqRolesGuard },
     { provide: APP_INTERCEPTOR, useExisting: AuditInterceptor },

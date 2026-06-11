@@ -80,7 +80,12 @@ export interface TenantView {
   owner: string;
   whatsapp: string;
   mobile_money: string;
-  ar_days: number;
+  /**
+   * Days an invoice has been outstanding. `null` = unknown (the billing AR
+   * fetch failed) — distinct from `0` (known to be paid up). Never report
+   * unknown as 0, or overdue tenants would look healthy.
+   */
+  ar_days: number | null;
   nps: number | null;
   /**
    * Pattern-D pointer into nola-iam.organizations. Surfaced so the HQ
@@ -115,9 +120,10 @@ export class TenantsService {
     const limit = query.limit ?? 50;
 
     // Fan-out in parallel: canonical tenants from billing + local CRM
-    // augmentation + outstanding invoices (drives the real ar_days
-    // value). The invoice fetch is best-effort — if billing is down
-    // for that call we still return tenant rows with ar_days=0.
+    // augmentation + outstanding invoices (drives the real ar_days value).
+    // The invoice fetch is best-effort, but its failure must NOT be silently
+    // reported as ar_days=0 (that makes overdue tenants look paid up) — on
+    // failure we surface `null` (unknown) instead.
     const [tenants, crms, arDaysByTenant] = await Promise.all([
       this.fetchBillingTenants({
         app: query.app,
@@ -127,9 +133,9 @@ export class TenantsService {
       this.crm.find(),
       this.fetchOutstandingArDays().catch((err) => {
         this.logger.warn(
-          `Failed to fetch outstanding invoices for AR days: ${err.message}`,
+          `Failed to fetch outstanding invoices for AR days — reporting ar_days as unknown: ${err.message}`,
         );
-        return new Map<string, number>();
+        return null;
       }),
     ]);
 
@@ -137,8 +143,10 @@ export class TenantsService {
 
     const views = tenants.map((t) => {
       const view = this.merge(t, crmByExternalId.get(t.externalId));
-      // Override the merge() default (0) with the computed value.
-      view.ar_days = arDaysByTenant.get(t.externalId) ?? 0;
+      // Fetch succeeded → real value or 0 (paid up). Fetch failed → null
+      // (unknown), never a misleading 0.
+      view.ar_days =
+        arDaysByTenant === null ? null : arDaysByTenant.get(t.externalId) ?? 0;
       return view;
     });
 
@@ -184,10 +192,10 @@ export class TenantsService {
     return items
       .filter(
         (v) =>
-          v.ar_days > 0 ||
+          (v.ar_days ?? 0) > 0 ||
           ['attention', 'churn-risk', 'suspended'].includes(v.status),
       )
-      .sort((a, b) => b.ar_days - a.ar_days);
+      .sort((a, b) => (b.ar_days ?? 0) - (a.ar_days ?? 0));
   }
 
   // ─── Writes — disabled in CQRS mode ──────────────────────────────
@@ -339,7 +347,7 @@ export class TenantsService {
       'finance',
       'tenant.reminder_sent',
       id,
-      `via ${channel} (J+${t.ar_days})`,
+      `via ${channel} (J+${t.ar_days ?? '?'})`,
     );
     return { ok: true, tenant: t.id, channel, sentAt: new Date().toISOString() };
   }

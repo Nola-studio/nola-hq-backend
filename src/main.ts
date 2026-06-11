@@ -35,14 +35,23 @@ async function bootstrap() {
     );
   }
 
+  const isProd =
+    (config.get<string>('NODE_ENV') ?? 'development') === 'production';
   const origins = (config.get<string>('CORS_ORIGINS') ?? '')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
+  if (origins.length === 0 && isProd) {
+    // Fail closed: never reflect every origin with credentials in prod.
+    logger.error(
+      'CORS_ORIGINS is empty in production — cross-origin requests are blocked. Set CORS_ORIGINS to the console URL(s).',
+    );
+  }
   app.enableCors({
-    // CORS doit autoriser le credentials=true pour que le cookie de session
-    // (kelasi-style) puisse traverser une requête cross-site.
-    origin: origins.length > 0 ? origins : true,
+    // CORS doit autoriser credentials=true pour que le cookie de session
+    // (kelasi-style) traverse une requête cross-site. En prod, on n'autorise
+    // jamais `*` : liste explicite, sinon fermé.
+    origin: origins.length > 0 ? origins : isProd ? false : true,
     credentials: true,
   });
 
