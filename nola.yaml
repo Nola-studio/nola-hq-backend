@@ -54,3 +54,43 @@ endpoints:
   manifest: /.well-known/nola-manifest.yaml
   auth_login: /api/v1/auth/login
   auth_logout: /api/v1/auth/logout
+
+# ─── Contrat de variables d'environnement ─────────────────────────────────────
+# Source de vérité, alignée sur le contrat @nola/sdk de nola-platform.
+# Classification dérivée de src/config/env.validation.ts, hq-config.service.ts,
+# keycloak-admin.service.ts, assist/* et tenants/kelasi-provision.client.ts :
+# `required` = boot/flux critique cassé sans la variable (pas de défaut sûr) ;
+# `optional` = défaut sûr dans le code OU feature dégradable.
+# Le SOCLE PLATEFORME (NODE_ENV, NATS_URL/USER/PASS, CORS_ORIGINS) et le
+# DÉRIVABLE de l'issuer OIDC (KEYCLOAK_BASE_URL, KEYCLOAK_ADMIN_REALM) ne sont
+# pas redéclarés ici. Aucune donnée par-tenant via l'environnement.
+env:
+  required:
+    - DATABASE_URL                 # secret — Postgres ; requis en prod (env.validation.ts)
+    - SESSION_ENCRYPTION_KEY       # secret — AES-256-GCM 32 octets base64 (env.validation.ts)
+    - ASSIST_REDEEM_SECRET         # secret — vérifie POST /assist/redeem (assist.controller.ts)
+    - HQ_PROVISION_SECRET          # secret — provisioning HQ → kelasi-gateway (kelasi-provision.client.ts)
+    - KEYCLOAK_ADMIN_CLIENT_ID     # client OAuth2 admin Keycloak (keycloak-admin.service.ts)
+    - KEYCLOAK_ADMIN_CLIENT_SECRET # secret (sealed variable)
+    - NOLA_BOOTSTRAP_USER          # bootstrap Keycloak (les 3 requis ensemble — hq-config.service.ts)
+    - NOLA_BOOTSTRAP_PASS          # secret (sealed variable)
+    - NOLA_BOOTSTRAP_SECRET        # secret (sealed variable)
+  optional:
+    - PORT                         # défaut 3001
+    - KELASI_GATEWAY_URL           # requis seulement si provisioning déclenché
+    - KEYCLOAK_ADMIN_BASE_URL      # préféré à KEYCLOAK_BASE_URL si présent
+    - KEYCLOAK_TENANT_GROUP_PATH   # défaut /tenants
+    - KEYCLOAK_TENANT_ATTRIBUTE    # défaut tenant_id
+    - NOLA_AUTH_ISSUER             # défaut undefined (auth bypass si absent)
+    - NOLA_AUTH_SESSION_ENDPOINT   # défaut /v1/sessions
+    - NOLA_OFFLINE                 # toggle offline (défaut false)
+    - NOLA_MANIFEST_PATH           # défaut ./nola.yaml
+    - NOLA_HQ_INCIDENT_ALERTS      # toggle alertes incident (défaut true)
+    - NOLA_HQ_INCIDENT_EMAIL       # destinataire alertes (défaut admin@nolaastudio.com)
+    - NOLA_HQ_LOG_INGEST           # toggle ingestion logs (défaut true)
+    - HEALTH_PROBE_URLS            # JSON sondes santé (défaut : probing désactivé)
+    - SESSION_COOKIE_NAME          # défaut nola_hq_session
+    - SESSION_COOKIE_DOMAIN        # défaut undefined
+    - SESSION_COOKIE_SECURE        # défaut false ; "true" en HTTPS
+    - SESSION_COOKIE_SAMESITE      # défaut lax
+    - SESSION_TTL_SECONDS          # défaut 43200 (12 h)
