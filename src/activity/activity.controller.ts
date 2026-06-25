@@ -3,6 +3,8 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { IsIn, IsOptional, IsString } from 'class-validator';
 import { ActivityService, type ActivityQuery } from './activity.service';
 import type { ActivityCategory } from './activity.entity';
+import { HqRoles } from '../common/auth/hq-roles.decorator';
+import { HqRole } from '../common/auth/hq-role.enum';
 
 class CreateActivityEventDto {
   @IsIn(['finance', 'tech', 'incident', 'support', 'commercial'])
@@ -24,6 +26,7 @@ export class ActivityController {
   }
 
   @Post()
+  @HqRoles(HqRole.Operator)
   record(@Body() dto: CreateActivityEventDto) {
     return this.svc.record(dto);
   }

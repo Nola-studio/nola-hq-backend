@@ -3,6 +3,8 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { IsIn, IsString } from 'class-validator';
 import { LogsService, type LogQuery } from './logs.service';
 import type { LogLevel } from './log.entity';
+import { HqRoles } from '../common/auth/hq-roles.decorator';
+import { HqRole } from '../common/auth/hq-role.enum';
 
 class IngestLogDto {
   @IsString() svc!: string;
@@ -23,6 +25,7 @@ export class LogsController {
   }
 
   @Post()
+  @HqRoles(HqRole.Operator)
   ingest(@Body() dto: IngestLogDto) {
     return this.svc.ingest(dto.svc, dto.lvl, dto.msg);
   }
