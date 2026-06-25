@@ -64,6 +64,8 @@ export class TicketsService {
       assignee: dto.assignee,
       assigned: dto.assignee,
       sla: dto.sla ?? '24h',
+      category: dto.category ?? null,
+      source: dto.source ?? null,
       age: '0 min',
       ago: '0 min',
       replies: [],
