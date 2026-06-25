@@ -2,6 +2,13 @@ import { IsIn, IsOptional, IsString } from 'class-validator';
 
 const PRIORITIES = ['P1', 'P2', 'P3'] as const;
 const STATUSES = ['open', 'pending', 'closed', 'resolved'] as const;
+const CATEGORIES = [
+  'technical',
+  'billing',
+  'account',
+  'feature',
+  'other',
+] as const;
 
 export class CreateTicketDto {
   @IsString() tenant!: string;
@@ -15,6 +22,11 @@ export class CreateTicketDto {
   status?: (typeof STATUSES)[number];
   @IsString() assignee!: string;
   @IsOptional() @IsString() sla?: string;
+  /** What the request is about — drives HQ triage/filtering. */
+  @IsOptional() @IsIn(CATEGORIES as unknown as string[])
+  category?: (typeof CATEGORIES)[number];
+  /** Where the ticket came from, e.g. 'kelasi-owner-app'. */
+  @IsOptional() @IsString() source?: string;
 }
 
 export class AddReplyDto {
