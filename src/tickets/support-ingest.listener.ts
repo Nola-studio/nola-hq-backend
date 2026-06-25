@@ -35,6 +35,7 @@ interface SupportRequestPayload {
   meta?: {
     orgName?: string;
     schoolName?: string;
+    role?: string;
     appVersion?: string;
     platform?: string;
     personId?: string;
@@ -174,6 +175,7 @@ export class SupportIngestListener implements OnApplicationBootstrap {
     const lines: string[] = [];
     if (m.schoolName) lines.push(`École : ${m.schoolName}`);
     if (m.orgName) lines.push(`Organisation : ${m.orgName}`);
+    if (m.role) lines.push(`Rôle : ${m.role}`);
     if (m.appVersion) lines.push(`Version app : ${m.appVersion}`);
     if (m.platform) lines.push(`Plateforme : ${m.platform}`);
     if (m.personId) lines.push(`Person ID : ${m.personId}`);
