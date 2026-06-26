@@ -5,7 +5,7 @@ import {
   OnModuleDestroy,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { Between, In, LessThanOrEqual, MoreThanOrEqual, Repository } from 'typeorm';
 import { MetricSnapshot } from './metric-snapshot.entity';
 import { Ticket } from '../tickets/ticket.entity';
 import { TenantsService } from '../tenants/tenants.service';
@@ -16,6 +16,19 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /** Calendar day `YYYY-MM-DD` (UTC) for a given instant. */
 function dayKey(d: Date): string {
   return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Coerce an ISO date/datetime string to its `YYYY-MM-DD` calendar day, or
+ * `undefined` if absent/unparseable. Used to window the snapshot series,
+ * whose `date` column is a `YYYY-MM-DD` string (lexical compare == date
+ * compare for that format).
+ */
+function toDayKey(iso: string | undefined): string | undefined {
+  if (!iso) return undefined;
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return undefined;
+  return new Date(t).toISOString().slice(0, 10);
 }
 
 /**
@@ -102,6 +115,40 @@ export class SnapshotsService implements OnApplicationBootstrap, OnModuleDestroy
     for (const k of keys) out[k] = [];
     for (const r of rows) (out[r.metricKey] ??= []).push(r.value);
     for (const k of keys) out[k] = out[k].slice(-days);
+    return out;
+  }
+
+  /**
+   * Series for several metrics restricted to an inclusive `[from, to]`
+   * calendar-day window. When both bounds are omitted this is equivalent to
+   * `seriesMany` (full history). Bounds compare lexically on the
+   * `YYYY-MM-DD` `date` column. Unlike `seriesMany` there is no `days` cap —
+   * the window itself bounds the result.
+   */
+  async seriesManyBetween(
+    keys: string[] = METRIC_KEYS,
+    from?: string,
+    to?: string,
+  ): Promise<Record<string, number[]>> {
+    const fromDay = toDayKey(from);
+    const toDay = toDayKey(to);
+    const dateFilter =
+      fromDay && toDay
+        ? Between(fromDay, toDay)
+        : fromDay
+          ? MoreThanOrEqual(fromDay)
+          : toDay
+            ? LessThanOrEqual(toDay)
+            : undefined;
+    const rows = await this.repo.find({
+      where: dateFilter
+        ? { metricKey: In(keys), date: dateFilter }
+        : { metricKey: In(keys) },
+      order: { date: 'ASC' },
+    });
+    const out: Record<string, number[]> = {};
+    for (const k of keys) out[k] = [];
+    for (const r of rows) (out[r.metricKey] ??= []).push(r.value);
     return out;
   }
 }

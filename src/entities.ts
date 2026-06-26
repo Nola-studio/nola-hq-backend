@@ -8,6 +8,7 @@ import { Invoice } from './invoices/invoice.entity';
 import { Kpi } from './analytics/kpi.entity';
 import { MetricSnapshot } from './analytics/metric-snapshot.entity';
 import { LogEntry } from './logs/log.entity';
+import { ModuleOverride } from './modules/module-override.entity';
 import { MomoEntry } from './momo/momo-entry.entity';
 import { PipelineItem } from './pipeline/pipeline-item.entity';
 import { TeamMember } from './team/team-member.entity';
@@ -29,6 +30,7 @@ export const entities = [
   Kpi,
   MetricSnapshot,
   LogEntry,
+  ModuleOverride,
   MomoEntry,
   PipelineItem,
   TeamMember,

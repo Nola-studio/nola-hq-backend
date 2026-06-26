@@ -35,6 +35,7 @@ import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { KelasiProxyModule } from './kelasi-proxy/kelasi-proxy.module';
 import { AssistModule } from './assist/assist.module';
+import { ModulesModule } from './modules/modules.module';
 
 import { entities } from './entities';
 import { validate } from './config/env.validation';
@@ -111,6 +112,7 @@ import { validate } from './config/env.validation';
     NotificationsModule,
     KelasiProxyModule,
     AssistModule,
+    ModulesModule,
   ],
   // Guards globaux dans l'ordre de chaîne :
   //   1. JwtAuthGuard — hydrate `req.user` depuis la session.

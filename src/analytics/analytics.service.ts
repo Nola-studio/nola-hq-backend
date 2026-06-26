@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Between, MoreThanOrEqual, LessThanOrEqual, Repository } from 'typeorm';
+import type { FindOptionsWhere, FindOperator } from 'typeorm';
 import { Kpi } from './kpi.entity';
 import { ActivityEvent } from '../activity/activity.entity';
 import { MomoEntry } from '../momo/momo-entry.entity';
@@ -11,6 +12,54 @@ import { InvoicesService } from '../invoices/invoices.service';
 import { HealthService } from '../health/health.service';
 import { SnapshotsService } from './snapshots.service';
 import { buildKpiList } from './snapshot.metrics';
+
+/** `?from=&to=` analytics window (ISO-8601 strings; both optional). */
+export interface DateRange {
+  from?: string;
+  to?: string;
+}
+
+/**
+ * Build a TypeORM `createdAt` filter for an inclusive `[from, to]` window,
+ * or `undefined` when neither bound is usable.
+ */
+function createdAtFilter(range: DateRange | undefined): FindOperator<Date> | undefined {
+  if (!range) return undefined;
+  const from = range.from ? new Date(range.from) : undefined;
+  const to = range.to ? new Date(range.to) : undefined;
+  const fromOk = from && !Number.isNaN(from.getTime()) ? from : undefined;
+  const toOk = to && !Number.isNaN(to.getTime()) ? to : undefined;
+  if (fromOk && toOk) return Between(fromOk, toOk);
+  if (fromOk) return MoreThanOrEqual(fromOk);
+  if (toOk) return LessThanOrEqual(toOk);
+  return undefined;
+}
+
+/** True when the range carries at least one usable bound. */
+function hasRange(range: DateRange | undefined): boolean {
+  if (!range) return false;
+  const f = range.from ? Date.parse(range.from) : NaN;
+  const t = range.to ? Date.parse(range.to) : NaN;
+  return !Number.isNaN(f) || !Number.isNaN(t);
+}
+
+/**
+ * Filter tenants by their signup day (`since`, `YYYY-MM-DD`) within the
+ * window. Used by `/analytics/growth` so "growth over a period" is a real
+ * cohort filter rather than a no-op.
+ */
+function tenantsInRange(tenants: TenantView[], range: DateRange | undefined): TenantView[] {
+  if (!hasRange(range)) return tenants;
+  const fromDay = range?.from ? new Date(range.from).toISOString().slice(0, 10) : undefined;
+  const toDay = range?.to ? new Date(range.to).toISOString().slice(0, 10) : undefined;
+  return tenants.filter((t) => {
+    const since = t.since; // YYYY-MM-DD
+    if (!since) return false;
+    if (fromDay && since < fromDay) return false;
+    if (toDay && since > toDay) return false;
+    return true;
+  });
+}
 
 /**
  * Analytics — every aggregate that drove the legacy HQ Postgres tables
@@ -42,11 +91,20 @@ export class AnalyticsService {
    * (replacing the legacy static `kpis` table, which was never written to and
    * is no longer read here). Series are sparse until the daily job has run for
    * a few days — the UI renders that gracefully.
+   *
+   * `?from=&to=` windows the historical **series** (the sparkline) to the
+   * requested calendar range. The headline `value` stays the live, current
+   * figure (point-in-time, not a windowed aggregate); when a window is set
+   * `value` falls back to the last in-window snapshot so the card and its
+   * sparkline stay consistent.
    */
-  async kpiList() {
+  async kpiList(range?: DateRange) {
+    const windowed = hasRange(range);
     const [current, series] = await Promise.all([
       this.snapshots.currentMetrics(),
-      this.snapshots.seriesMany(),
+      windowed
+        ? this.snapshots.seriesManyBetween(undefined, range?.from, range?.to)
+        : this.snapshots.seriesMany(),
     ]);
     return buildKpiList(current, series);
   }
@@ -56,8 +114,21 @@ export class AnalyticsService {
    * needed in one fan-out: tenants (billing), invoices (billing),
    * health (registry + metrics), local KPI/activity/momo/tickets rows
    * (still in HQ DB for now).
+   *
+   * `?from=&to=` applies to the parts that carry a real time dimension:
+   *   - `kpis` series (windowed via kpiList),
+   *   - `recent_activity` (filtered on `createdAt`).
+   * Point-in-time figures (`summary.*`, tenant/health counts) describe the
+   * current state and ignore the window — momo inflow likewise (its `ts`
+   * column is a display label, not a reliable timestamp).
    */
-  async dashboard() {
+  async dashboard(range?: DateRange) {
+    const activityWhere: FindOptionsWhere<ActivityEvent> = {};
+    const createdFilter = createdAtFilter(range);
+    if (createdFilter) {
+      (activityWhere as Record<string, unknown>).createdAt = createdFilter;
+    }
+
     const [tenantPage, invoiceSummary, activity, momoRows, ticketRows, kpis] =
       await Promise.all([
         this.tenants.list({ page: 1, limit: 1000 } as never),
@@ -71,10 +142,14 @@ export class AnalyticsService {
             overdue_cdf: 0,
           };
         }),
-        this.activity.find({ order: { createdAt: 'DESC' }, take: 12 }),
+        this.activity.find({
+          where: activityWhere,
+          order: { createdAt: 'DESC' },
+          take: 12,
+        }),
         this.momo.find(),
         this.tickets.find(),
-        this.kpiList(),
+        this.kpiList(range),
       ]);
     const tenants = tenantPage.items;
     const appsList = this.apps.listApps();
@@ -108,6 +183,16 @@ export class AnalyticsService {
         nps_avg: npsAvg,
         open_tickets: openTickets,
       },
+      // Echo the applied window + which figures honour it, so the UI doesn't
+      // render a "filtered" badge over numbers that are actually live.
+      window: hasRange(range)
+        ? {
+            from: range?.from ?? null,
+            to: range?.to ?? null,
+            applies_to: ['kpis.series', 'recent_activity'],
+            live: ['summary', 'health', 'apps'],
+          }
+        : null,
       recent_activity: activity,
       health,
       apps: appsList,
@@ -164,12 +249,17 @@ export class AnalyticsService {
    * counts + MRR across the canonical tenant set; `apps` is the
    * registry projection enriched with the count of tenants subscribed
    * via the billing subscriptions (one app per Tenant.apps entry).
+   *
+   * `?from=&to=` filters tenants by their signup day (`since`) — i.e. the
+   * cohort that joined within the window. App registry metadata (version,
+   * status, registeredAt) is live and not windowed.
    */
-  async growth() {
-    const { items: tenants } = await this.tenants.list({
+  async growth(range?: DateRange) {
+    const { items: allTenants } = await this.tenants.list({
       page: 1,
       limit: 1000,
     } as never);
+    const tenants = tenantsInRange(allTenants, range);
     const appsList = this.apps.listApps();
 
     const byCountry: Record<string, { count: number; mrr_cdf: number }> = {};
@@ -197,6 +287,14 @@ export class AnalyticsService {
     return {
       by_country: byCountry,
       by_plan: byPlan,
+      window: hasRange(range)
+        ? {
+            from: range?.from ?? null,
+            to: range?.to ?? null,
+            applies_to: ['by_country', 'by_plan', 'apps.tenants', 'apps.mrr_cdf'],
+            basis: 'tenant.since (signup day)',
+          }
+        : null,
       apps: appsList.map((a) => ({
         id: a.id,
         name: a.name,
