@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   Logger,
   NotFoundException,
@@ -18,6 +19,13 @@ import { MomoEntry } from '../momo/momo-entry.entity';
 import { Ticket } from '../tickets/ticket.entity';
 import { ActivityEvent } from '../activity/activity.entity';
 import { Invoice } from '../invoices/invoice.entity';
+import {
+  SubscriptionsService,
+  type BillingSubscriptionRow,
+} from '../subscriptions/subscriptions.service';
+import { PlansService } from '../plans/plans.service';
+import { IamClientService } from '../iam/iam-client.service';
+import type { IamMembershipResponse } from '../iam/iam.types';
 import type { PaginatedResult } from '../common/dto/pagination.dto';
 
 /**
@@ -111,6 +119,9 @@ export class TenantsService {
     private readonly activity: Repository<ActivityEvent>,
     private readonly commands: NolaCommandsService,
     private readonly kelasiProvision: KelasiProvisionClient,
+    private readonly subscriptions: SubscriptionsService,
+    private readonly plans: PlansService,
+    private readonly iam: IamClientService,
   ) {}
 
   // ─── Reads (merge nola-billing canonical + local CRM) ────────────
@@ -198,9 +209,50 @@ export class TenantsService {
       .sort((a, b) => (b.ar_days ?? 0) - (a.ar_days ?? 0));
   }
 
-  // ─── Writes — disabled in CQRS mode ──────────────────────────────
-  // Signatures preserved so the existing controller still type-checks.
-  // Body always throws — the right place for these ops is nola-billing.
+  /**
+   * Resolve a tenant's IAM memberships from a `tenantId` (the stable
+   * Keycloak/business identifier the HQ console holds), mapping
+   * tenant → organizationId → nola-iam memberships.
+   *
+   * The Users tab on TenantDetail calls this so it can render every
+   * member's name / email / platform role without the operator having to
+   * resolve the org id by hand. Returns the membership rows (with the
+   * eager-loaded person) exactly as `GET /iam/orgs/:id/memberships` would.
+   *
+   * A tenant with no `organizationId` (legacy / pre-Pattern-D) surfaces a
+   * 409 with a machine-readable code so the UI can show "this tenant is
+   * not yet linked to an organization" rather than an empty list that
+   * looks like "no users".
+   */
+  async memberships(
+    id: string,
+    options: { includeInactive?: boolean } = {},
+  ): Promise<{
+    tenantId: string;
+    organizationId: string;
+    memberships: IamMembershipResponse[];
+  }> {
+    const tenant = await this.findOne(id);
+    if (!tenant.organizationId) {
+      throw new ConflictException({
+        code: 'tenant_not_linked_to_org',
+        message:
+          'This tenant has no organizationId in nola-billing yet — memberships cannot be resolved until the org link is backfilled.',
+        tenantId: id,
+      });
+    }
+    const memberships = await this.iam.listMembershipsForOrg(
+      tenant.organizationId,
+      { includeInactive: options.includeInactive ?? false, includePerson: true },
+    );
+    return {
+      tenantId: id,
+      organizationId: tenant.organizationId,
+      memberships,
+    };
+  }
+
+  // ─── Writes ──────────────────────────────────────────────────────
 
   /**
    * Onboard a new tenant from the HQ console.
@@ -321,13 +373,175 @@ export class TenantsService {
       organizationId: result.organizationId ?? null,
     };
   }
+
+  /**
+   * Change the active plan on a tenant by delegating to the canonical
+   * billing flow (`SubscriptionsService.changePlan` →
+   * `nola.commands.billing.admin.subscription.change_plan`).
+   *
+   * Retro-compat wrapper for the legacy `POST /tenants/:id/change-plan`
+   * route. The richer surface is `POST /subscriptions/:tenantId/:app/change-plan`
+   * which lets the operator target a specific app. Here we resolve the
+   * tenant's app: if it has exactly one subscription we use it; if it has
+   * several, `app` must be passed explicitly (400) so we never change the
+   * wrong product silently.
+   *
+   * `plan` is forwarded as `newPlanId` — billing accepts either the plan
+   * UUID or its name (e.g. `kelasi:growth`).
+   */
+  async changePlan(id: string, plan: string, app?: string) {
+    const tenant = await this.findOne(id);
+    const apps = tenant.apps;
+    let targetApp = app?.trim();
+    if (!targetApp) {
+      if (apps.length === 1) {
+        targetApp = apps[0];
+      } else if (apps.length === 0) {
+        throw new BadRequestException({
+          code: 'no_subscription',
+          message: `Tenant "${id}" has no active subscription to change.`,
+        });
+      } else {
+        throw new BadRequestException({
+          code: 'app_required',
+          message: `Tenant "${id}" has multiple apps (${apps.join(', ')}). Pass "app" to choose which one to re-plan, or use POST /subscriptions/:tenantId/:app/change-plan.`,
+          apps,
+        });
+      }
+    }
+    return this.subscriptions.changePlan({
+      tenantId: id,
+      app: targetApp,
+      newPlanId: plan,
+    });
+  }
+
+  /**
+   * Provision (activate) an app on an existing tenant.
+   *
+   * Idempotent: if the app already has an active subscription we return
+   * the current subscription row untouched (status=`already_active`) — no
+   * double-provisioning.
+   *
+   * Otherwise we resolve the target plan and delegate to nola-billing's
+   * `nola.commands.billing.admin.subscription.create` (idempotent by
+   * tenant+app on the billing side too) to create a fresh Subscription row,
+   * returning status=`activated`.
+   *
+   * Plan resolution:
+   *   - `plan` provided  → forwarded as-is (UUID or name, e.g. "kelasi:free";
+   *     billing resolves both).
+   *   - `plan` omitted   → the app's default plan = the cheapest ACTIVE plan
+   *     for that app, taken from the canonical billing catalogue
+   *     (`PlansService.listAll({ app })`, which billing returns ordered by
+   *     `price: 'asc'`). If the app has no active plan we surface a precise
+   *     400 (`no_plan_for_app`) — never a guess, never a 501.
+   *
+   * Note: this only creates the billing Subscription. It does NOT spin up a
+   * Keycloak user / Org / School (that's the brand-new-tenant path in
+   * `create()` via kelasi-gateway hq-provision). "Activate app on existing
+   * tenant" is purely a billing-subscription operation.
+   */
+  async activateApp(
+    id: string,
+    app: string,
+    plan?: string,
+  ): Promise<{
+    tenantId: string;
+    app: string;
+    status: 'already_active' | 'activated';
+    subscription: BillingSubscriptionRow;
+  }> {
+    const targetApp = app.trim();
+    if (!targetApp) {
+      throw new BadRequestException({
+        code: 'app_required',
+        message: 'app is required',
+      });
+    }
+    // Confirm the tenant exists (404 otherwise) before touching billing.
+    await this.findOne(id);
+
+    // Idempotence: is the app already active for this tenant?
+    const existing = await this.subscriptions.list({ tenantId: id, app: targetApp });
+    const active = existing.find((s) => s.status === 'active') ?? existing[0];
+    if (active) {
+      await this.recordActivity(
+        'commercial',
+        'tenant.app_activation_noop',
+        id,
+        `${targetApp} already subscribed (status=${active.status})`,
+      );
+      return {
+        tenantId: id,
+        app: targetApp,
+        status: 'already_active',
+        subscription: active,
+      };
+    }
+
+    // Resolve the plan to start the subscription on.
+    const planId = await this.resolvePlanForApp(targetApp, plan);
+
+    // Create the subscription on the billing side (idempotent there too).
+    const subscription = await this.subscriptions.createSubscription({
+      tenantId: id,
+      app: targetApp,
+      planId,
+    });
+
+    await this.recordActivity(
+      'commercial',
+      'tenant.app_activated',
+      id,
+      `${targetApp} · plan=${subscription.plan?.name ?? subscription.planId ?? planId}`,
+    );
+
+    return {
+      tenantId: id,
+      app: targetApp,
+      status: 'activated',
+      subscription,
+    };
+  }
+
+  /**
+   * Resolve the plan id/name to provision an app on.
+   *
+   * If the caller passed an explicit `plan` we forward it untouched —
+   * billing accepts both the plan UUID and its name (e.g. "kelasi:free")
+   * and is the authority that validates it (PLAN_NOT_FOUND surfaces back
+   * as a billing error if it's bogus).
+   *
+   * Otherwise we pick the app's default plan = the cheapest ACTIVE plan in
+   * the canonical billing catalogue. `PlansService.listAll({ app })` hits
+   * `nola.commands.billing.admin.plan.list`, which billing returns already
+   * filtered on `isActive: true` and ordered `price: 'asc'`, so the first
+   * row is the cheapest active plan. No active plan for the app → 400.
+   */
+  private async resolvePlanForApp(
+    app: string,
+    explicitPlan?: string,
+  ): Promise<string> {
+    const trimmed = explicitPlan?.trim();
+    if (trimmed) return trimmed;
+
+    const plans = await this.plans.listAll({ app });
+    const cheapest = plans[0];
+    if (!cheapest) {
+      throw new BadRequestException({
+        code: 'no_plan_for_app',
+        message: `No active plan found for app "${app}". Pass an explicit plan or activate one in nola-billing first.`,
+        app,
+      });
+    }
+    return cheapest.id;
+  }
+
   async update(_id: string, _dto: unknown): Promise<never> {
     throw new NotImplementedException(NOT_IMPLEMENTED_HINT);
   }
   async remove(_id: string): Promise<never> {
-    throw new NotImplementedException(NOT_IMPLEMENTED_HINT);
-  }
-  async changePlan(_id: string, _plan: string): Promise<never> {
     throw new NotImplementedException(NOT_IMPLEMENTED_HINT);
   }
   async suspend(_id: string): Promise<never> {

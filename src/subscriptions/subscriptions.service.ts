@@ -85,6 +85,39 @@ export class SubscriptionsService {
     return row;
   }
 
+  /**
+   * Provision a fresh subscription for an app on a tenant, on the chosen
+   * plan. Delegates to nola-billing's idempotent
+   * `nola.commands.billing.admin.subscription.create` — a second call with
+   * the same (tenant, app) returns the existing active subscription instead
+   * of 409-ing, so this is safe to call from the HQ "activate app" flow.
+   *
+   * `planId` accepts either the plan UUID or its name (e.g. "kelasi:free");
+   * billing resolves both. Returns the canonical subscription row so the HQ
+   * console can refresh its tenant detail view with the new state.
+   */
+  async createSubscription(
+    args: {
+      tenantId: string;
+      app: string;
+      planId: string;
+    },
+    actor = 'nola-hq',
+  ): Promise<BillingSubscriptionRow> {
+    const row = await this.send<typeof args, BillingSubscriptionRow>(
+      'nola.commands.billing.admin.subscription.create',
+      args,
+    );
+    const planLabel =
+      row.plan?.displayName ?? row.plan?.name ?? row.planId ?? args.planId;
+    await this.recordActivity(
+      actor,
+      `App activée → ${row.app} (plan ${planLabel})`,
+      row.tenantId ?? args.tenantId ?? null,
+    );
+    return row;
+  }
+
   async cancel(
     args: {
       subscriptionId?: string;

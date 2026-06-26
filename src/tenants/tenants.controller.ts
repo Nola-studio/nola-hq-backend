@@ -9,12 +9,13 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { TenantsService } from './tenants.service';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { ListTenantsDto } from './dto/list-tenants.dto';
 import { ChangePlanDto } from './dto/change-plan.dto';
+import { ActivateAppDto } from './dto/activate-app.dto';
 import { HqRoles } from '../common/auth/hq-roles.decorator';
 import { HqRole } from '../common/auth/hq-role.enum';
 
@@ -44,6 +45,26 @@ export class TenantsController {
     return this.svc.detail(id);
   }
 
+  /**
+   * Convenience resolver for the TenantDetail "Users" tab. The console
+   * holds a `tenantId`, not an `organizationId`; this maps
+   * tenant → org → nola-iam memberships in one call. Equivalent to
+   * `GET /iam/orgs/:orgId/memberships` once you know the org id.
+   */
+  @Get(':id/memberships')
+  @ApiOperation({
+    summary: 'List the IAM memberships of a tenant (resolves tenant→org)',
+  })
+  @ApiQuery({ name: 'includeInactive', required: false, type: Boolean })
+  memberships(
+    @Param('id') id: string,
+    @Query('includeInactive') includeInactive?: string,
+  ) {
+    return this.svc.memberships(id, {
+      includeInactive: includeInactive === 'true',
+    });
+  }
+
   @Post()
   @HqRoles(HqRole.Operator)
   create(@Body() dto: CreateTenantDto) {
@@ -66,7 +87,19 @@ export class TenantsController {
   @Post(':id/change-plan')
   @HqRoles(HqRole.Operator)
   changePlan(@Param('id') id: string, @Body() dto: ChangePlanDto) {
-    return this.svc.changePlan(id, dto.plan);
+    return this.svc.changePlan(id, dto.plan, dto.app);
+  }
+
+  /**
+   * Activate (provision) an app on an existing tenant. Idempotent: if the
+   * app is already subscribed it returns the current subscription instead
+   * of re-provisioning.
+   */
+  @Post(':id/apps')
+  @HqRoles(HqRole.Operator)
+  @ApiOperation({ summary: 'Activate an app on an existing tenant (idempotent)' })
+  activateApp(@Param('id') id: string, @Body() dto: ActivateAppDto) {
+    return this.svc.activateApp(id, dto.app, dto.plan);
   }
 
   @Post(':id/suspend')

@@ -1,7 +1,8 @@
 import { Body, Controller, Post, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { IsEmail, IsIn, IsObject, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsIn, IsObject, IsOptional, IsString, MaxLength } from 'class-validator';
 import { NotificationsService } from './notifications.service';
+import { IsRecipientForChannel } from './dto/recipient-for-channel.validator';
 import { HqRoles } from '../common/auth/hq-roles.decorator';
 import { HqRole } from '../common/auth/hq-role.enum';
 
@@ -9,7 +10,16 @@ class SendTestNotificationDto {
   @IsIn(['email', 'sms', 'whatsapp'])
   channel!: 'email' | 'sms' | 'whatsapp';
 
-  @IsEmail()
+  /**
+   * Recipient — validated conditionally on the channel:
+   *   - `email`           → a valid email address.
+   *   - `sms` / `whatsapp` → an E.164 MSISDN (`+` then 8–15 digits).
+   *
+   * Without this split, an SMS/WhatsApp test to a phone number was rejected
+   * with an unjustified 400 because the field was always `@IsEmail()`.
+   */
+  @IsString()
+  @IsRecipientForChannel('channel')
   to!: string;
 
   /**
