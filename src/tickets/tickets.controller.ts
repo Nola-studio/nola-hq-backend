@@ -16,6 +16,8 @@ import {
   CreateTicketDto,
   UpdateTicketStatusDto,
 } from './dto/create-ticket.dto';
+import { HqRoles } from '../common/auth/hq-roles.decorator';
+import { HqRole } from '../common/auth/hq-role.enum';
 
 @ApiBearerAuth()
 @ApiTags('tickets')
@@ -39,16 +41,19 @@ export class TicketsController {
   }
 
   @Post()
+  @HqRoles(HqRole.Operator)
   create(@Body() dto: CreateTicketDto) {
     return this.svc.create(dto);
   }
 
   @Post(':id/replies')
+  @HqRoles(HqRole.Operator)
   reply(@Param('id', ParseIntPipe) id: number, @Body() dto: AddReplyDto) {
     return this.svc.addReply(id, dto);
   }
 
   @Patch(':id/status')
+  @HqRoles(HqRole.Operator)
   setStatus(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateTicketStatusDto,
@@ -57,6 +62,7 @@ export class TicketsController {
   }
 
   @Patch(':id/assign')
+  @HqRoles(HqRole.Operator)
   assign(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: AssignTicketDto,

@@ -59,11 +59,19 @@ import { validate } from './config/env.validation';
             type: 'postgres' as const,
             url,
             entities,
-            synchronize: true,
+            // Prod schema is migration-driven. `synchronize` is OFF so TypeORM
+            // never auto-alters/drops columns at boot; `migrationsRun` applies
+            // pending migrations (the baseline creates the full schema on a
+            // fresh DB). Generate new ones with `bun run migration:generate`.
+            migrations: [`${__dirname}/migrations/*.{js,ts}`],
+            synchronize: false,
+            migrationsRun: true,
             logging: false,
             ssl: isInternal ? false : { rejectUnauthorized: false },
           };
         }
+        // SQLite dev: no production data to protect → keep auto-sync, no
+        // migrations (the Postgres baseline is not SQLite-compatible anyway).
         return {
           type: 'sqlite' as const,
           database: config.get<string>('DB_PATH') ?? './data/nola.sqlite',
