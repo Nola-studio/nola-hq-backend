@@ -39,6 +39,8 @@ interface SupportRequestPayload {
     appVersion?: string;
     platform?: string;
     personId?: string;
+    /** Real email when the sender has one (web matricule users may not). */
+    contactEmail?: string;
   };
 }
 
@@ -131,14 +133,21 @@ export class SupportIngestListener implements OnApplicationBootstrap {
     const p = env.payload ?? {};
     const subject = (p.subject ?? '').trim();
     const message = (p.message ?? '').trim();
-    const contact = (p.contact ?? '').trim();
     const tenant = (p.tenant ?? '').trim();
+    // `contact` is NOT required to ingest: a web user who logged in by
+    // matricule has no email, and dropping their request would lose a real
+    // support ticket. Fall back to the email carried in meta, else a marker —
+    // the school (tenant) + context footer still let HQ act on it.
+    const contact =
+      (p.contact ?? '').trim() ||
+      (p.meta?.contactEmail ?? '').trim() ||
+      'contact inconnu';
 
-    // A request with no usable content is dropped (acked) — retrying it would
-    // never succeed and would block the consumer.
-    if (!subject || !message || !contact || !tenant) {
+    // Only drop when there's genuinely nothing to action — retrying these
+    // would never succeed and would block the consumer.
+    if (!subject || !message || !tenant) {
       this.logger.warn(
-        `Dropping malformed support request (subject=${!!subject} message=${!!message} contact=${!!contact} tenant=${!!tenant})`,
+        `Dropping malformed support request (subject=${!!subject} message=${!!message} tenant=${!!tenant})`,
       );
       return;
     }
