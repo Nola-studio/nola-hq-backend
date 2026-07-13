@@ -73,7 +73,9 @@ describe('TeamService.invite → Keycloak provisioning', () => {
     expect(res.keycloak.passwordSet).toBe(true);
     expect(typeof res.keycloak.temporaryPassword).toBe('string');
     expect(res.keycloak.temporaryPassword!.length).toBeGreaterThanOrEqual(12);
-    expect(kc.resetPassword.mock.calls[0][3]).toBe(true); // temporary=true
+    // PERMANENT (temporary=false): the ROPC login refuses a pending
+    // UPDATE_PASSWORD action ("Account is not fully set up" → 401).
+    expect(kc.resetPassword.mock.calls[0][3]).toBe(false);
   });
 
   test('defaults to the least-privilege role (hq:viewer)', async () => {
