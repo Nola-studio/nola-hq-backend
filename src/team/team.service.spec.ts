@@ -33,11 +33,12 @@ describe('TeamService.invite → Keycloak provisioning', () => {
     expect(res.keycloak).toEqual({ created: false, reason: 'keycloak_admin_not_configured' });
   });
 
-  test('new account → creates user, sets a temp password, assigns the role', async () => {
+  test('new account + realm SMTP → "set your password" email, NO temp password', async () => {
     const kc = {
       isConfigured: () => true,
       findUserByEmail: mock(async () => null),
       createUser: mock(async () => 'kc-user-1'),
+      executeActionsEmail: mock(async () => true),
       resetPassword: mock(async () => true),
       assignRealmRole: mock(async () => true),
     } as any;
@@ -47,13 +48,32 @@ describe('TeamService.invite → Keycloak provisioning', () => {
     expect(res.keycloak.created).toBe(true);
     expect(res.keycloak.userId).toBe('kc-user-1');
     expect(res.keycloak.realmRole).toBe('hq:operator');
+    expect(res.keycloak.emailSent).toBe(true);
+    expect(res.keycloak.temporaryPassword).toBeUndefined();
+    expect(kc.resetPassword).not.toHaveBeenCalled(); // no password transits
+    expect(kc.createUser.mock.calls[0][0]).toBe('nola-hq');
+    expect(kc.executeActionsEmail.mock.calls[0][2]).toEqual(['UPDATE_PASSWORD']);
+    expect(kc.assignRealmRole.mock.calls[0][2]).toBe('hq:operator');
+  });
+
+  test('new account, email send fails → falls back to a temp password', async () => {
+    const kc = {
+      isConfigured: () => true,
+      findUserByEmail: mock(async () => null),
+      createUser: mock(async () => 'kc-user-1b'),
+      executeActionsEmail: mock(async () => false), // realm without SMTP
+      resetPassword: mock(async () => true),
+      assignRealmRole: mock(async () => true),
+    } as any;
+    const svc = new TeamService(makeRepo(), kc, config);
+
+    const res = await svc.invite({ ...invite, hqAccess: 'operator' });
+    expect(res.keycloak.created).toBe(true);
+    expect(res.keycloak.emailSent).toBe(false);
     expect(res.keycloak.passwordSet).toBe(true);
     expect(typeof res.keycloak.temporaryPassword).toBe('string');
     expect(res.keycloak.temporaryPassword!.length).toBeGreaterThanOrEqual(12);
-    // role posted to realm 'nola-hq', password marked temporary
-    expect(kc.createUser.mock.calls[0][0]).toBe('nola-hq');
     expect(kc.resetPassword.mock.calls[0][3]).toBe(true); // temporary=true
-    expect(kc.assignRealmRole.mock.calls[0][2]).toBe('hq:operator');
   });
 
   test('defaults to the least-privilege role (hq:viewer)', async () => {
@@ -61,6 +81,7 @@ describe('TeamService.invite → Keycloak provisioning', () => {
       isConfigured: () => true,
       findUserByEmail: mock(async () => null),
       createUser: mock(async () => 'kc-user-2'),
+      executeActionsEmail: mock(async () => true),
       resetPassword: mock(async () => true),
       assignRealmRole: mock(async () => true),
     } as any;
