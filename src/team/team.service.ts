@@ -182,8 +182,14 @@ export class TeamService {
         return { created: true, userId, realmRole, roleAssigned, emailSent: true };
       }
 
+      // PERMANENT password (temporary=false), like kelasi's issued credentials:
+      // the HQ login is an OIDC password grant (ROPC), and Keycloak refuses the
+      // grant while an UPDATE_PASSWORD required action is pending ("Account is
+      // not fully set up" → 401 invalid_credentials at the BFF). The password
+      // is still one-time-displayed; changing it after first login is advice,
+      // not enforcement.
       const temporaryPassword = generateTempPassword();
-      const passwordSet = await this.kc.resetPassword(realm, userId, temporaryPassword, true);
+      const passwordSet = await this.kc.resetPassword(realm, userId, temporaryPassword, false);
 
       return {
         created: true,
