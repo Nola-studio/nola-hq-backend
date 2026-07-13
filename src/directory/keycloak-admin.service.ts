@@ -201,4 +201,115 @@ export class KeycloakAdminService {
       )) ?? []
     );
   }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Write operations (provisioning). All best-effort: in degraded mode
+  // (`isConfigured()` false) or on error they return null/false + warn, never
+  // throw — callers keep their local state and surface the outcome to the UI.
+  // ───────────────────────────────────────────────────────────────────────────
+
+  private async adminSend(
+    realm: string,
+    method: 'POST' | 'PUT' | 'DELETE',
+    path: string,
+    body?: unknown,
+  ): Promise<Response | null> {
+    const token = await this.token();
+    if (!token) return null;
+    const base = this.baseUrl()!.replace(/\/$/, '');
+    const url = `${base}/admin/realms/${realm}${path}`;
+    return fetch(url, {
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: body == null ? undefined : JSON.stringify(body),
+    });
+  }
+
+  /** Exact-email lookup (`?email=…&exact=true`). */
+  async findUserByEmail(realm: string, email: string): Promise<KcUser | null> {
+    const qs = new URLSearchParams({
+      email,
+      exact: 'true',
+      briefRepresentation: 'false',
+    });
+    const users = (await this.adminGet<KcUser[]>(realm, '/users', qs)) ?? [];
+    const lower = email.toLowerCase();
+    return users.find((u) => u.email?.toLowerCase() === lower) ?? users[0] ?? null;
+  }
+
+  /**
+   * Creates an enabled user in `realm`. Returns the new user id, the id of the
+   * pre-existing user on 409, or null in degraded mode / on error.
+   */
+  async createUser(
+    realm: string,
+    input: { email: string; firstName?: string; lastName?: string; username?: string },
+  ): Promise<string | null> {
+    const res = await this.adminSend(realm, 'POST', '/users', {
+      username: input.username ?? input.email,
+      email: input.email,
+      firstName: input.firstName,
+      lastName: input.lastName,
+      enabled: true,
+      emailVerified: true,
+    });
+    if (!res) return null;
+    if (res.status === 201) {
+      const loc = res.headers.get('location') ?? res.headers.get('Location');
+      const id = loc?.split('/').pop();
+      return id || (await this.findUserByEmail(realm, input.email))?.id || null;
+    }
+    if (res.status === 409) {
+      return (await this.findUserByEmail(realm, input.email))?.id ?? null;
+    }
+    this.logger.warn(`Keycloak createUser ${realm} failed (status=${res.status})`);
+    return null;
+  }
+
+  /**
+   * Sets a password credential. `temporary=true` forces the UPDATE_PASSWORD
+   * required action so the user must change it at first login.
+   */
+  async resetPassword(
+    realm: string,
+    userId: string,
+    password: string,
+    temporary = true,
+  ): Promise<boolean> {
+    const res = await this.adminSend(realm, 'PUT', `/users/${userId}/reset-password`, {
+      type: 'password',
+      value: password,
+      temporary,
+    });
+    if (!res) return false;
+    if (res.ok) return true;
+    this.logger.warn(
+      `Keycloak resetPassword ${realm}/${userId} failed (status=${res.status})`,
+    );
+    return false;
+  }
+
+  /** Assigns a realm role (composite ok) to a user. Idempotent server-side. */
+  async assignRealmRole(realm: string, userId: string, roleName: string): Promise<boolean> {
+    const role = await this.adminGet<{ id: string; name: string }>(
+      realm,
+      `/roles/${encodeURIComponent(roleName)}`,
+    );
+    if (!role) {
+      this.logger.warn(`Keycloak role ${roleName} not found in realm ${realm}`);
+      return false;
+    }
+    const res = await this.adminSend(realm, 'POST', `/users/${userId}/role-mappings/realm`, [
+      { id: role.id, name: role.name },
+    ]);
+    if (!res) return false;
+    if (res.ok) return true;
+    this.logger.warn(
+      `Keycloak assignRealmRole ${roleName}→${userId} failed (status=${res.status})`,
+    );
+    return false;
+  }
 }
