@@ -69,11 +69,25 @@ export class KeycloakAdminService {
     return this.config.get<string>('KEYCLOAK_ADMIN_REALM') ?? 'master';
   }
 
+  /**
+   * Master-admin password-grant creds (same pattern as kelasi-gateway's
+   * KeycloakAdminClient, whose auto-invite works in production). When set,
+   * they take precedence over the confidential client: the bootstrap admin
+   * holds manage-users on every realm, whereas the view-only client 403s on
+   * user creation (team auto-provisioning).
+   */
+  private adminUserCreds(): { username: string; password: string } | null {
+    const username = this.config.get<string>('KEYCLOAK_ADMIN_USER');
+    const password = this.config.get<string>('KEYCLOAK_ADMIN_PASSWORD');
+    return username && password ? { username, password } : null;
+  }
+
   isConfigured(): boolean {
     return Boolean(
       this.baseUrl() &&
-        this.config.get<string>('KEYCLOAK_ADMIN_CLIENT_ID') &&
-        this.config.get<string>('KEYCLOAK_ADMIN_CLIENT_SECRET'),
+        (this.adminUserCreds() ||
+          (this.config.get<string>('KEYCLOAK_ADMIN_CLIENT_ID') &&
+            this.config.get<string>('KEYCLOAK_ADMIN_CLIENT_SECRET'))),
     );
   }
 
@@ -84,12 +98,22 @@ export class KeycloakAdminService {
       return this.cached.accessToken;
     }
     const base = this.baseUrl()!.replace(/\/$/, '');
-    const url = `${base}/realms/${this.authRealm()}/protocol/openid-connect/token`;
-    const body = new URLSearchParams({
-      grant_type: 'client_credentials',
-      client_id: this.config.get<string>('KEYCLOAK_ADMIN_CLIENT_ID')!,
-      client_secret: this.config.get<string>('KEYCLOAK_ADMIN_CLIENT_SECRET')!,
-    });
+    const admin = this.adminUserCreds();
+    const url = admin
+      ? `${base}/realms/master/protocol/openid-connect/token`
+      : `${base}/realms/${this.authRealm()}/protocol/openid-connect/token`;
+    const body = admin
+      ? new URLSearchParams({
+          grant_type: 'password',
+          client_id: 'admin-cli',
+          username: admin.username,
+          password: admin.password,
+        })
+      : new URLSearchParams({
+          grant_type: 'client_credentials',
+          client_id: this.config.get<string>('KEYCLOAK_ADMIN_CLIENT_ID')!,
+          client_secret: this.config.get<string>('KEYCLOAK_ADMIN_CLIENT_SECRET')!,
+        });
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -292,12 +316,25 @@ export class KeycloakAdminService {
     return false;
   }
 
-  /** Assigns a realm role (composite ok) to a user. Idempotent server-side. */
+  /**
+   * Assigns a realm role (composite ok) to a user. Idempotent server-side.
+   * Self-healing: a missing role is created first (fresh realms don't ship
+   * the hq:* roles), so provisioning never silently loses the authorization.
+   */
   async assignRealmRole(realm: string, userId: string, roleName: string): Promise<boolean> {
-    const role = await this.adminGet<{ id: string; name: string }>(
+    let role = await this.adminGet<{ id: string; name: string }>(
       realm,
       `/roles/${encodeURIComponent(roleName)}`,
     );
+    if (!role) {
+      const created = await this.adminSend(realm, 'POST', '/roles', { name: roleName });
+      if (created?.ok || created?.status === 409) {
+        role = await this.adminGet<{ id: string; name: string }>(
+          realm,
+          `/roles/${encodeURIComponent(roleName)}`,
+        );
+      }
+    }
     if (!role) {
       this.logger.warn(`Keycloak role ${roleName} not found in realm ${realm}`);
       return false;
