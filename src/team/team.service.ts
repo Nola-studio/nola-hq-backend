@@ -42,7 +42,13 @@ export interface KeycloakProvisionResult {
   realmRole?: string;
   roleAssigned?: boolean;
   passwordSet?: boolean;
-  /** One-time temporary password — present ONLY when a new account was created. */
+  /**
+   * Keycloak sent the "set your password" email (realm SMTP — Resend). When
+   * true, no temporary password exists: the invitee sets their own via the
+   * emailed link (24h validity).
+   */
+  emailSent?: boolean;
+  /** One-time temporary password — fallback when the email could not be sent. */
   temporaryPassword?: string;
   /** Why provisioning was skipped/failed (e.g. keycloak_admin_not_configured). */
   reason?: string;
@@ -165,9 +171,19 @@ export class TeamService {
       });
       if (!userId) return { created: false, error: 'keycloak_create_failed' };
 
+      const roleAssigned = await this.kc.assignRealmRole(realm, userId, realmRole);
+
+      // Preferred path (same as kelasi invites): Keycloak emails a one-shot
+      // "set your password" link via the realm SMTP (Resend) — no password
+      // ever transits. Falls back to a one-time temporary password when the
+      // realm has no SMTP or the send fails.
+      const emailSent = await this.kc.executeActionsEmail(realm, userId, ['UPDATE_PASSWORD']);
+      if (emailSent) {
+        return { created: true, userId, realmRole, roleAssigned, emailSent: true };
+      }
+
       const temporaryPassword = generateTempPassword();
       const passwordSet = await this.kc.resetPassword(realm, userId, temporaryPassword, true);
-      const roleAssigned = await this.kc.assignRealmRole(realm, userId, realmRole);
 
       return {
         created: true,
@@ -175,6 +191,7 @@ export class TeamService {
         realmRole,
         roleAssigned,
         passwordSet,
+        emailSent: false,
         temporaryPassword: passwordSet ? temporaryPassword : undefined,
       };
     } catch (e) {

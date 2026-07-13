@@ -294,6 +294,32 @@ export class KeycloakAdminService {
   }
 
   /**
+   * Sends Keycloak's action email (e.g. UPDATE_PASSWORD → "set your password"
+   * link) to the user. Requires the realm to have an SMTP server configured;
+   * returns false otherwise. Same mechanism as kelasi's staff/student invites
+   * (Resend SMTP relay on the realm).
+   */
+  async executeActionsEmail(
+    realm: string,
+    userId: string,
+    actions: string[] = ['UPDATE_PASSWORD'],
+    lifespanSeconds = 24 * 3600,
+  ): Promise<boolean> {
+    const res = await this.adminSend(
+      realm,
+      'PUT',
+      `/users/${userId}/execute-actions-email?lifespan=${lifespanSeconds}`,
+      actions,
+    );
+    if (!res) return false;
+    if (res.ok) return true;
+    this.logger.warn(
+      `Keycloak executeActionsEmail ${realm}/${userId} failed (status=${res.status})`,
+    );
+    return false;
+  }
+
+  /**
    * Sets a password credential. `temporary=true` forces the UPDATE_PASSWORD
    * required action so the user must change it at first login.
    */
