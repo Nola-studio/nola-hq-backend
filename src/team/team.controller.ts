@@ -33,9 +33,12 @@ export class TeamController {
 
   /**
    * Invite un nouveau membre de l'équipe HQ. Crée la row `team_members`
-   * (profil affichable). Pour activer le login il faudra encore créer
-   * l'utilisateur dans Keycloak realm `nola-hq` — soit côté nola-auth
-   * `POST /users/nola-hq`, soit manuellement.
+   * (profil affichable) ET provisionne automatiquement le compte Keycloak
+   * (realm `nola-hq`) : compte activé, mot de passe temporaire (à changer à la
+   * 1ʳᵉ connexion) et rôle realm `hq:*` selon `hqAccess`. La réponse porte
+   * `keycloak.temporaryPassword` (une seule fois) à communiquer à l'invité.
+   * Si Keycloak admin n'est pas configuré, la row est créée quand même et
+   * `keycloak.reason` l'indique (activation manuelle).
    *
    * Owner-only: managing who has console access is the most privileged
    * action — it controls the admin surface itself.

@@ -1,11 +1,16 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { TeamMember } from './team-member.entity';
+import { KeycloakAdminService } from '../directory/keycloak-admin.service';
+import { generateTempPassword } from './temp-password.util';
+import type { HqAccessLevel } from './dto/invite-team-member.dto';
 
 export interface UpdateTeamMemberDto {
   name?: string;
@@ -24,14 +29,46 @@ export interface InviteTeamMemberData {
   tag?: string;
   country?: string;
   perms?: string[];
+  hqAccess?: HqAccessLevel;
 }
+
+/** Outcome of the automatic Keycloak (realm `nola-hq`) provisioning. */
+export interface KeycloakProvisionResult {
+  /** A brand-new Keycloak account was created for this invite. */
+  created: boolean;
+  /** The account already existed (login was already possible). */
+  existed?: boolean;
+  userId?: string;
+  realmRole?: string;
+  roleAssigned?: boolean;
+  passwordSet?: boolean;
+  /** One-time temporary password — present ONLY when a new account was created. */
+  temporaryPassword?: string;
+  /** Why provisioning was skipped/failed (e.g. keycloak_admin_not_configured). */
+  reason?: string;
+  error?: string;
+}
+
+const HQ_ACCESS_TO_REALM_ROLE: Record<HqAccessLevel, string> = {
+  viewer: 'hq:viewer',
+  operator: 'hq:operator',
+  owner: 'hq:owner',
+};
 
 @Injectable()
 export class TeamService {
+  private readonly logger = new Logger(TeamService.name);
+
   constructor(
     @InjectRepository(TeamMember)
     private readonly repo: Repository<TeamMember>,
+    private readonly kc: KeycloakAdminService,
+    private readonly config: ConfigService,
   ) {}
+
+  private hqRealm(): string {
+    return this.config.get<string>('HQ_TEAM_REALM') ?? 'nola-hq';
+  }
 
   findAll() {
     return this.repo
@@ -54,10 +91,12 @@ export class TeamService {
   }
 
   /**
-   * Crée une row team_members pour un nouvel invité. L'activation du
-   * login (création de l'utilisateur Keycloak côté nola-auth) reste à
-   * faire manuellement ou via un appel HTTP séparé — ce service ne
-   * touche que la couche d'affichage HQ.
+   * Invite un nouveau membre HQ. Crée la row `team_members` (profil affichable)
+   * PUIS provisionne automatiquement le compte Keycloak (realm `nola-hq`) :
+   * création du compte, mot de passe temporaire (à changer à la 1ʳᵉ connexion)
+   * et rôle realm (`hq:*`) correspondant au niveau d'accès. Best-effort : si
+   * Keycloak admin n'est pas configuré ou échoue, la row reste créée et le
+   * résultat le signale (l'UI affiche alors le message d'activation manuelle).
    */
   async invite(data: InviteTeamMemberData) {
     const existing = await this.repo.findOne({ where: { email: data.email } });
@@ -88,7 +127,64 @@ export class TeamService {
         passwordHash: undefined,
       }),
     );
-    return stripPassword(saved);
+    const keycloak = await this.provisionKeycloak(data);
+    return { ...stripPassword(saved), keycloak };
+  }
+
+  /**
+   * Auto-provisions the Keycloak account for an invite. Never throws — returns a
+   * structured outcome the controller/UI can act on. The temporary password is
+   * returned exactly once (only for a freshly-created account) and is never
+   * stored server-side.
+   */
+  private async provisionKeycloak(
+    data: InviteTeamMemberData,
+  ): Promise<KeycloakProvisionResult> {
+    if (!this.kc.isConfigured()) {
+      return { created: false, reason: 'keycloak_admin_not_configured' };
+    }
+    const realm = this.hqRealm();
+    const realmRole = HQ_ACCESS_TO_REALM_ROLE[data.hqAccess ?? 'viewer'];
+    try {
+      const parts = data.name.trim().split(/\s+/);
+      const firstName = parts[0] || undefined;
+      const lastName = parts.length > 1 ? parts.slice(1).join(' ') : undefined;
+
+      const existing = await this.kc.findUserByEmail(realm, data.email);
+      if (existing?.id) {
+        // Login already possible — don't clobber their password; just make sure
+        // the access role is present.
+        const roleAssigned = await this.kc.assignRealmRole(realm, existing.id, realmRole);
+        return { created: false, existed: true, userId: existing.id, realmRole, roleAssigned };
+      }
+
+      const userId = await this.kc.createUser(realm, {
+        email: data.email,
+        firstName,
+        lastName,
+      });
+      if (!userId) return { created: false, error: 'keycloak_create_failed' };
+
+      const temporaryPassword = generateTempPassword();
+      const passwordSet = await this.kc.resetPassword(realm, userId, temporaryPassword, true);
+      const roleAssigned = await this.kc.assignRealmRole(realm, userId, realmRole);
+
+      return {
+        created: true,
+        userId,
+        realmRole,
+        roleAssigned,
+        passwordSet,
+        temporaryPassword: passwordSet ? temporaryPassword : undefined,
+      };
+    } catch (e) {
+      this.logger.warn(
+        `Keycloak provisioning failed for ${data.email}: ${
+          e instanceof Error ? e.message : String(e)
+        }`,
+      );
+      return { created: false, error: 'keycloak_error' };
+    }
   }
 
   async remove(id: string) {
