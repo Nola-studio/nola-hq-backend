@@ -18,6 +18,10 @@ import { UpdateInitiativeDto } from './dto/update-initiative.dto';
 import { MoveInitiativeDto } from './dto/move-initiative.dto';
 import { CreateMilestoneDto } from './dto/create-milestone.dto';
 import { UpdateMilestoneDto } from './dto/update-milestone.dto';
+import { CreateKeyResultDto } from './dto/create-key-result.dto';
+import { UpdateKeyResultDto } from './dto/update-key-result.dto';
+import { CreateTrajectoryPointDto } from './dto/create-trajectory-point.dto';
+import { UpdateTrajectoryPointDto } from './dto/update-trajectory-point.dto';
 import {
   ListInitiativesDto,
   ListObjectivesDto,
@@ -26,9 +30,10 @@ import { HqRoles } from '../common/auth/hq-roles.decorator';
 import { HqRole } from '../common/auth/hq-role.enum';
 
 /**
- * Nola Studio's internal roadmap: quarterly **objectives** → **initiatives**
- * → **milestones**. This is the studio's own strategy tool — nothing here is
- * tenant-scoped.
+ * Nola Studio's internal roadmap: staged **objectives** (annual → quarterly)
+ * → **key results** (how the objective is measured, with a planned
+ * trajectory) and **initiatives** → **milestones** (how it gets done). This
+ * is the studio's own strategy tool — nothing here is tenant-scoped.
  *
  * Same RBAC posture as the pipeline board: reads only need authentication,
  * mutations need `hq:operator`. Deleting an **objective** is the one
@@ -52,6 +57,14 @@ export class RoadmapController {
     return this.svc.timeline();
   }
 
+  @Get('metrics')
+  @ApiOperation({
+    summary: 'Metrics a key result can bind to (the console never hardcodes them)',
+  })
+  metrics() {
+    return this.svc.metrics();
+  }
+
   // ── objectives ───────────────────────────────────────────────────
 
   @Get('objectives')
@@ -62,7 +75,9 @@ export class RoadmapController {
   }
 
   @Get('objectives/:id')
-  @ApiOperation({ summary: 'One objective with its initiatives' })
+  @ApiOperation({
+    summary: 'One objective with its key results, initiatives and children',
+  })
   findObjective(@Param('id') id: string) {
     return this.svc.findObjective(id);
   }
@@ -87,6 +102,75 @@ export class RoadmapController {
   })
   async removeObjective(@Param('id') id: string) {
     await this.svc.removeObjective(id);
+  }
+
+  // ── key results ──────────────────────────────────────────────────
+
+  @Get('objectives/:id/key-results')
+  @ApiOperation({
+    summary: 'Key results of an objective, with current / progress / status',
+  })
+  listKeyResults(@Param('id') id: string) {
+    return this.svc.listKeyResults(id);
+  }
+
+  @Post('objectives/:id/key-results')
+  @HqRoles(HqRole.Operator)
+  @ApiOperation({
+    summary: 'Add a key result (a metric-bound one needs no manual entry)',
+  })
+  createKeyResult(@Param('id') id: string, @Body() dto: CreateKeyResultDto) {
+    return this.svc.createKeyResult(id, dto);
+  }
+
+  @Patch('key-results/:id')
+  @HqRoles(HqRole.Operator)
+  updateKeyResult(@Param('id') id: string, @Body() dto: UpdateKeyResultDto) {
+    return this.svc.updateKeyResult(id, dto);
+  }
+
+  @Delete('key-results/:id')
+  @HttpCode(204)
+  @HqRoles(HqRole.Operator)
+  @ApiOperation({ summary: 'Delete a key result and its trajectory points' })
+  async removeKeyResult(@Param('id') id: string) {
+    await this.svc.removeKeyResult(id);
+  }
+
+  @Get('key-results/:id/series')
+  @ApiOperation({ summary: 'Planned vs measured curves, sorted by date' })
+  series(@Param('id') id: string) {
+    return this.svc.keyResultSeries(id);
+  }
+
+  // ── trajectory points ────────────────────────────────────────────
+
+  @Post('key-results/:id/points')
+  @HqRoles(HqRole.Operator)
+  @ApiOperation({
+    summary: 'Plan a step of the trajectory (an existing date is updated)',
+  })
+  addTrajectoryPoint(
+    @Param('id') id: string,
+    @Body() dto: CreateTrajectoryPointDto,
+  ) {
+    return this.svc.addTrajectoryPoint(id, dto);
+  }
+
+  @Patch('trajectory-points/:id')
+  @HqRoles(HqRole.Operator)
+  updateTrajectoryPoint(
+    @Param('id') id: string,
+    @Body() dto: UpdateTrajectoryPointDto,
+  ) {
+    return this.svc.updateTrajectoryPoint(id, dto);
+  }
+
+  @Delete('trajectory-points/:id')
+  @HttpCode(204)
+  @HqRoles(HqRole.Operator)
+  async removeTrajectoryPoint(@Param('id') id: string) {
+    await this.svc.removeTrajectoryPoint(id);
   }
 
   // ── initiatives ──────────────────────────────────────────────────

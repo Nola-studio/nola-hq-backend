@@ -1,5 +1,5 @@
 import { test, expect, describe, mock } from 'bun:test';
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { RoadmapService } from './roadmap.service';
 import type { RoadmapInitiativeStatus } from './roadmap-initiative.entity';
 
@@ -42,6 +42,21 @@ function makeInitiativesRepo(rows: Row[]) {
 const noMilestones = { find: mock(async () => []) } as any;
 const objectives = { findOne: mock(async () => null) } as any;
 
+/** Key results / trajectory points / snapshots are out of scope here. */
+const empty = () => ({ find: mock(async () => []), count: mock(async () => 0) }) as any;
+
+/** The service under test, with only the repositories these cases touch. */
+function makeService(initiatives: any, milestones: any = noMilestones) {
+  return new RoadmapService(
+    objectives,
+    initiatives,
+    milestones,
+    empty(),
+    empty(),
+    empty(),
+  );
+}
+
 /** The `{id,status,position}` triples handed to `save`, id-sorted. */
 function persisted(repo: any) {
   const [items] = repo.save.mock.calls[0] as [Row[]];
@@ -58,7 +73,7 @@ describe('RoadmapService.move', () => {
       row('c', 'planned', 2),
     ];
     const repo = makeInitiativesRepo(rows);
-    const svc = new RoadmapService(objectives, repo, noMilestones);
+    const svc = makeService(repo);
 
     await svc.move('c', { status: 'planned', position: 0 });
 
@@ -78,7 +93,7 @@ describe('RoadmapService.move', () => {
       row('x', 'planned', 0),
     ];
     const repo = makeInitiativesRepo(rows);
-    const svc = new RoadmapService(objectives, repo, noMilestones);
+    const svc = makeService(repo);
 
     await svc.move('b', { status: 'planned', position: 0 });
 
@@ -96,7 +111,7 @@ describe('RoadmapService.move', () => {
       row('x', 'idea', 0),
     ];
     const repo = makeInitiativesRepo(rows);
-    const svc = new RoadmapService(objectives, repo, noMilestones);
+    const svc = makeService(repo);
 
     await svc.move('x', { status: 'shipped', position: 99 });
 
@@ -108,7 +123,7 @@ describe('RoadmapService.move', () => {
   test('defaults to the top of the column when no position is given', async () => {
     const rows = [row('a', 'planned', 0), row('x', 'idea', 0)];
     const repo = makeInitiativesRepo(rows);
-    const svc = new RoadmapService(objectives, repo, noMilestones);
+    const svc = makeService(repo);
 
     await svc.move('x', { status: 'planned' });
 
@@ -121,7 +136,7 @@ describe('RoadmapService.move', () => {
   test('a no-op move writes nothing at all', async () => {
     const rows = [row('a', 'planned', 0), row('b', 'planned', 1)];
     const repo = makeInitiativesRepo(rows);
-    const svc = new RoadmapService(objectives, repo, noMilestones);
+    const svc = makeService(repo);
 
     const moved = await svc.move('a', { status: 'planned', position: 0 });
 
@@ -133,7 +148,7 @@ describe('RoadmapService.move', () => {
 
   test('unknown initiative → 404, nothing persisted', async () => {
     const repo = makeInitiativesRepo([row('a', 'planned', 0)]);
-    const svc = new RoadmapService(objectives, repo, noMilestones);
+    const svc = makeService(repo);
 
     await expect(svc.move('ghost', { status: 'planned', position: 0 })).rejects.toBeInstanceOf(
       NotFoundException,
@@ -154,7 +169,7 @@ describe('RoadmapService read model', () => {
         { initiativeId: 'a', done: false },
       ]),
     } as any;
-    const svc = new RoadmapService(objectives, repo, milestones);
+    const svc = makeService(repo, milestones);
 
     const [view] = await svc.listInitiatives();
     expect(view.progress).toBe(67); // 2/3 → 66.67 → 67
@@ -169,10 +184,197 @@ describe('RoadmapService read model', () => {
     const milestones = {
       find: mock(async () => [{ initiativeId: 'a', done: true }]),
     } as any;
-    const svc = new RoadmapService(objectives, repo, milestones);
+    const svc = makeService(repo, milestones);
 
     const columns = await svc.board();
     const inProgress = columns.find((c) => c.id === 'in_progress')!;
     expect(inProgress.items.map((i) => i.progress)).toEqual([100]);
+  });
+});
+
+/**
+ * The objective read model: the service must batch-load key results,
+ * initiatives and children, then hand the whole thing to the pure cascade
+ * (`deriveCascadedObjectiveProgress`, unit-tested in
+ * roadmap.trajectory.spec.ts). Repositories are mocked — no DB, no Nest.
+ */
+
+interface ObjectiveRow {
+  id: string;
+  parentId: string | null;
+  progress: number;
+  quarter?: string | null;
+  year?: string | null;
+}
+
+function objectiveRow(
+  id: string,
+  over: Partial<ObjectiveRow> = {},
+): ObjectiveRow {
+  return { id, parentId: null, progress: 0, quarter: null, year: null, ...over };
+}
+
+/** A metric-free key result — its actuals come from its trajectory points. */
+function keyResultRow(id: string, objectiveId: string, baseline: number, target: number) {
+  return { id, objectiveId, metricKey: null, baseline, target, position: 0 };
+}
+
+/**
+ * Wires a service over in-memory rows. `objectives.find` answers the two
+ * distinct queries the read model issues (the listed rows, then their
+ * children by `parentId`).
+ */
+function makeReadService(
+  objectiveRows: ObjectiveRow[],
+  keyResultRows: any[] = [],
+  pointRows: any[] = [],
+) {
+  const objectivesRepo = {
+    find: mock(async (opts: any) => {
+      const parentIn = opts?.where?.parentId;
+      if (parentIn) {
+        const ids: string[] = parentIn._value ?? [];
+        return objectiveRows.filter((o) => o.parentId && ids.includes(o.parentId));
+      }
+      return objectiveRows.filter((o) => !o.parentId);
+    }),
+    findOne: mock(async ({ where }: any) =>
+      objectiveRows.find((o) => o.id === where.id) ?? null,
+    ),
+    count: mock(async ({ where }: any) =>
+      objectiveRows.filter((o) => o.parentId === where.parentId).length,
+    ),
+    save: mock(async (x: unknown) => x),
+    create: mock((x: unknown) => x),
+    remove: mock(async (x: unknown) => x),
+  } as any;
+  const keyResultsRepo = {
+    find: mock(async ({ where }: any) => {
+      const ids: string[] = where.objectiveId?._value ?? [where.objectiveId];
+      return keyResultRows.filter((k) => ids.includes(k.objectiveId));
+    }),
+  } as any;
+  const pointsRepo = { find: mock(async () => pointRows) } as any;
+  const snapshotsRepo = { find: mock(async () => []) } as any;
+  const svc = new RoadmapService(
+    objectivesRepo,
+    { find: mock(async () => []), count: mock(async () => 0) } as any,
+    { find: mock(async () => []) } as any,
+    keyResultsRepo,
+    pointsRepo,
+    snapshotsRepo,
+  );
+  return { svc, objectivesRepo };
+}
+
+describe('RoadmapService objective cascade', () => {
+  test('an objective with key results reports their mean progress', async () => {
+    const { svc } = makeReadService(
+      [objectiveRow('o1', { progress: 90 })], // stored value must be ignored
+      [keyResultRow('k1', 'o1', 0, 100), keyResultRow('k2', 'o1', 0, 100)],
+      [
+        { keyResultId: 'k1', date: '2026-01-01', targetValue: 100, actualValue: 20 },
+        { keyResultId: 'k2', date: '2026-01-01', targetValue: 100, actualValue: 80 },
+      ],
+    );
+
+    const [view] = await svc.listObjectives();
+    expect(view.progress).toBe(50);
+    expect(view.keyResultCount).toBe(2);
+    expect(view.initiativeCount).toBe(0);
+  });
+
+  test('an annual objective averages its quarterly children', async () => {
+    const { svc } = makeReadService(
+      [
+        objectiveRow('annual', { year: '2026' }),
+        objectiveRow('q1', { parentId: 'annual', quarter: '2026-Q1' }),
+        objectiveRow('q2', { parentId: 'annual', quarter: '2026-Q2' }),
+      ],
+      [keyResultRow('k1', 'q1', 0, 100), keyResultRow('k2', 'q2', 0, 100)],
+      [
+        { keyResultId: 'k1', date: '2026-01-01', targetValue: 100, actualValue: 100 },
+        { keyResultId: 'k2', date: '2026-01-01', targetValue: 100, actualValue: 40 },
+      ],
+    );
+
+    const [annual] = await svc.listObjectives();
+    expect(annual.id).toBe('annual');
+    expect(annual.progress).toBe(70); // (100 + 40) / 2
+  });
+
+  test('the detail route hydrates key results, children and their measures', async () => {
+    const { svc } = makeReadService(
+      [
+        objectiveRow('annual', { year: '2026' }),
+        objectiveRow('q1', { parentId: 'annual', quarter: '2026-Q1' }),
+      ],
+      [keyResultRow('k1', 'q1', 8, 4)], // a "down" key result
+      [{ keyResultId: 'k1', date: '2026-01-01', targetValue: 4, actualValue: 6 }],
+    );
+
+    const annual = await svc.findObjective('annual');
+    expect(annual.children?.map((c) => c.id)).toEqual(['q1']);
+    expect(annual.children?.[0].progress).toBe(50); // 8 → 4, currently 6
+    expect(annual.keyResults).toEqual([]);
+
+    const quarterly = await svc.findObjective('q1');
+    expect(quarterly.keyResults?.[0]).toMatchObject({
+      id: 'k1',
+      current: 6,
+      progress: 50,
+      status: 'behind', // plan said 4 on 2026-01-01, we are at 6
+    });
+  });
+});
+
+describe('RoadmapService objective staging guards', () => {
+  test('an objective plans a year OR a quarter, never both', async () => {
+    const { svc } = makeReadService([objectiveRow('o1')]);
+    await expect(
+      svc.createObjective({ title: 'Both', year: '2026', quarter: '2026-Q1' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      svc.updateObjective('o1', { year: '2026', quarter: '2026-Q1' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  test('a PATCH is judged on the resulting state, not on the payload', async () => {
+    const { svc } = makeReadService([objectiveRow('o1', { quarter: '2026-Q1' })]);
+    // The row already has a quarter → setting a year alone must still fail.
+    await expect(svc.updateObjective('o1', { year: '2026' })).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    // …unless the same PATCH clears the quarter.
+    const saved = await svc.updateObjective('o1', { year: '2026', quarter: null });
+    expect(saved.year).toBe('2026');
+    expect(saved.quarter).toBeNull();
+  });
+
+  test('the cascade stops at two levels (annual → quarterly)', async () => {
+    const { svc } = makeReadService([
+      objectiveRow('annual', { year: '2026' }),
+      objectiveRow('q1', { parentId: 'annual' }),
+      objectiveRow('loose'),
+    ]);
+    // `q1` already has a parent → it cannot become one.
+    await expect(
+      svc.updateObjective('loose', { parentId: 'q1' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    // `annual` already has children → it cannot become a child.
+    await expect(
+      svc.updateObjective('annual', { parentId: 'loose' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    // Self-parenting is the only reachable cycle.
+    await expect(
+      svc.updateObjective('loose', { parentId: 'loose' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  test('an unknown parent is a 404, not a silent detach', async () => {
+    const { svc } = makeReadService([objectiveRow('o1')]);
+    await expect(
+      svc.updateObjective('o1', { parentId: 'ghost' }),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 });
