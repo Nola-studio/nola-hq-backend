@@ -1,4 +1,11 @@
-import { Column, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
+import {
+  Column,
+  Entity,
+  Index,
+  JoinColumn,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+} from 'typeorm';
 
 export type RoadmapObjectiveStatus =
   | 'draft'
@@ -8,15 +15,21 @@ export type RoadmapObjectiveStatus =
   | 'dropped';
 
 /**
- * Top level of the studio roadmap: a **quarterly objective** (startup
- * strategy). Objectives group initiatives; initiatives group milestones.
+ * Top level of the studio roadmap: an **objective** (startup strategy).
+ * Objectives group key results and initiatives; initiatives group milestones.
+ *
+ * Objectives are **staged**: an objective carrying a `year` (and no
+ * `quarter`) is an *annual* objective, and the quarterly ones that serve it
+ * point at it through `parentId`. The horizon is derivable from those two
+ * columns — there is deliberately no `horizon` enum to keep in sync. The
+ * cascade is capped at two levels (annual → quarterly) at write time.
  *
  * This is Nola Studio's own planning tool — it has nothing to do with a
  * tenant's data. No NATS involvement, purely DB-backed.
  *
- * `progress` is a *stored* fallback: the API always answers with the value
- * derived from the linked initiatives (`deriveObjectiveProgress`), which is
- * 0 while the objective has none. See `roadmap.progress.ts`.
+ * `progress` is a *stored* fallback of last resort: the API answers with the
+ * value derived from the key results, else the children, else the
+ * initiatives (`deriveCascadedObjectiveProgress`, `roadmap.trajectory.ts`).
  */
 @Entity('roadmap_objectives')
 export class RoadmapObjective {
@@ -28,6 +41,22 @@ export class RoadmapObjective {
 
   @Column({ type: 'text', nullable: true })
   description!: string | null;
+
+  /**
+   * Annual objective this one serves. `ON DELETE SET NULL`: dropping the
+   * yearly goal must never delete the quarterly work planned under it.
+   */
+  @Column({ type: 'uuid', name: 'parent_id', nullable: true })
+  @Index()
+  parentId!: string | null;
+
+  @ManyToOne(() => RoadmapObjective, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'parent_id' })
+  parent?: RoadmapObjective | null;
+
+  /** `YYYY` — set (with `quarter` null) on an **annual** objective. */
+  @Column({ type: 'varchar', length: 4, nullable: true })
+  year!: string | null;
 
   /** Target quarter in `YYYY-Qn` (e.g. `2026-Q3`). Null = not scheduled yet. */
   @Column({ type: 'varchar', length: 7, nullable: true })
@@ -45,7 +74,7 @@ export class RoadmapObjective {
   @Column({ type: 'varchar', length: 120, nullable: true })
   owner!: string | null;
 
-  /** 0..100. Manual fallback; the read model derives it from initiatives. */
+  /** 0..100. Manual fallback; the read model derives it (cf. the cascade). */
   @Column({ type: 'integer', default: 0 })
   progress!: number;
 
