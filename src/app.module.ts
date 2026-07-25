@@ -53,9 +53,16 @@ import { validate } from './config/env.validation';
         const url = config.get<string>('DATABASE_URL');
         if (url) {
           // Postgres en prod (Railway). SSL désactivé sur le réseau privé
-          // Railway (`*.railway.internal`) ; sinon SSL sans vérif. de chaîne
-          // (certif managé Railway).
-          const isInternal = /\.railway\.internal/.test(url);
+          // Railway (`*.railway.internal`) et en local (loopback) ; sinon SSL
+          // sans vérif. de chaîne (certif managé Railway).
+          //
+          // Le cas loopback est indispensable pour développer sur un Postgres
+          // local : une installation standard n'active pas SSL, et forcer
+          // `ssl` faisait échouer la connexion avec « The server does not
+          // support SSL connections ». Le trafic ne quitte pas la machine.
+          const isInternal =
+            /\.railway\.internal/.test(url) ||
+            /@(localhost|127\.0\.0\.1|\[::1\])[:/]/.test(url);
           return {
             type: 'postgres' as const,
             url,
