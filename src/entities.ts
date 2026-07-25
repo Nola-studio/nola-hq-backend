@@ -11,6 +11,9 @@ import { LogEntry } from './logs/log.entity';
 import { ModuleOverride } from './modules/module-override.entity';
 import { MomoEntry } from './momo/momo-entry.entity';
 import { PipelineItem } from './pipeline/pipeline-item.entity';
+import { RoadmapInitiative } from './roadmap/roadmap-initiative.entity';
+import { RoadmapMilestone } from './roadmap/roadmap-milestone.entity';
+import { RoadmapObjective } from './roadmap/roadmap-objective.entity';
 import { TeamMember } from './team/team-member.entity';
 import { Tenant } from './tenants/tenant.entity';
 import { TenantCrm } from './tenants/tenant-crm.entity';
@@ -33,6 +36,9 @@ export const entities = [
   ModuleOverride,
   MomoEntry,
   PipelineItem,
+  RoadmapInitiative,
+  RoadmapMilestone,
+  RoadmapObjective,
   TeamMember,
   Tenant,
   TenantCrm,
