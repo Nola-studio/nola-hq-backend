@@ -11,6 +11,7 @@ import { LogEntry } from './logs/log.entity';
 import { ModuleOverride } from './modules/module-override.entity';
 import { MomoEntry } from './momo/momo-entry.entity';
 import { PipelineItem } from './pipeline/pipeline-item.entity';
+import { PushSubscription } from './push/push-subscription.entity';
 import { RoadmapInitiative } from './roadmap/roadmap-initiative.entity';
 import { RoadmapKeyResult } from './roadmap/roadmap-key-result.entity';
 import { RoadmapMilestone } from './roadmap/roadmap-milestone.entity';
@@ -43,6 +44,7 @@ export const entities = [
   RoadmapMilestone,
   RoadmapObjective,
   RoadmapTrajectoryPoint,
+  PushSubscription,
   TeamMember,
   Tenant,
   TenantCrm,

@@ -19,6 +19,11 @@ export class EnvironmentVariables {
   @IsOptional() @IsString() CORS_ORIGINS?: string;
   @IsOptional() @IsString() NODE_ENV?: string;
   @IsOptional() @IsString() PORT?: string;
+  // Web Push (PWA) — optionnels : sans clés VAPID le push est simplement
+  // désactivé (mode dégradé du PushService), rien d'autre n'en dépend.
+  @IsOptional() @IsString() VAPID_PUBLIC_KEY?: string;
+  @IsOptional() @IsString() VAPID_PRIVATE_KEY?: string;
+  @IsOptional() @IsString() VAPID_SUBJECT?: string;
 }
 
 /** base64 of 32 zero bytes — the dev placeholder that must never reach prod. */

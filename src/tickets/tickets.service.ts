@@ -7,6 +7,7 @@ import {
   CreateTicketDto,
 } from './dto/create-ticket.dto';
 import { PaginationDto, type PaginatedResult } from '../common/dto/pagination.dto';
+import { PushService } from '../push/push.service';
 
 export interface TicketsListQuery extends PaginationDto {
   tenant?: string;
@@ -19,6 +20,7 @@ export interface TicketsListQuery extends PaginationDto {
 export class TicketsService {
   constructor(
     @InjectRepository(Ticket) private readonly repo: Repository<Ticket>,
+    private readonly push: PushService,
   ) {}
 
   async list(query: TicketsListQuery): Promise<PaginatedResult<Ticket>> {
@@ -72,7 +74,16 @@ export class TicketsService {
       createdAt: now,
       updatedAt: now,
     });
-    return this.repo.save(ticket);
+    const saved = await this.repo.save(ticket);
+    // Fire-and-forget : une notif ratée ne doit jamais faire échouer la
+    // création du ticket (broadcast() avale et logge ses erreurs).
+    void this.push.broadcast({
+      title: `Nouveau ticket ${saved.priority} · ${saved.tenant}`,
+      body: saved.subject,
+      url: '/tickets',
+      tag: `ticket-${saved.id}`,
+    });
+    return saved;
   }
 
   async addReply(id: number, dto: AddReplyDto) {
