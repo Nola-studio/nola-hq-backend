@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { NolaSdkModule } from '@nola-hq/nola-sdk';
 import { AppsModule } from '../apps/apps.module';
+import { PushModule } from '../push/push.module';
 import { HealthController } from './health.controller';
 import { HealthService } from './health.service';
 import { IncidentAlertListener } from './incident-alert.listener';
@@ -16,7 +17,7 @@ import { IncidentAlertListener } from './incident-alert.listener';
  * stream.
  */
 @Module({
-  imports: [AppsModule, NolaSdkModule],
+  imports: [AppsModule, NolaSdkModule, PushModule],
   controllers: [HealthController],
   providers: [HealthService, IncidentAlertListener],
   exports: [HealthService],

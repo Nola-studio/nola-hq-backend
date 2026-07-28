@@ -30,6 +30,7 @@ import { AnalyticsModule } from './analytics/analytics.module';
 import { BroadcastModule } from './broadcast/broadcast.module';
 import { DirectoryModule } from './directory/directory.module';
 import { IamModule } from './iam/iam.module';
+import { PushModule } from './push/push.module';
 import { PlansModule } from './plans/plans.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { NotificationsModule } from './notifications/notifications.module';
@@ -115,6 +116,7 @@ import { validate } from './config/env.validation';
     BroadcastModule,
     DirectoryModule,
     IamModule,
+    PushModule,
     PlansModule,
     SubscriptionsModule,
     NotificationsModule,

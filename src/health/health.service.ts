@@ -8,6 +8,7 @@ import {
 import { EventBus } from '@nola-studio/sdk';
 import { NolaClientService } from '@nola-hq/nola-sdk';
 import { AppsService, type AppProjection } from '../apps/apps.service';
+import { PushService } from '../push/push.service';
 
 /* ─── public read model ─────────────────────────────────────── */
 
@@ -147,6 +148,7 @@ export class HealthService
   constructor(
     private readonly apps: AppsService,
     private readonly nolaClient: NolaClientService,
+    private readonly push: PushService,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -457,6 +459,14 @@ export class HealthService
       this.logger.warn(
         `[INCIDENT OPEN] ${app.id} → ${next} · sev=${severity}`,
       );
+      // Fire-and-forget — même contrat que côté tickets : l'alerte push
+      // ne participe jamais au chemin critique de la projection santé.
+      void this.push.broadcast({
+        title: `Incident ${severity} · ${app.name}`,
+        body: incident.reason,
+        url: '/health',
+        tag: `incident-${app.id}`,
+      });
       if (persist && this.eventBus) {
         await this.eventBus.emit<HealthIncident>(
           `nola.events.nola.health.incident.${app.id}`,
