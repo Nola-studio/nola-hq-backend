@@ -30,8 +30,9 @@ export interface NolaConfig {
   natsTlsCert?: string;
   natsTlsKey?: string;
   bootstrap?: {
-    bootstrapUser: string;
-    bootstrapPass: string;
+    /** Legacy/pre-cutover shared bootstrap creds — omitted when natsCreds is set. */
+    bootstrapUser?: string;
+    bootstrapPass?: string;
     bootstrapSecret: string;
     realm: string;
     displayName?: string;

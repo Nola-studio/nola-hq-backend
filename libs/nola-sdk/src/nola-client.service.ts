@@ -217,18 +217,28 @@ export class NolaClientService implements OnModuleInit, OnModuleDestroy {
       natsUrl: this.config.natsUrl,
       bootstrap: this.config.bootstrap,
       // kind forwarding: see TODO in connectAsync().
+      // Post-cutover: announce over HQ's OWN dedicated creds (its account
+      // imports nola.bootstrap.announce), so no shared bootstrap password is
+      // needed. Pre-cutover these are undefined and the SDK falls back to the
+      // shared bootstrap user/pass. TLS flows through the same options.
+      natsCreds: this.config.natsCreds,
+      natsTlsCa: this.config.natsTlsCa,
+      natsTlsCert: this.config.natsTlsCert,
+      natsTlsKey: this.config.natsTlsKey,
     });
     this.logger.log(
       `Bootstrap (Phase 1) attempt #${this.bootstrapAttempts} with realm ` +
-        `"${this.config.bootstrap!.realm}" using bootstrap creds`,
+        `"${this.config.bootstrap!.realm}" using ${
+          this.config.natsCreds ? 'dedicated creds' : 'shared bootstrap creds'
+        }`,
     );
     try {
       await bootstrapClient.start();
     } catch (err) {
-      // The SDK's tail connectDirect() always throws when we use bootstrap-only
-      // creds (no nola.> publish perm) — that's expected and the registration
-      // result is still populated from the announce. Other errors (NATS auth,
-      // Keycloak admin auth) leave registrationResult empty and are real.
+      // With shared bootstrap creds the SDK's tail connectDirect() throws (no
+      // nola.> publish perm) — expected; the announce still populated the
+      // registration. With dedicated creds that tail succeeds. Either way, real
+      // errors (NATS auth, Keycloak admin auth) leave registrationResult empty.
       this.lastBootstrapError = err instanceof Error ? err.message : String(err);
     }
     const reg = bootstrapClient.registrationResult ?? null;

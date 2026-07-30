@@ -51,7 +51,10 @@ export class HqConfigService {
     const user = this.config.get<string>('NOLA_BOOTSTRAP_USER');
     const pass = this.config.get<string>('NOLA_BOOTSTRAP_PASS');
     const secret = this.config.get<string>('NOLA_BOOTSTRAP_SECRET');
-    if (!user || !pass || !secret) return undefined;
+    // Secret is always required (nola-auth validates it in the announce).
+    // Post-cutover the shared user/pass are gone — the announce authenticates
+    // over HQ's dedicated natsCreds — so only the secret is mandatory here.
+    if (!secret) return undefined;
     return {
       bootstrapUser: user,
       bootstrapPass: pass,
