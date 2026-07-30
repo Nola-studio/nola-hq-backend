@@ -29,6 +29,11 @@ export class HqConfigService {
         this.config.get<string>('NATS_URL') ?? 'nats://localhost:4222',
       natsUser: this.config.get<string>('NATS_USER') || undefined,
       natsPass: this.config.get<string>('NATS_PASS') || undefined,
+      // Decentralized auth + TLS (Phase 3 prep, additive/dormant until set).
+      natsCreds: this.config.get<string>('NATS_CREDS') || undefined,
+      natsTlsCa: this.config.get<string>('NATS_TLS_CA') || undefined,
+      natsTlsCert: this.config.get<string>('NATS_TLS_CERT') || undefined,
+      natsTlsKey: this.config.get<string>('NATS_TLS_KEY') || undefined,
       authIssuer:
         this.config.get<string>('NOLA_AUTH_ISSUER') || undefined,
       authAudience: manifest.id,
