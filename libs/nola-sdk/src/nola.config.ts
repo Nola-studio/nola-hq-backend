@@ -20,6 +20,15 @@ export interface NolaConfig {
    */
   natsUser?: string;
   natsPass?: string;
+  /**
+   * Decentralized-auth credentials (.creds = user JWT + NKey seed). When set,
+   * used INSTEAD of natsUser/natsPass. natsTlsCa enables verified TLS;
+   * + natsTlsCert/natsTlsKey for mutual TLS. Additive (Phase 3 prep).
+   */
+  natsCreds?: string;
+  natsTlsCa?: string;
+  natsTlsCert?: string;
+  natsTlsKey?: string;
   bootstrap?: {
     bootstrapUser: string;
     bootstrapPass: string;

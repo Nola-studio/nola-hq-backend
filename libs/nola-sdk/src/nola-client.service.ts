@@ -70,7 +70,12 @@ export class NolaClientService implements OnModuleInit, OnModuleDestroy {
    *   - dedicated only       (no bootstrap): one connection, no OIDC creds
    */
   private async connectAsync(): Promise<void> {
-    const hasDedicated = Boolean(this.config.natsUser && this.config.natsPass);
+    // Dedicated = has its own runtime creds (user/pass OR decentralized .creds)
+    // → connect directly. natsCreds alone must count as dedicated so a
+    // creds-only (post-cutover) config doesn't fall through to bootstrap.
+    const hasDedicated = Boolean(
+      (this.config.natsUser && this.config.natsPass) || this.config.natsCreds,
+    );
     const hasBootstrap = Boolean(this.config.bootstrap);
 
     // ─── Phase 1 — bootstrap-only handshake (with retry) ─────────────
@@ -107,6 +112,11 @@ export class NolaClientService implements OnModuleInit, OnModuleDestroy {
       serviceVersion: this.config.serviceVersion,
       kind: this.config.kind,
       natsUrl: this.config.natsUrl,
+      // Decentralized auth + TLS (Phase 3 prep, additive/dormant until set).
+      natsCreds: this.config.natsCreds,
+      natsTlsCa: this.config.natsTlsCa,
+      natsTlsCert: this.config.natsTlsCert,
+      natsTlsKey: this.config.natsTlsKey,
       // Always carry the manifest into the runtime client — the registry
       // projection on the HQ side wants it on every `register` event,
       // and after Phase-1 the SDK drops the bootstrap block so the
@@ -115,11 +125,14 @@ export class NolaClientService implements OnModuleInit, OnModuleDestroy {
     };
 
     if (hasDedicated) {
-      options.natsUser = this.config.natsUser;
-      options.natsPass = this.config.natsPass;
-      this.logger.log(
-        `Runtime (Phase 2) connecting as user="${this.config.natsUser}" via ${this.config.natsUrl}`,
-      );
+      // natsCreds (decentralized) already set on `options` and wins in the SDK;
+      // only carry user/pass when actually present (legacy path).
+      if (this.config.natsUser && this.config.natsPass) {
+        options.natsUser = this.config.natsUser;
+        options.natsPass = this.config.natsPass;
+      }
+      const how = this.config.natsCreds ? 'creds (JWT/NKey)' : `user="${this.config.natsUser}"`;
+      this.logger.log(`Runtime (Phase 2) connecting via ${how} @ ${this.config.natsUrl}`);
     } else if (hasBootstrap) {
       // No dedicated creds — fall back to bootstrap creds for everything
       // (legacy single-phase path).
