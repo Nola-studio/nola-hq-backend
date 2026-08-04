@@ -11,6 +11,8 @@ import { StudioExpensesService } from './studio-expenses.service';
 import { StudioExpensesController } from './studio-expenses.controller';
 import { StudioDashboardService } from './studio-dashboard.service';
 import { StudioDashboardController } from './studio-dashboard.controller';
+import { StudioMeetingsService } from './studio-meetings.service';
+import { StudioMeetingsController } from './studio-meetings.controller';
 
 @Module({
   imports: [
@@ -21,8 +23,25 @@ import { StudioDashboardController } from './studio-dashboard.controller';
       StudioExpense,
     ]),
   ],
-  controllers: [StudioTasksController, StudioExpensesController, StudioDashboardController],
-  providers: [StudioService, StudioTasksService, StudioExpensesService, StudioDashboardService],
-  exports: [StudioService, StudioTasksService, StudioExpensesService, StudioDashboardService],
+  controllers: [
+    StudioTasksController,
+    StudioExpensesController,
+    StudioDashboardController,
+    StudioMeetingsController,
+  ],
+  providers: [
+    StudioService,
+    StudioTasksService,
+    StudioExpensesService,
+    StudioDashboardService,
+    StudioMeetingsService,
+  ],
+  exports: [
+    StudioService,
+    StudioTasksService,
+    StudioExpensesService,
+    StudioDashboardService,
+    StudioMeetingsService,
+  ],
 })
 export class StudioModule {}
