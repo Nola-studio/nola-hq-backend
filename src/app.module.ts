@@ -38,6 +38,7 @@ import { KelasiProxyModule } from './kelasi-proxy/kelasi-proxy.module';
 import { AssistModule } from './assist/assist.module';
 import { ModulesModule } from './modules/modules.module';
 import { RoadmapModule } from './roadmap/roadmap.module';
+import { WorkItemsModule } from './work-items/work-items.module';
 
 import { entities } from './entities';
 import { validate } from './config/env.validation';
@@ -124,6 +125,7 @@ import { validate } from './config/env.validation';
     AssistModule,
     ModulesModule,
     RoadmapModule,
+    WorkItemsModule,
   ],
   // Guards globaux dans l'ordre de chaîne :
   //   1. JwtAuthGuard — hydrate `req.user` depuis la session.

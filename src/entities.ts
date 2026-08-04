@@ -21,6 +21,10 @@ import { TeamMember } from './team/team-member.entity';
 import { Tenant } from './tenants/tenant.entity';
 import { TenantCrm } from './tenants/tenant-crm.entity';
 import { Ticket } from './tickets/ticket.entity';
+import { WorkItem } from './work-items/work-item.entity';
+import { WorkItemComment } from './work-items/work-item-comment.entity';
+import { WorkItemEvent } from './work-items/work-item-event.entity';
+import { WorkItemSubtask } from './work-items/work-item-subtask.entity';
 
 // Le registry des apps n'a PAS de table — c'est une projection in-memory
 // reconstruite à partir du JetStream NOLA_REGISTRY (cf. AppsService).
@@ -49,4 +53,8 @@ export const entities = [
   Tenant,
   TenantCrm,
   Ticket,
+  WorkItem,
+  WorkItemComment,
+  WorkItemEvent,
+  WorkItemSubtask,
 ];
