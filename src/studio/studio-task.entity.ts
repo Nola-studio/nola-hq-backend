@@ -98,4 +98,11 @@ export class StudioTask {
   /** Rank inside the `status` kanban column (0-based, dense). */
   @Column({ type: 'integer', default: 0 })
   position!: number;
+
+  @Column({ type: 'numeric', precision: 8, scale: 2, name: 'hours_spent', nullable: true })
+  hoursSpent!: string | null;
+
+  /** 0-100. */
+  @Column({ type: 'integer', name: 'progress_percent', nullable: true })
+  progressPercent!: number | null;
 }

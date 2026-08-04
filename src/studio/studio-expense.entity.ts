@@ -9,6 +9,7 @@ export type StudioExpenseCategory =
   | 'travel'
   | 'other';
 export type StudioExpenseFrequency = 'monthly' | 'yearly' | 'one_time';
+export type StudioExpenseStatus = 'paid' | 'void';
 
 /**
  * An internal team expense. Amounts are stored as integer cents; totals are
@@ -46,6 +47,20 @@ export class StudioExpense {
 
   @Column({ type: 'varchar', nullable: true })
   frequency!: StudioExpenseFrequency | null;
+
+  @Column({ type: 'varchar', nullable: true, default: 'paid' })
+  status!: StudioExpenseStatus | null;
+
+  /** e.g. `NolaaStudio-prod (Railway)`, `Namecheap (Greg)`. */
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  workspace!: string | null;
+
+  @Column({ type: 'varchar', length: 160, name: 'billing_email', nullable: true })
+  billingEmail!: string | null;
+
+  /** e.g. `Card ending 1090` — free text, never a raw card number. */
+  @Column({ type: 'varchar', length: 120, name: 'payment_method', nullable: true })
+  paymentMethod!: string | null;
 
   @Column({ name: 'created_at' })
   createdAt!: Date;

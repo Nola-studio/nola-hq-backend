@@ -4,6 +4,8 @@ import { StudioProject } from './studio-project.entity';
 import { StudioTask } from './studio-task.entity';
 import { StudioMeeting } from './studio-meeting.entity';
 import { StudioExpense } from './studio-expense.entity';
+import { StudioDomain } from './studio-domain.entity';
+import { StudioRecurring } from './studio-recurring.entity';
 import { StudioNotificationDedup } from './studio-notification-dedup.entity';
 import { TeamMember } from '../team/team-member.entity';
 import { StudioService } from './studio.service';
@@ -25,6 +27,8 @@ import { StudioDueSoonScheduler } from './studio-due-soon.scheduler';
       StudioTask,
       StudioMeeting,
       StudioExpense,
+      StudioDomain,
+      StudioRecurring,
       StudioNotificationDedup,
       TeamMember,
     ]),
