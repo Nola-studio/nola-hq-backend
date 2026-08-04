@@ -7,6 +7,7 @@ import {
   Patch,
   Post,
   Query,
+  Delete,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, type AuthenticatedUser } from '../common/auth/current-user.decorator';
@@ -21,13 +22,18 @@ import {
   AddWorkItemSubtaskDto,
   UpdateWorkItemSubtaskDto,
 } from './dto/work-item.dto';
+import { AddWorkItemDependencyDto } from './dto/work-planning.dto';
 import { WorkItemsService } from './work-items.service';
+import { WorkPlanningService } from './work-planning.service';
 
 @ApiBearerAuth()
 @ApiTags('work-items')
 @Controller('work-items')
 export class WorkItemsController {
-  constructor(private readonly svc: WorkItemsService) {}
+  constructor(
+    private readonly svc: WorkItemsService,
+    private readonly planning: WorkPlanningService,
+  ) {}
 
   @Get()
   list(@Query() query: ListWorkItemsDto) {
@@ -98,6 +104,22 @@ export class WorkItemsController {
     @CurrentUser() user?: AuthenticatedUser,
   ) {
     return this.svc.updateSubtask(id, dto, actor(user));
+  }
+
+  @Post(':id/dependencies')
+  @HqRoles(HqRole.Operator)
+  addDependency(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: AddWorkItemDependencyDto,
+    @CurrentUser() user?: AuthenticatedUser,
+  ) {
+    return this.planning.addDependency(id, dto.dependsOnId, actor(user));
+  }
+
+  @Delete('dependencies/:id')
+  @HqRoles(HqRole.Operator)
+  removeDependency(@Param('id') id: string, @CurrentUser() user?: AuthenticatedUser) {
+    return this.planning.removeDependency(id, actor(user));
   }
 }
 

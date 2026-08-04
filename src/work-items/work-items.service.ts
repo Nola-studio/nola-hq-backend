@@ -8,6 +8,7 @@ import { PushService } from '../push/push.service';
 import { WorkItemComment } from './work-item-comment.entity';
 import { WorkItemEvent, type WorkItemEventAction } from './work-item-event.entity';
 import { WorkItemSubtask } from './work-item-subtask.entity';
+import { WorkPlanningService } from './work-planning.service';
 import {
   WORK_ITEM_STATUSES,
   WorkItem,
@@ -56,6 +57,7 @@ export class WorkItemsService {
     @InjectRepository(TeamMember)
     private readonly team: Repository<TeamMember>,
     private readonly push: PushService,
+    private readonly planning: WorkPlanningService,
   ) {}
 
   async list(query: ListWorkItemsDto): Promise<PaginatedResult<WorkItem>> {
@@ -63,6 +65,7 @@ export class WorkItemsService {
     const limit = query.limit ?? 100;
     const qb = this.repo.createQueryBuilder('w');
     if (query.projectId) qb.andWhere('w.projectId = :projectId', { projectId: query.projectId });
+    if (query.sprintId) qb.andWhere('w.sprintId = :sprintId', { sprintId: query.sprintId });
     if (query.status) qb.andWhere('w.status = :status', { status: query.status });
     if (query.priority) qb.andWhere('w.priority = :priority', { priority: query.priority });
     if (query.type) qb.andWhere('w.type = :type', { type: query.type });
@@ -96,12 +99,13 @@ export class WorkItemsService {
 
   async findDetail(id: number) {
     const item = await this.findOne(id);
-    const [comments, subtasks, history] = await Promise.all([
+    const [comments, subtasks, history, dependencies] = await Promise.all([
       this.comments.find({ where: { workItemId: id }, order: { createdAt: 'ASC' } }),
       this.subtasks.find({ where: { workItemId: id }, order: { position: 'ASC' } }),
       this.events.find({ where: { workItemId: id }, order: { createdAt: 'DESC' }, take: 100 }),
+      this.planning.dependenciesFor(id),
     ]);
-    return { ...item, comments, subtasks, history };
+    return { ...item, comments, subtasks, history, dependencies };
   }
 
   private async findProject(id: string) {
@@ -117,6 +121,7 @@ export class WorkItemsService {
 
   async create(dto: CreateWorkItemDto, reporter: string) {
     const project = await this.findProject(dto.projectId);
+    if (dto.sprintId) await this.planning.assertSprint(dto.sprintId, project.id);
     const position = await this.repo.count({ where: { status: dto.status ?? 'backlog' } });
     const now = new Date();
     let item = this.repo.create({
@@ -131,6 +136,8 @@ export class WorkItemsService {
       assignee: dto.assignee || null,
       dueDate: dto.dueDate ?? null,
       blockedReason: dto.blockedReason?.trim() || null,
+      sprintId: dto.sprintId ?? null,
+      estimatePoints: dto.estimatePoints ?? 0,
       position,
       createdAt: now,
       updatedAt: now,
@@ -154,6 +161,9 @@ export class WorkItemsService {
     if (dto.projectId && dto.projectId !== item.projectId) {
       await this.findProject(dto.projectId);
     }
+    const nextProjectId = dto.projectId ?? item.projectId;
+    const nextSprintId = dto.sprintId === undefined ? item.sprintId : dto.sprintId;
+    if (nextProjectId && nextSprintId) await this.planning.assertSprint(nextSprintId, nextProjectId);
     const changes: Record<string, { from: unknown; to: unknown }> = {};
     const current = item as unknown as Record<string, unknown>;
     for (const [key, value] of Object.entries(dto)) {

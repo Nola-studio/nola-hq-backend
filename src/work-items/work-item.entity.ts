@@ -7,6 +7,7 @@ import {
   PrimaryGeneratedColumn,
 } from 'typeorm';
 import { RoadmapInitiative } from '../roadmap/roadmap-initiative.entity';
+import { WorkSprint } from './work-sprint.entity';
 
 export const WORK_ITEM_TYPES = ['bug', 'feature', 'task', 'ops', 'debt'] as const;
 export type WorkItemType = (typeof WORK_ITEM_TYPES)[number];
@@ -46,6 +47,14 @@ export class WorkItem {
   @JoinColumn({ name: 'project_id' })
   project?: RoadmapInitiative | null;
 
+  @Column({ type: 'uuid', name: 'sprint_id', nullable: true })
+  @Index()
+  sprintId!: string | null;
+
+  @ManyToOne(() => WorkSprint, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'sprint_id' })
+  sprint?: WorkSprint | null;
+
   @Column({ type: 'varchar', length: 200 })
   title!: string;
 
@@ -80,6 +89,9 @@ export class WorkItem {
 
   @Column({ type: 'integer', default: 0 })
   position!: number;
+
+  @Column({ type: 'integer', name: 'estimate_points', default: 0 })
+  estimatePoints!: number;
 
   @Column({ name: 'created_at' })
   createdAt!: Date;

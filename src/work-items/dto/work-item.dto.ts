@@ -25,6 +25,7 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 export class ListWorkItemsDto extends PaginationDto {
   @IsOptional() @IsUUID() projectId?: string;
+  @IsOptional() @IsUUID() sprintId?: string;
   @IsOptional() @IsIn(WORK_ITEM_STATUSES as unknown as string[])
   status?: WorkItemStatus;
   @IsOptional() @IsIn(WORK_ITEM_PRIORITIES as unknown as string[])
@@ -47,6 +48,8 @@ export class CreateWorkItemDto {
   @IsOptional() @IsString() @MaxLength(160) assignee?: string;
   @IsOptional() @Matches(DATE_PATTERN) dueDate?: string;
   @IsOptional() @IsString() @MaxLength(2_000) blockedReason?: string;
+  @IsOptional() @IsUUID() sprintId?: string;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(0) @Max(100) estimatePoints?: number;
 }
 
 export class UpdateWorkItemDto {
@@ -60,6 +63,8 @@ export class UpdateWorkItemDto {
   @IsOptional() @IsString() @MaxLength(160) assignee?: string | null;
   @IsOptional() @Matches(DATE_PATTERN) dueDate?: string | null;
   @IsOptional() @IsString() @MaxLength(2_000) blockedReason?: string | null;
+  @IsOptional() @IsUUID() sprintId?: string | null;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(0) @Max(100) estimatePoints?: number;
 }
 
 export class MoveWorkItemDto {

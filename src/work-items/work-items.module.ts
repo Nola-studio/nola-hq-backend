@@ -7,6 +7,11 @@ import { WorkItem } from './work-item.entity';
 import { WorkItemComment } from './work-item-comment.entity';
 import { WorkItemEvent } from './work-item-event.entity';
 import { WorkItemSubtask } from './work-item-subtask.entity';
+import { WorkSprint } from './work-sprint.entity';
+import { WorkItemDependency } from './work-item-dependency.entity';
+import { ProjectRisk } from './project-risk.entity';
+import { WorkPlanningService } from './work-planning.service';
+import { WorkPlanningController } from './work-planning.controller';
 import { WorkItemsController } from './work-items.controller';
 import { WorkItemsService } from './work-items.service';
 
@@ -19,11 +24,14 @@ import { WorkItemsService } from './work-items.service';
       WorkItemSubtask,
       RoadmapInitiative,
       TeamMember,
+      WorkSprint,
+      WorkItemDependency,
+      ProjectRisk,
     ]),
     PushModule,
   ],
-  controllers: [WorkItemsController],
-  providers: [WorkItemsService],
-  exports: [WorkItemsService],
+  controllers: [WorkItemsController, WorkPlanningController],
+  providers: [WorkItemsService, WorkPlanningService],
+  exports: [WorkItemsService, WorkPlanningService],
 })
 export class WorkItemsModule {}
