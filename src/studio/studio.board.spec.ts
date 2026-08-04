@@ -13,7 +13,7 @@ function sorted(placements: ReturnType<typeof planMove>) {
 }
 
 describe('buildBoard', () => {
-  test('always returns the five columns, in display order, with a label', () => {
+  test('always returns the six columns, in display order, with a label', () => {
     const columns = buildBoard([]);
     expect(columns.map((c) => c.id)).toEqual(TASK_STATUSES);
     expect(columns.map((c) => c.label)).toEqual(TASK_STATUSES.map((s) => STATUS_LABELS[s]));
@@ -26,11 +26,13 @@ describe('buildBoard', () => {
       card('b', 'in_progress', 0),
       card('c', 'backlog', 0),
       card('d', 'done', 0),
+      card('e', 'blocked', 0),
     ]);
     const byId = Object.fromEntries(columns.map((c) => [c.id, c.items.map((i) => i.id)]));
     expect(byId.backlog).toEqual(['c', 'a']);
     expect(byId.this_quarter).toEqual([]);
     expect(byId.in_progress).toEqual(['b']);
+    expect(byId.blocked).toEqual(['e']);
     expect(byId.in_review).toEqual([]);
     expect(byId.done).toEqual(['d']);
   });

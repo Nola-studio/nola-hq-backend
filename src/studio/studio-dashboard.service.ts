@@ -3,6 +3,13 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { MoreThanOrEqual, Repository } from 'typeorm';
 import { StudioTask } from './studio-task.entity';
 import { StudioExpense } from './studio-expense.entity';
+import {
+  tasksByStatus,
+  openTasksByAssignee,
+  countBlocked,
+  countHighPriorityOpen,
+  donePercent,
+} from './studio.dashboard-agg';
 
 /**
  * All the numbers `ScreenStudio`'s Dashboard tab needs, in one round trip.
@@ -44,12 +51,17 @@ export interface StudioDashboard {
   kpis: {
     tasksInProgress: number;
     tasksLate: number;
+    tasksBlocked: number;
+    tasksHighPriorityOpen: number;
+    tasksDonePercent: number;
     expensesThisMonth: { currency: string; amountCents: number }[];
     nextDue: { identifier: string; title: string; dueDate: string } | null;
   };
   expensesByCategoryCurrentQuarter: { category: string; currency: string; amountCents: number }[];
   expensesMonthly: { month: string; currency: string; amountCents: number }[];
   tasksByAssigneeStatus: { assigneeEmail: string | null; status: string; count: number }[];
+  tasksByStatus: { status: string; count: number }[];
+  tasksOpenByAssignee: { assigneeEmail: string | null; count: number }[];
   upcomingDeadlines: {
     id: string;
     identifier: string;
@@ -128,6 +140,10 @@ export class StudioDashboardService {
       })
       .sort((a, b) => a.month.localeCompare(b.month));
 
+    // ── Tasks by status / open workload by assignee ──────────────
+    const tasksByStatusResult = tasksByStatus(allTasks);
+    const tasksOpenByAssignee = openTasksByAssignee(allTasks);
+
     // ── Tasks by assignee × status ───────────────────────────────
     const byAssigneeStatus = new Map<string, number>();
     for (const t of allTasks) {
@@ -165,6 +181,9 @@ export class StudioDashboardService {
       kpis: {
         tasksInProgress,
         tasksLate,
+        tasksBlocked: countBlocked(allTasks),
+        tasksHighPriorityOpen: countHighPriorityOpen(allTasks),
+        tasksDonePercent: donePercent(allTasks),
         expensesThisMonth: Array.from(expensesThisMonthByCurrency.entries()).map(([currency, amountCents]) => ({
           currency,
           amountCents,
@@ -174,6 +193,8 @@ export class StudioDashboardService {
       expensesByCategoryCurrentQuarter,
       expensesMonthly,
       tasksByAssigneeStatus,
+      tasksByStatus: tasksByStatusResult,
+      tasksOpenByAssignee,
       upcomingDeadlines,
       activityHeatmap,
     };

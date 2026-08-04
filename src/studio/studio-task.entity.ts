@@ -13,6 +13,7 @@ export type StudioTaskStatus =
   | 'backlog'
   | 'this_quarter'
   | 'in_progress'
+  | 'blocked'
   | 'in_review'
   | 'done';
 export type StudioTaskCategory =

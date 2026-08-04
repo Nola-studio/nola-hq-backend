@@ -21,7 +21,7 @@ import { HqRole } from '../common/auth/hq-role.enum';
 import { CurrentUser, type AuthenticatedUser } from '../common/auth/current-user.decorator';
 
 /**
- * Studio's internal task board: 5-column kanban filed under a fixed set of
+ * Studio's internal task board: 6-column kanban filed under a fixed set of
  * workstreams (`GET /studio/projects`). Same RBAC posture as Roadmap: reads
  * only need authentication, mutations need `hq:operator`.
  */

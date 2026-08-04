@@ -13,6 +13,7 @@ export const TASK_STATUSES: StudioTaskStatus[] = [
   'backlog',
   'this_quarter',
   'in_progress',
+  'blocked',
   'in_review',
   'done',
 ];
@@ -21,6 +22,7 @@ export const STATUS_LABELS: Record<StudioTaskStatus, string> = {
   backlog: 'Backlog',
   this_quarter: 'Ce trimestre',
   in_progress: 'En cours',
+  blocked: 'Bloqué',
   in_review: 'En review',
   done: 'Fait',
 };
@@ -46,7 +48,7 @@ export interface TaskPlacement {
 }
 
 /**
- * Groups tasks into the five kanban columns, each ordered by `position`
+ * Groups tasks into the six kanban columns, each ordered by `position`
  * (ties broken by id so the output is stable). Every column is always
  * present, even empty — the UI renders a fixed board.
  */
