@@ -17,10 +17,12 @@ import { RoadmapKeyResult } from './roadmap/roadmap-key-result.entity';
 import { RoadmapMilestone } from './roadmap/roadmap-milestone.entity';
 import { RoadmapObjective } from './roadmap/roadmap-objective.entity';
 import { RoadmapTrajectoryPoint } from './roadmap/roadmap-trajectory-point.entity';
+import { StudioDomain } from './studio/studio-domain.entity';
 import { StudioExpense } from './studio/studio-expense.entity';
 import { StudioMeeting } from './studio/studio-meeting.entity';
 import { StudioNotificationDedup } from './studio/studio-notification-dedup.entity';
 import { StudioProject } from './studio/studio-project.entity';
+import { StudioRecurring } from './studio/studio-recurring.entity';
 import { StudioTask } from './studio/studio-task.entity';
 import { TeamMember } from './team/team-member.entity';
 import { Tenant } from './tenants/tenant.entity';
@@ -50,10 +52,12 @@ export const entities = [
   RoadmapObjective,
   RoadmapTrajectoryPoint,
   PushSubscription,
+  StudioDomain,
   StudioExpense,
   StudioMeeting,
   StudioNotificationDedup,
   StudioProject,
+  StudioRecurring,
   StudioTask,
   TeamMember,
   Tenant,
