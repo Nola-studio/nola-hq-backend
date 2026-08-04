@@ -34,6 +34,10 @@ import { BusinessContract } from './business/business-contract.entity';
 import { ProjectBudget } from './business/project-budget.entity';
 import { BusinessExpense } from './business/business-expense.entity';
 import { BusinessInvoice } from './business/business-invoice.entity';
+import { BusinessQuote, BusinessQuoteLine } from './business/business-quote.entity';
+import { BusinessDocument } from './business/business-document.entity';
+import { BusinessReminder } from './business/business-reminder.entity';
+import { ProjectTimeEntry } from './business/project-time-entry.entity';
 
 // Le registry des apps n'a PAS de table — c'est une projection in-memory
 // reconstruite à partir du JetStream NOLA_REGISTRY (cf. AppsService).
@@ -75,4 +79,9 @@ export const entities = [
   ProjectBudget,
   BusinessExpense,
   BusinessInvoice,
+  BusinessQuote,
+  BusinessQuoteLine,
+  BusinessDocument,
+  BusinessReminder,
+  ProjectTimeEntry,
 ];
