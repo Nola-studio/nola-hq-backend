@@ -86,6 +86,8 @@ export class StudioTasksService {
       meetingId: dto.meetingId ?? null,
       createdByEmail,
       completedAt: status === 'done' ? now : null,
+      hoursSpent: dto.hoursSpent ?? null,
+      progressPercent: dto.progressPercent ?? null,
       // Lands at the bottom of its column — a new card never jumps the queue.
       position: dto.position ?? (await this.tasks.count({ where: { status } })),
       createdAt: now,
@@ -119,6 +121,8 @@ export class StudioTasksService {
     if (dto.priority !== undefined) task.priority = dto.priority;
     if (dto.meetingId !== undefined) task.meetingId = dto.meetingId ?? null;
     if (dto.position !== undefined) task.position = dto.position;
+    if (dto.hoursSpent !== undefined) task.hoursSpent = dto.hoursSpent;
+    if (dto.progressPercent !== undefined) task.progressPercent = dto.progressPercent;
     task.updatedAt = new Date();
 
     const saved = await this.tasks.save(task);

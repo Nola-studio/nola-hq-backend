@@ -13,6 +13,10 @@ import { StudioTasksService } from './studio-tasks.service';
 import { StudioTasksController } from './studio-tasks.controller';
 import { StudioExpensesService } from './studio-expenses.service';
 import { StudioExpensesController } from './studio-expenses.controller';
+import { StudioDomainsService } from './studio-domains.service';
+import { StudioDomainsController } from './studio-domains.controller';
+import { StudioRecurringService } from './studio-recurring.service';
+import { StudioRecurringController } from './studio-recurring.controller';
 import { StudioDashboardService } from './studio-dashboard.service';
 import { StudioDashboardController } from './studio-dashboard.controller';
 import { StudioMeetingsService } from './studio-meetings.service';
@@ -36,6 +40,8 @@ import { StudioDueSoonScheduler } from './studio-due-soon.scheduler';
   controllers: [
     StudioTasksController,
     StudioExpensesController,
+    StudioDomainsController,
+    StudioRecurringController,
     StudioDashboardController,
     StudioMeetingsController,
   ],
@@ -43,6 +49,8 @@ import { StudioDueSoonScheduler } from './studio-due-soon.scheduler';
     StudioService,
     StudioTasksService,
     StudioExpensesService,
+    StudioDomainsService,
+    StudioRecurringService,
     StudioDashboardService,
     StudioMeetingsService,
     StudioNotifyService,
@@ -52,6 +60,8 @@ import { StudioDueSoonScheduler } from './studio-due-soon.scheduler';
     StudioService,
     StudioTasksService,
     StudioExpensesService,
+    StudioDomainsService,
+    StudioRecurringService,
     StudioDashboardService,
     StudioMeetingsService,
   ],

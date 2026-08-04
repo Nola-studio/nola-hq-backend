@@ -52,6 +52,14 @@ export class StudioService {
           color: dto.color,
           ownerEmail: dto.ownerEmail ?? null,
           status: 'active',
+          type: dto.type ?? null,
+          priority: dto.priority ?? null,
+          healthStatus: dto.healthStatus ?? null,
+          budget: dto.budget ?? null,
+          cost: dto.cost ?? null,
+          startDate: dto.startDate ?? null,
+          dueDate: dto.dueDate ?? null,
+          leadAssigneeEmail: dto.leadAssigneeEmail ?? null,
           createdAt: new Date(),
         }),
       );
@@ -68,6 +76,14 @@ export class StudioService {
     if (dto.description !== undefined) project.description = dto.description ?? null;
     if (dto.color !== undefined) project.color = dto.color;
     if (dto.ownerEmail !== undefined) project.ownerEmail = dto.ownerEmail ?? null;
+    if (dto.type !== undefined) project.type = dto.type;
+    if (dto.priority !== undefined) project.priority = dto.priority;
+    if (dto.healthStatus !== undefined) project.healthStatus = dto.healthStatus;
+    if (dto.budget !== undefined) project.budget = dto.budget;
+    if (dto.cost !== undefined) project.cost = dto.cost;
+    if (dto.startDate !== undefined) project.startDate = dto.startDate;
+    if (dto.dueDate !== undefined) project.dueDate = dto.dueDate;
+    if (dto.leadAssigneeEmail !== undefined) project.leadAssigneeEmail = dto.leadAssigneeEmail;
     return this.projects.save(project);
   }
 

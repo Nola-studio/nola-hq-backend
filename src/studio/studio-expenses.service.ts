@@ -40,6 +40,10 @@ export class StudioExpensesService {
       date: dto.date,
       recurring: dto.recurring ?? false,
       frequency: dto.frequency ?? null,
+      status: dto.status ?? 'paid',
+      workspace: dto.workspace ?? null,
+      billingEmail: dto.billingEmail ?? null,
+      paymentMethod: dto.paymentMethod ?? null,
       createdAt: new Date(),
     });
     return this.expenses.save(expense);
@@ -55,6 +59,10 @@ export class StudioExpensesService {
     if (dto.date !== undefined) expense.date = dto.date;
     if (dto.recurring !== undefined) expense.recurring = dto.recurring;
     if (dto.frequency !== undefined) expense.frequency = dto.frequency;
+    if (dto.status !== undefined) expense.status = dto.status;
+    if (dto.workspace !== undefined) expense.workspace = dto.workspace;
+    if (dto.billingEmail !== undefined) expense.billingEmail = dto.billingEmail;
+    if (dto.paymentMethod !== undefined) expense.paymentMethod = dto.paymentMethod;
     return this.expenses.save(expense);
   }
 

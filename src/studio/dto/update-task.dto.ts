@@ -2,10 +2,12 @@ import {
   IsEmail,
   IsIn,
   IsInt,
+  IsNumberString,
   IsOptional,
   IsString,
   IsUUID,
   Matches,
+  Max,
   MaxLength,
   Min,
   MinLength,
@@ -35,4 +37,6 @@ export class UpdateTaskDto {
   @IsOptional() @IsIn(TASK_PRIORITIES as unknown as string[]) priority?: StudioTaskPriority;
   @IsOptional() @IsUUID() meetingId?: string | null;
   @IsOptional() @IsInt() @Min(0) position?: number;
+  @IsOptional() @IsNumberString() hoursSpent?: string | null;
+  @IsOptional() @IsInt() @Min(0) @Max(100) progressPercent?: number | null;
 }
