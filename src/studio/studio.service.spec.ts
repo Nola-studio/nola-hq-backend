@@ -1,116 +1,136 @@
 import { test, expect, describe, mock } from 'bun:test';
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { StudioService } from './studio.service';
 
-interface Row {
+interface ProjectRow {
   id: string;
   name: string;
   key: string;
-  status: string;
+  description: string | null;
+  status: 'active' | 'archived';
+  color: string;
+  ownerEmail: string | null;
   createdAt: Date;
 }
 
-function makeProjectsRepo(rows: Row[] = [], opts: { failKeys?: string[] } = {}) {
+function makeProjectsRepo(rows: ProjectRow[] = []) {
   let seq = 0;
   return {
-    insert: mock(async (entity: any) => {
-      if (rows.some((r) => r.key === entity.key) || opts.failKeys?.includes(entity.key)) {
-        const err = new Error(`duplicate key value violates unique constraint "UQ_studio_projects_key"`) as any;
-        err.code = '23505';
-        throw err;
-      }
-      rows.push({ id: `p${++seq}`, ...entity });
-    }),
     create: mock((x: unknown) => x),
     save: mock(async (entity: any) => {
-      if (rows.some((r) => r.key === entity.key)) {
-        const err = new Error(`duplicate key value violates unique constraint "UQ_studio_projects_key"`) as any;
-        err.code = '23505';
-        throw err;
+      if (!entity.id) {
+        if (rows.some((r) => r.key === entity.key)) {
+          const err = new Error('duplicate key value violates unique constraint') as any;
+          err.code = '23505';
+          throw err;
+        }
+        const saved = { id: `p${++seq}`, ...entity };
+        rows.push(saved);
+        return saved;
       }
-      const saved = { id: `p${++seq}`, ...entity };
-      rows.push(saved);
-      return saved;
+      const idx = rows.findIndex((r) => r.id === entity.id);
+      rows[idx] = entity;
+      return entity;
     }),
-    findOne: mock(async ({ where }: any) => rows.find((r) => r.key === where.key) ?? null),
+    findOne: mock(async ({ where }: any) => {
+      if (where.id) return rows.find((r) => r.id === where.id) ?? null;
+      if (where.key) return rows.find((r) => r.key === where.key) ?? null;
+      return null;
+    }),
     find: mock(async () => [...rows].sort((a, b) => a.key.localeCompare(b.key))),
   } as any;
 }
 
-describe('StudioService.onModuleInit', () => {
-  test('seeds the three default projects on an empty table', async () => {
-    const repo = makeProjectsRepo([]);
-    const svc = new StudioService(repo);
-    await svc.onModuleInit();
-    expect(repo.insert.mock.calls.length).toBe(3);
-    const keys = (await svc.listProjects()).map((p: any) => p.key).sort();
-    expect(keys).toEqual(['NOLA', 'STU', 'YEK']);
-  });
+function makeTasksRepo(openCountByProject: Record<string, number> = {}) {
+  return {
+    count: mock(async ({ where }: any) => openCountByProject[where.projectId] ?? 0),
+  } as any;
+}
 
-  test('is a no-op (does not throw) when all three already exist', async () => {
-    const repo = makeProjectsRepo([
-      { id: 'p1', name: 'Yeko', key: 'YEK', status: 'active', createdAt: new Date() },
-      { id: 'p2', name: 'Nola', key: 'NOLA', status: 'active', createdAt: new Date() },
-      { id: 'p3', name: 'Studio', key: 'STU', status: 'active', createdAt: new Date() },
-    ]);
-    const svc = new StudioService(repo);
-    await expect(svc.onModuleInit()).resolves.toBeUndefined();
-    expect(await svc.listProjects()).toHaveLength(3);
-  });
-
-  test('a partial seed (simulating a lost race on one key) still inserts the others', async () => {
-    // Only YEK already exists — NOLA/STU should still land, not be skipped
-    // just because the bulk-insert-style old implementation would have
-    // aborted the whole statement on the first conflict.
-    const repo = makeProjectsRepo([
-      { id: 'p1', name: 'Yeko', key: 'YEK', status: 'active', createdAt: new Date() },
-    ]);
-    const svc = new StudioService(repo);
-    await svc.onModuleInit();
-    const keys = (await svc.listProjects()).map((p: any) => p.key).sort();
-    expect(keys).toEqual(['NOLA', 'STU', 'YEK']);
-  });
-
-  test('a non-conflict error from insert still propagates', async () => {
-    const repo = makeProjectsRepo([]);
-    repo.insert = mock(async () => {
-      throw new Error('connection refused');
-    });
-    const svc = new StudioService(repo);
-    await expect(svc.onModuleInit()).rejects.toThrow('connection refused');
-  });
-});
+const baseInput = { key: 'ACME', name: 'Acme', color: '#4F46E5' };
 
 describe('StudioService.createProject', () => {
-  test('creates a project with a normalized key', async () => {
+  test('creates a project with a normalized key and no seed side effects', async () => {
     const repo = makeProjectsRepo([]);
-    const svc = new StudioService(repo);
-    const created = await svc.createProject({ key: 'ACME', name: 'Acme' } as any);
-    expect(created).toMatchObject({ key: 'ACME', name: 'Acme', status: 'active' });
+    const svc = new StudioService(repo, makeTasksRepo());
+    const created = await svc.createProject(baseInput as any);
+    expect(created).toMatchObject({ key: 'ACME', name: 'Acme', status: 'active', color: '#4F46E5' });
+    expect(await svc.listProjects()).toHaveLength(1);
   });
 
   test('rejects a duplicate key with a friendly conflict', async () => {
     const repo = makeProjectsRepo([
-      { id: 'p1', name: 'Yeko', key: 'YEK', status: 'active', createdAt: new Date() },
+      { id: 'p1', name: 'Yeko', key: 'YEK', description: null, status: 'active', color: '#000', ownerEmail: null, createdAt: new Date() },
     ]);
-    const svc = new StudioService(repo);
-    await expect(svc.createProject({ key: 'YEK', name: 'Yeko 2' } as any)).rejects.toBeInstanceOf(
+    const svc = new StudioService(repo, makeTasksRepo());
+    await expect(svc.createProject({ ...baseInput, key: 'YEK' } as any)).rejects.toBeInstanceOf(
       ConflictException,
     );
   });
 
   test('translates a race that slips past the pre-check into a conflict too', async () => {
     const repo = makeProjectsRepo([]);
-    // findOne says free, but save() hits the unique constraint anyway —
-    // another request won the race between the two calls.
     repo.save = mock(async () => {
       const err = new Error('duplicate key value violates unique constraint') as any;
       err.code = '23505';
       throw err;
     });
-    const svc = new StudioService(repo);
-    await expect(svc.createProject({ key: 'YEK', name: 'Yeko' } as any)).rejects.toBeInstanceOf(
-      ConflictException,
-    );
+    const svc = new StudioService(repo, makeTasksRepo());
+    await expect(svc.createProject(baseInput as any)).rejects.toBeInstanceOf(ConflictException);
+  });
+});
+
+describe('StudioService.updateProject', () => {
+  test('updates the provided fields, leaves key/status untouched', async () => {
+    const repo = makeProjectsRepo([
+      { id: 'p1', name: 'Yeko', key: 'YEK', description: null, status: 'active', color: '#000', ownerEmail: null, createdAt: new Date() },
+    ]);
+    const svc = new StudioService(repo, makeTasksRepo());
+    const updated = await svc.updateProject('p1', { name: 'Yekoli', color: '#16A34A' } as any);
+    expect(updated).toMatchObject({ key: 'YEK', name: 'Yekoli', color: '#16A34A', status: 'active' });
+  });
+
+  test('404s on an unknown project', async () => {
+    const svc = new StudioService(makeProjectsRepo([]), makeTasksRepo());
+    await expect(svc.updateProject('missing', {} as any)).rejects.toBeInstanceOf(NotFoundException);
+  });
+});
+
+describe('StudioService.archiveProject', () => {
+  test('archives a project with no open tasks', async () => {
+    const repo = makeProjectsRepo([
+      { id: 'p1', name: 'Yeko', key: 'YEK', description: null, status: 'active', color: '#000', ownerEmail: null, createdAt: new Date() },
+    ]);
+    const svc = new StudioService(repo, makeTasksRepo({ p1: 0 }));
+    const archived = await svc.archiveProject('p1');
+    expect(archived.status).toBe('archived');
+  });
+
+  test('blocks archiving a project with open (non-done) tasks', async () => {
+    const repo = makeProjectsRepo([
+      { id: 'p1', name: 'Yeko', key: 'YEK', description: null, status: 'active', color: '#000', ownerEmail: null, createdAt: new Date() },
+    ]);
+    const svc = new StudioService(repo, makeTasksRepo({ p1: 3 }));
+    await expect(svc.archiveProject('p1')).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  test('archiving an already-archived project is a no-op, not an error', async () => {
+    const repo = makeProjectsRepo([
+      { id: 'p1', name: 'Yeko', key: 'YEK', description: null, status: 'archived', color: '#000', ownerEmail: null, createdAt: new Date() },
+    ]);
+    const svc = new StudioService(repo, makeTasksRepo({ p1: 5 }));
+    const result = await svc.archiveProject('p1');
+    expect(result.status).toBe('archived');
+  });
+});
+
+describe('StudioService.unarchiveProject', () => {
+  test('reactivates an archived project', async () => {
+    const repo = makeProjectsRepo([
+      { id: 'p1', name: 'Yeko', key: 'YEK', description: null, status: 'archived', color: '#000', ownerEmail: null, createdAt: new Date() },
+    ]);
+    const svc = new StudioService(repo, makeTasksRepo());
+    const result = await svc.unarchiveProject('p1');
+    expect(result.status).toBe('active');
   });
 });

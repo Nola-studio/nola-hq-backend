@@ -1,15 +1,10 @@
-import { ConflictException, Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Not, Repository } from 'typeorm';
 import { StudioProject } from './studio-project.entity';
+import { StudioTask } from './studio-task.entity';
 import { CreateProjectDto } from './dto/create-project.dto';
-
-/** The fixed set of workstreams tasks are filed under. */
-const DEFAULT_PROJECTS: Array<Pick<StudioProject, 'name' | 'key'>> = [
-  { name: 'Yeko', key: 'YEK' },
-  { name: 'Nola', key: 'NOLA' },
-  { name: 'Studio', key: 'STU' },
-];
+import { UpdateProjectDto } from './dto/update-project.dto';
 
 /** Postgres `23505` / SQLite `SQLITE_CONSTRAINT` — a unique-key clash on `key`. */
 function isUniqueViolation(err: unknown): boolean {
@@ -20,48 +15,28 @@ function isUniqueViolation(err: unknown): boolean {
 }
 
 /**
- * There is no seed-script convention in this repo (unlike Roadmap, which
- * needs none — objectives/initiatives are entirely user-created). Studio
- * tasks need at least one project to file into, so `StudioProject` rows are
- * ensured here instead: idempotent, works identically against the Postgres
- * (migration-created table) and SQLite (`synchronize: true`, no migrations
- * run) dev paths.
- *
- * Each default is inserted individually and a unique-key clash on `key` is
- * swallowed rather than checked for up front with a `count()` — multiple
- * instances can run this concurrently (rolling deploy, multi-replica boot)
- * without either crashing or double-seeding; whichever instance's insert
- * wins, the rest just no-op on the constraint. Also the only path that
- * makes `count() === 0` a permanent dead end if a first attempt raced and
- * lost — the old count-then-bulk-save version's single multi-row INSERT
- * failed (and inserted nothing) the moment any one of the three rows
- * conflicted, so a lost race left the table seeded with zero rows forever.
+ * Studio projects are fully user-managed — no seed, no fixed set. There is
+ * deliberately no delete: `key` is embedded in every task `identifier` filed
+ * under it (`YEK-1`, `YEK-2`, …) for the life of that task, so retiring a
+ * project means archiving it, not removing the row.
  */
 @Injectable()
-export class StudioService implements OnModuleInit {
-  private readonly logger = new Logger(StudioService.name);
-
+export class StudioService {
   constructor(
     @InjectRepository(StudioProject)
     private readonly projects: Repository<StudioProject>,
+    @InjectRepository(StudioTask)
+    private readonly tasks: Repository<StudioTask>,
   ) {}
-
-  async onModuleInit() {
-    const now = new Date();
-    let seeded = 0;
-    for (const p of DEFAULT_PROJECTS) {
-      try {
-        await this.projects.insert(this.projects.create({ ...p, status: 'active', createdAt: now }));
-        seeded++;
-      } catch (err) {
-        if (!isUniqueViolation(err)) throw err;
-      }
-    }
-    if (seeded > 0) this.logger.log(`Seeded ${seeded} default studio project(s)`);
-  }
 
   async listProjects(): Promise<StudioProject[]> {
     return this.projects.find({ order: { key: 'ASC' } });
+  }
+
+  async findProject(id: string): Promise<StudioProject> {
+    const project = await this.projects.findOne({ where: { id } });
+    if (!project) throw new NotFoundException(`Projet ${id} introuvable`);
+    return project;
   }
 
   async createProject(dto: CreateProjectDto): Promise<StudioProject> {
@@ -70,12 +45,59 @@ export class StudioService implements OnModuleInit {
 
     try {
       return await this.projects.save(
-        this.projects.create({ name: dto.name, key: dto.key, status: 'active', createdAt: new Date() }),
+        this.projects.create({
+          name: dto.name,
+          key: dto.key,
+          description: dto.description ?? null,
+          color: dto.color,
+          ownerEmail: dto.ownerEmail ?? null,
+          status: 'active',
+          createdAt: new Date(),
+        }),
       );
     } catch (err) {
       // Belt-and-suspenders against a concurrent create racing the check above.
       if (isUniqueViolation(err)) throw new ConflictException(`Le code « ${dto.key} » est déjà utilisé`);
       throw err;
     }
+  }
+
+  async updateProject(id: string, dto: UpdateProjectDto): Promise<StudioProject> {
+    const project = await this.findProject(id);
+    if (dto.name !== undefined) project.name = dto.name;
+    if (dto.description !== undefined) project.description = dto.description ?? null;
+    if (dto.color !== undefined) project.color = dto.color;
+    if (dto.ownerEmail !== undefined) project.ownerEmail = dto.ownerEmail ?? null;
+    return this.projects.save(project);
+  }
+
+  /**
+   * Blocks rather than warns-and-confirms: an archived project disappears
+   * from the task composer's project picker, so archiving one that still
+   * has open (non-`done`) work would silently strand those tasks with no
+   * way to route new ones alongside them. Move or finish the open tasks
+   * first (or archive anyway once they're done).
+   */
+  async archiveProject(id: string): Promise<StudioProject> {
+    const project = await this.findProject(id);
+    if (project.status === 'archived') return project;
+
+    const openCount = await this.tasks.count({
+      where: { projectId: id, status: Not('done') },
+    });
+    if (openCount > 0) {
+      throw new ConflictException(
+        `Impossible d'archiver « ${project.key} » : ${openCount} tâche(s) encore ouverte(s). Terminez-les ou déplacez-les d'abord.`,
+      );
+    }
+
+    project.status = 'archived';
+    return this.projects.save(project);
+  }
+
+  async unarchiveProject(id: string): Promise<StudioProject> {
+    const project = await this.findProject(id);
+    project.status = 'active';
+    return this.projects.save(project);
   }
 }

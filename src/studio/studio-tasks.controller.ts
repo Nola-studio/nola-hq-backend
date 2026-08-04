@@ -17,12 +17,13 @@ import { UpdateTaskDto } from './dto/update-task.dto';
 import { MoveTaskDto } from './dto/move-task.dto';
 import { ListTasksDto } from './dto/list-tasks.dto';
 import { CreateProjectDto } from './dto/create-project.dto';
+import { UpdateProjectDto } from './dto/update-project.dto';
 import { HqRoles } from '../common/auth/hq-roles.decorator';
 import { HqRole } from '../common/auth/hq-role.enum';
 import { CurrentUser, type AuthenticatedUser } from '../common/auth/current-user.decorator';
 
 /**
- * Studio's internal task board: 6-column kanban filed under a fixed set of
+ * Studio's internal task board: 6-column kanban filed under user-managed
  * workstreams (`GET /studio/projects`). Same RBAC posture as Roadmap: reads
  * only need authentication, mutations need `hq:operator`.
  */
@@ -36,9 +37,14 @@ export class StudioTasksController {
   ) {}
 
   @Get('projects')
-  @ApiOperation({ summary: 'The fixed set of workstreams tasks are filed under' })
+  @ApiOperation({ summary: 'Every workstream tasks are filed under, active and archived alike' })
   listProjects() {
     return this.studioSvc.listProjects();
+  }
+
+  @Get('projects/:id')
+  findProject(@Param('id') id: string) {
+    return this.studioSvc.findProject(id);
   }
 
   @Post('projects')
@@ -46,6 +52,26 @@ export class StudioTasksController {
   @ApiOperation({ summary: 'Add a new workstream — its key prefixes every task identifier it files' })
   createProject(@Body() dto: CreateProjectDto) {
     return this.studioSvc.createProject(dto);
+  }
+
+  @Patch('projects/:id')
+  @HqRoles(HqRole.Operator)
+  @ApiOperation({ summary: "Edit everything but the key (immutable — it's baked into task identifiers)" })
+  updateProject(@Param('id') id: string, @Body() dto: UpdateProjectDto) {
+    return this.studioSvc.updateProject(id, dto);
+  }
+
+  @Post('projects/:id/archive')
+  @HqRoles(HqRole.Operator)
+  @ApiOperation({ summary: 'Archive — blocked while the project has open (non-done) tasks' })
+  archiveProject(@Param('id') id: string) {
+    return this.studioSvc.archiveProject(id);
+  }
+
+  @Post('projects/:id/unarchive')
+  @HqRoles(HqRole.Operator)
+  unarchiveProject(@Param('id') id: string) {
+    return this.studioSvc.unarchiveProject(id);
   }
 
   @Get('tasks')
