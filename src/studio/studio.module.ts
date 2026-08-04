@@ -9,6 +9,8 @@ import { StudioTasksService } from './studio-tasks.service';
 import { StudioTasksController } from './studio-tasks.controller';
 import { StudioExpensesService } from './studio-expenses.service';
 import { StudioExpensesController } from './studio-expenses.controller';
+import { StudioDashboardService } from './studio-dashboard.service';
+import { StudioDashboardController } from './studio-dashboard.controller';
 
 @Module({
   imports: [
@@ -19,8 +21,8 @@ import { StudioExpensesController } from './studio-expenses.controller';
       StudioExpense,
     ]),
   ],
-  controllers: [StudioTasksController, StudioExpensesController],
-  providers: [StudioService, StudioTasksService, StudioExpensesService],
-  exports: [StudioService, StudioTasksService, StudioExpensesService],
+  controllers: [StudioTasksController, StudioExpensesController, StudioDashboardController],
+  providers: [StudioService, StudioTasksService, StudioExpensesService, StudioDashboardService],
+  exports: [StudioService, StudioTasksService, StudioExpensesService, StudioDashboardService],
 })
 export class StudioModule {}
