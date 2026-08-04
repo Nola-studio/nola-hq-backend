@@ -19,6 +19,7 @@ import { RoadmapObjective } from './roadmap/roadmap-objective.entity';
 import { RoadmapTrajectoryPoint } from './roadmap/roadmap-trajectory-point.entity';
 import { StudioExpense } from './studio/studio-expense.entity';
 import { StudioMeeting } from './studio/studio-meeting.entity';
+import { StudioNotificationDedup } from './studio/studio-notification-dedup.entity';
 import { StudioProject } from './studio/studio-project.entity';
 import { StudioTask } from './studio/studio-task.entity';
 import { TeamMember } from './team/team-member.entity';
@@ -51,6 +52,7 @@ export const entities = [
   PushSubscription,
   StudioExpense,
   StudioMeeting,
+  StudioNotificationDedup,
   StudioProject,
   StudioTask,
   TeamMember,

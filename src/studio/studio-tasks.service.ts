@@ -8,11 +8,13 @@ import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { MoveTaskDto } from './dto/move-task.dto';
 import { ListTasksDto } from './dto/list-tasks.dto';
+import { StudioNotifyService } from './studio-notify.service';
 
 /**
- * Studio's task board. Purely DB-backed, same posture as `RoadmapService`:
- * no NATS, no tenant coupling. Reordering math lives in `studio.board.ts`;
- * this service only fetches and persists.
+ * Studio's task board. Reordering math lives in `studio.board.ts`; this
+ * service fetches, persists, and triggers the `task.assigned` email
+ * (via `StudioNotifyService`) whenever a task gets a new assignee —
+ * on creation, or when an update actually changes `assigneeEmail`.
  */
 @Injectable()
 export class StudioTasksService {
@@ -21,6 +23,7 @@ export class StudioTasksService {
     private readonly tasks: Repository<StudioTask>,
     @InjectRepository(StudioProject)
     private readonly projects: Repository<StudioProject>,
+    private readonly notify: StudioNotifyService,
   ) {}
 
   async findAll(filter: ListTasksDto = {}): Promise<StudioTask[]> {
@@ -88,11 +91,21 @@ export class StudioTasksService {
       createdAt: now,
       updatedAt: now,
     });
-    return this.tasks.save(task);
+    const saved = await this.tasks.save(task);
+    if (saved.assigneeEmail) {
+      await this.notify.taskAssigned({
+        identifier: saved.identifier,
+        title: saved.title,
+        assigneeEmail: saved.assigneeEmail,
+        dueDate: saved.dueDate,
+      });
+    }
+    return saved;
   }
 
   async update(id: string, dto: UpdateTaskDto): Promise<StudioTask> {
     const task = await this.findOne(id);
+    const previousAssignee = task.assigneeEmail;
 
     if (dto.title !== undefined) task.title = dto.title;
     if (dto.description !== undefined) task.description = dto.description ?? null;
@@ -108,7 +121,16 @@ export class StudioTasksService {
     if (dto.position !== undefined) task.position = dto.position;
     task.updatedAt = new Date();
 
-    return this.tasks.save(task);
+    const saved = await this.tasks.save(task);
+    if (saved.assigneeEmail && saved.assigneeEmail !== previousAssignee) {
+      await this.notify.taskAssigned({
+        identifier: saved.identifier,
+        title: saved.title,
+        assigneeEmail: saved.assigneeEmail,
+        dueDate: saved.dueDate,
+      });
+    }
+    return saved;
   }
 
   /**

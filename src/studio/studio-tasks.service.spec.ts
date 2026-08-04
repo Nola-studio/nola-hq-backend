@@ -1,7 +1,15 @@
 import { test, expect, describe, mock } from 'bun:test';
 import { NotFoundException } from '@nestjs/common';
-import { StudioTasksService } from './studio-tasks.service';
 import type { StudioTaskStatus } from './studio-task.entity';
+
+// `StudioTasksService` imports `StudioNotifyService`, which imports
+// `NolaClientService` from `@nola-hq/nola-sdk` — that package's barrel
+// pulls in `@nola-studio/sdk`'s `auth` submodule (jose, ESM-only), which
+// bun's CJS-based test runner can't `require()`. Stubbed here since these
+// tests never touch NATS; real DI still gets the real class at runtime.
+mock.module('@nola-hq/nola-sdk', () => ({ NolaClientService: class {} }));
+
+const { StudioTasksService } = await import('./studio-tasks.service');
 
 /**
  * `move` wiring: the reordering plan is computed by `planMove` (unit-tested
@@ -36,8 +44,12 @@ function makeTasksRepo(rows: Row[]) {
 
 const noProjects = { findOne: mock(async () => null) } as any;
 
-function makeService(tasks: any, projects: any = noProjects) {
-  return new StudioTasksService(tasks, projects);
+function makeNotify() {
+  return { taskAssigned: mock(async () => {}) } as any;
+}
+
+function makeService(tasks: any, projects: any = noProjects, notify: any = makeNotify()) {
+  return new StudioTasksService(tasks, projects, notify);
 }
 
 /** The `{id,status,position}` triples handed to `save`, id-sorted. */
@@ -129,5 +141,37 @@ describe('StudioTasksService.create', () => {
     await expect(
       svc.create({ projectId: 'missing', title: 'X', category: 'product' } as any, 'a@b.co'),
     ).rejects.toThrow(NotFoundException);
+  });
+
+  test('notifies the assignee when a task is created pre-assigned', async () => {
+    const tasksRepo = makeTasksRepo([]);
+    const projectsRepo = { findOne: mock(async () => ({ id: 'p1', key: 'YEK' })) } as any;
+    const notify = makeNotify();
+    const svc = makeService(tasksRepo, projectsRepo, notify);
+
+    await svc.create(
+      { projectId: 'p1', title: 'Ship it', category: 'product', assigneeEmail: 'a@nola.dev' } as any,
+      'staff@nola.dev',
+    );
+
+    expect(notify.taskAssigned).toHaveBeenCalledWith(
+      expect.objectContaining({ identifier: 'YEK-1', assigneeEmail: 'a@nola.dev' }),
+    );
+  });
+});
+
+describe('StudioTasksService.update', () => {
+  test('notifies only when assigneeEmail actually changes', async () => {
+    const rows = [{ ...row('a', 'backlog', 0), identifier: 'YEK-1', assigneeEmail: null }] as any[];
+    const tasksRepo = makeTasksRepo(rows);
+    const notify = makeNotify();
+    const svc = makeService(tasksRepo, noProjects, notify);
+
+    await svc.update('a', { assigneeEmail: 'a@nola.dev' } as any);
+    expect(notify.taskAssigned).toHaveBeenCalledTimes(1);
+
+    rows[0].assigneeEmail = 'a@nola.dev';
+    await svc.update('a', { title: 'Renamed' } as any);
+    expect(notify.taskAssigned).toHaveBeenCalledTimes(1); // unchanged assignee → no new call
   });
 });

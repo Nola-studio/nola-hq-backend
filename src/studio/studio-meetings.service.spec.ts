@@ -1,6 +1,12 @@
 import { test, expect, describe, mock } from 'bun:test';
 import { NotFoundException } from '@nestjs/common';
-import { StudioMeetingsService } from './studio-meetings.service';
+
+// See studio-tasks.service.spec.ts for why: StudioMeetingsService pulls in
+// StudioTasksService → StudioNotifyService → @nola-hq/nola-sdk, whose
+// barrel drags in an ESM-only `jose` import bun's test runner can't require.
+mock.module('@nola-hq/nola-sdk', () => ({ NolaClientService: class {} }));
+
+const { StudioMeetingsService } = await import('./studio-meetings.service');
 
 function makeMeetingsRepo(rows: any[] = []) {
   return {
