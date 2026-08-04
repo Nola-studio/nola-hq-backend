@@ -13,6 +13,7 @@ export class StudioDomainsController {
   constructor(private readonly svc: StudioDomainsService) {}
 
   @Get()
+  @HqRoles(HqRole.Viewer)
   findAll() {
     return this.svc.findAll();
   }

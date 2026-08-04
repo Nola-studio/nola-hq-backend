@@ -15,12 +15,14 @@ export class StudioMeetingsController {
   constructor(private readonly svc: StudioMeetingsService) {}
 
   @Get()
+  @HqRoles(HqRole.Viewer)
   @ApiOperation({ summary: 'List meetings, most recent first' })
   findAll() {
     return this.svc.findAll();
   }
 
   @Get(':id')
+  @HqRoles(HqRole.Viewer)
   @ApiOperation({ summary: 'One meeting with its linked tasks' })
   findOne(@Param('id') id: string) {
     return this.svc.findOne(id);

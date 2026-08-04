@@ -15,6 +15,7 @@ export class StudioExpensesController {
   constructor(private readonly svc: StudioExpensesService) {}
 
   @Get()
+  @HqRoles(HqRole.Viewer)
   @ApiQuery({ name: 'category', required: false, type: String })
   @ApiQuery({ name: 'currency', required: false, type: String })
   @ApiQuery({ name: 'recurring', required: false, type: Boolean })
@@ -23,6 +24,7 @@ export class StudioExpensesController {
   }
 
   @Get('export.csv')
+  @HqRoles(HqRole.Viewer)
   @ApiOperation({ summary: 'Export all expenses as CSV' })
   async exportCsv(@Res() res: Response) {
     const csv = await this.svc.exportCsv();

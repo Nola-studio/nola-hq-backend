@@ -13,6 +13,7 @@ export class StudioRecurringController {
   constructor(private readonly svc: StudioRecurringService) {}
 
   @Get()
+  @HqRoles(HqRole.Viewer)
   findAll() {
     return this.svc.findAll();
   }

@@ -24,8 +24,8 @@ import { CurrentUser, type AuthenticatedUser } from '../common/auth/current-user
 
 /**
  * Studio's internal task board: 6-column kanban filed under user-managed
- * workstreams (`GET /studio/projects`). Same RBAC posture as Roadmap: reads
- * only need authentication, mutations need `hq:operator`.
+ * workstreams (`GET /studio/projects`). Reads need `hq:viewer` (or above),
+ * mutations need `hq:operator`.
  */
 @ApiBearerAuth()
 @ApiTags('studio')
@@ -37,12 +37,14 @@ export class StudioTasksController {
   ) {}
 
   @Get('projects')
+  @HqRoles(HqRole.Viewer)
   @ApiOperation({ summary: 'Every workstream tasks are filed under, active and archived alike' })
   listProjects() {
     return this.studioSvc.listProjects();
   }
 
   @Get('projects/:id')
+  @HqRoles(HqRole.Viewer)
   findProject(@Param('id') id: string) {
     return this.studioSvc.findProject(id);
   }
@@ -75,6 +77,7 @@ export class StudioTasksController {
   }
 
   @Get('tasks')
+  @HqRoles(HqRole.Viewer)
   @ApiQuery({ name: 'assignee', required: false, type: String })
   @ApiQuery({ name: 'category', required: false, type: String })
   @ApiQuery({ name: 'project', required: false, type: String })
@@ -85,6 +88,7 @@ export class StudioTasksController {
   }
 
   @Get('tasks/:id')
+  @HqRoles(HqRole.Viewer)
   findTask(@Param('id') id: string) {
     return this.tasksSvc.findOne(id);
   }
