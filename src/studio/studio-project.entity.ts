@@ -1,10 +1,11 @@
 import { Column, Entity, PrimaryGeneratedColumn } from 'typeorm';
 
 /**
- * Fixed, small set of internal workstreams tasks are filed under (e.g.
- * `YEK`, `NOLA`, `STU`). No CRUD is exposed for this — the set is seeded
- * once and referenced by `StudioTask.projectId` for its `identifier`
- * sequence (`YEK-1`, `YEK-2`, …).
+ * Small set of internal workstreams tasks are filed under (e.g. `YEK`,
+ * `NOLA`, `STU`). Three defaults are seeded on boot (`StudioService.
+ * onModuleInit`); `POST /studio/projects` lets an operator add more. Only
+ * creation is exposed — `key` is referenced by `StudioTask.projectId` for
+ * its `identifier` sequence (`YEK-1`, `YEK-2`, …) and isn't meant to change.
  */
 @Entity('studio_projects')
 export class StudioProject {

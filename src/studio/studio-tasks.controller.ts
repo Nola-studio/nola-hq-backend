@@ -16,6 +16,7 @@ import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { MoveTaskDto } from './dto/move-task.dto';
 import { ListTasksDto } from './dto/list-tasks.dto';
+import { CreateProjectDto } from './dto/create-project.dto';
 import { HqRoles } from '../common/auth/hq-roles.decorator';
 import { HqRole } from '../common/auth/hq-role.enum';
 import { CurrentUser, type AuthenticatedUser } from '../common/auth/current-user.decorator';
@@ -38,6 +39,13 @@ export class StudioTasksController {
   @ApiOperation({ summary: 'The fixed set of workstreams tasks are filed under' })
   listProjects() {
     return this.studioSvc.listProjects();
+  }
+
+  @Post('projects')
+  @HqRoles(HqRole.Operator)
+  @ApiOperation({ summary: 'Add a new workstream — its key prefixes every task identifier it files' })
+  createProject(@Body() dto: CreateProjectDto) {
+    return this.studioSvc.createProject(dto);
   }
 
   @Get('tasks')
