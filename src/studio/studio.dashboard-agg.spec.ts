@@ -3,7 +3,7 @@ import {
   tasksByStatus,
   openTasksByAssignee,
   countBlocked,
-  countHighPriorityOpen,
+  countHighOrUrgentPriorityOpen,
   donePercent,
 } from './studio.dashboard-agg';
 import type { StudioTaskStatus } from './studio-task.entity';
@@ -64,15 +64,21 @@ describe('countBlocked', () => {
   });
 });
 
-describe('countHighPriorityOpen', () => {
-  test('counts open tasks with priority=high, excludes done and other priorities', () => {
-    const result = countHighPriorityOpen([
+describe('countHighOrUrgentPriorityOpen', () => {
+  test('counts open tasks with priority=high or priority=urgent, excludes done and lower priorities', () => {
+    const result = countHighOrUrgentPriorityOpen([
       task('backlog', 'high'),
       task('done', 'high'),
       task('in_progress', 'urgent'),
+      task('done', 'urgent'),
       task('in_progress', 'high'),
+      task('backlog', 'medium'),
     ]);
-    expect(result).toBe(2);
+    expect(result).toBe(3);
+  });
+
+  test('an all-urgent open list counts every task', () => {
+    expect(countHighOrUrgentPriorityOpen([task('backlog', 'urgent'), task('blocked', 'urgent')])).toBe(2);
   });
 });
 

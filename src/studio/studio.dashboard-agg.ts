@@ -39,10 +39,13 @@ export function countBlocked(tasks: { status: StudioTaskStatus }[]): number {
   return tasks.filter((t) => t.status === 'blocked').length;
 }
 
-export function countHighPriorityOpen(
+/** Open tasks at `high` or `urgent` priority — `urgent` is a superset, not a separate tier. */
+export function countHighOrUrgentPriorityOpen(
   tasks: { status: StudioTaskStatus; priority: string }[],
 ): number {
-  return tasks.filter((t) => t.status !== 'done' && t.priority === 'high').length;
+  return tasks.filter(
+    (t) => t.status !== 'done' && (t.priority === 'high' || t.priority === 'urgent'),
+  ).length;
 }
 
 export function donePercent(tasks: { status: StudioTaskStatus }[]): number {

@@ -7,7 +7,7 @@ import {
   tasksByStatus,
   openTasksByAssignee,
   countBlocked,
-  countHighPriorityOpen,
+  countHighOrUrgentPriorityOpen,
   donePercent,
 } from './studio.dashboard-agg';
 
@@ -182,7 +182,7 @@ export class StudioDashboardService {
         tasksInProgress,
         tasksLate,
         tasksBlocked: countBlocked(allTasks),
-        tasksHighPriorityOpen: countHighPriorityOpen(allTasks),
+        tasksHighPriorityOpen: countHighOrUrgentPriorityOpen(allTasks),
         tasksDonePercent: donePercent(allTasks),
         expensesThisMonth: Array.from(expensesThisMonthByCurrency.entries()).map(([currency, amountCents]) => ({
           currency,

@@ -13,6 +13,7 @@ describe('StudioDashboardService', () => {
       { id: 't2', identifier: 'YEK-2', title: 'B', status: 'in_review', priority: 'none', assigneeEmail: 'a@nola.dev', dueDate: '2026-08-01', completedAt: null },
       { id: 't3', identifier: 'YEK-3', title: 'C', status: 'done', priority: 'none', assigneeEmail: null, dueDate: '2026-08-10', completedAt: new Date('2026-08-14T00:00:00Z') },
       { id: 't4', identifier: 'YEK-4', title: 'D', status: 'blocked', priority: 'none', assigneeEmail: 'a@nola.dev', dueDate: null, completedAt: null },
+      { id: 't5', identifier: 'YEK-5', title: 'E', status: 'backlog', priority: 'urgent', assigneeEmail: null, dueDate: null, completedAt: null },
     ];
     const expenses = [
       { category: 'infra_hosting', currency: 'CAD', amountCents: 5000, date: '2026-08-05' },
@@ -44,8 +45,8 @@ describe('StudioDashboardService', () => {
     expect(result.kpis.tasksInProgress).toBe(1);
     expect(result.kpis.tasksLate).toBe(1); // t2, due 2026-08-01, not done
     expect(result.kpis.tasksBlocked).toBe(1); // t4
-    expect(result.kpis.tasksHighPriorityOpen).toBe(1); // t1
-    expect(result.kpis.tasksDonePercent).toBe(25); // 1 of 4
+    expect(result.kpis.tasksHighPriorityOpen).toBe(2); // t1 (high) + t5 (urgent)
+    expect(result.kpis.tasksDonePercent).toBe(20); // 1 of 5
     expect(result.kpis.expensesThisMonth).toEqual([
       { currency: 'CAD', amountCents: 5000 },
       { currency: 'USD', amountCents: 2000 },
@@ -61,7 +62,7 @@ describe('StudioDashboardService', () => {
     );
 
     expect(result.tasksByStatus).toEqual([
-      { status: 'backlog', count: 0 },
+      { status: 'backlog', count: 1 },
       { status: 'this_quarter', count: 0 },
       { status: 'in_progress', count: 1 },
       { status: 'blocked', count: 1 },
@@ -70,7 +71,10 @@ describe('StudioDashboardService', () => {
     ]);
 
     expect(result.tasksOpenByAssignee).toEqual(
-      expect.arrayContaining([{ assigneeEmail: 'a@nola.dev', count: 3 }]),
+      expect.arrayContaining([
+        { assigneeEmail: 'a@nola.dev', count: 3 },
+        { assigneeEmail: null, count: 1 },
+      ]),
     );
 
     expect(result.activityHeatmap).toEqual([{ date: '2026-08-14', count: 1 }]);
