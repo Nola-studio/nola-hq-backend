@@ -9,6 +9,10 @@ import { BusinessInvoice, type BusinessInvoiceStatus } from './business-invoice.
 import { BusinessOpportunity } from './business-opportunity.entity';
 import { ProjectBudget } from './project-budget.entity';
 import { ProjectTimeEntry } from './project-time-entry.entity';
+import { WorkItem } from '../work-items/work-item.entity';
+import { ProjectRisk } from '../work-items/project-risk.entity';
+import { BusinessDocument } from './business-document.entity';
+import { BusinessReminder } from './business-reminder.entity';
 import {
   CreateBusinessClientDto,
   CreateBusinessContractDto,
@@ -34,6 +38,10 @@ export class BusinessService {
     @InjectRepository(BusinessInvoice) private readonly invoices: Repository<BusinessInvoice>,
     @InjectRepository(RoadmapInitiative) private readonly projects: Repository<RoadmapInitiative>,
     @InjectRepository(ProjectTimeEntry) private readonly timeEntries: Repository<ProjectTimeEntry>,
+    @InjectRepository(WorkItem) private readonly workItems: Repository<WorkItem>,
+    @InjectRepository(ProjectRisk) private readonly risks: Repository<ProjectRisk>,
+    @InjectRepository(BusinessDocument) private readonly documents: Repository<BusinessDocument>,
+    @InjectRepository(BusinessReminder) private readonly reminders: Repository<BusinessReminder>,
   ) {}
 
   private clean(value?: string | null) {
@@ -456,6 +464,90 @@ export class BusinessService {
         laborCostCdf,
         netProfitCdf,
         marginPct: invoicedCdf ? Math.round((netProfitCdf / invoicedCdf) * 1_000) / 10 : 0,
+      };
+    });
+  }
+
+  async projectPortfolio() {
+    const [financials, projects, workItems, risks, invoices, timeEntries, documents, reminders] = await Promise.all([
+      this.projectProfitability(),
+      this.projects.find({ order: { priority: 'ASC', updatedAt: 'DESC' } }),
+      this.workItems.find(),
+      this.risks.find(),
+      this.invoices.find(),
+      this.timeEntries.find(),
+      this.documents.find({ where: { entityType: 'project' } }),
+      this.reminders.find({ where: { entityType: 'project' } }),
+    ]);
+    const today = new Date().toISOString().slice(0, 10);
+    const financialByProject = new Map(financials.map((row) => [row.project.id, row]));
+
+    return projects.map((project) => {
+      const projectItems = workItems.filter((item) => item.projectId === project.id);
+      const projectRisks = risks.filter((risk) => risk.projectId === project.id && risk.status === 'open');
+      const projectInvoices = invoices.filter((invoice) => invoice.projectId === project.id);
+      const projectTime = timeEntries.filter((entry) => entry.projectId === project.id);
+      const done = projectItems.filter((item) => item.status === 'done').length;
+      const blocked = projectItems.filter((item) => item.status === 'blocked').length;
+      const overdueTickets = projectItems.filter(
+        (item) => item.status !== 'done' && item.dueDate && item.dueDate < today,
+      ).length;
+      const overdueInvoices = projectInvoices.filter(
+        (invoice) => !['paid', 'cancelled', 'draft'].includes(invoice.status) && invoice.dueOn < today,
+      ).length;
+      const criticalRisks = projectRisks.filter((risk) => risk.level === 'critical').length;
+      const scheduleOverdue = Boolean(
+        project.targetDate && project.targetDate < today && !['shipped', 'dropped'].includes(project.status),
+      );
+      const completed = project.status === 'shipped';
+      const critical = criticalRisks > 0 || scheduleOverdue || overdueInvoices > 0;
+      const attention = blocked > 0 || overdueTickets > 0 || projectRisks.length > 0;
+      const health = completed ? 'completed' : critical ? 'critical' : attention ? 'attention' : 'healthy';
+      const financial = financialByProject.get(project.id);
+
+      return {
+        project: {
+          id: project.id,
+          title: project.title,
+          summary: project.summary,
+          status: project.status,
+          priority: project.priority,
+          owner: project.owner,
+          appId: project.appId,
+          startDate: project.startDate,
+          targetDate: project.targetDate,
+        },
+        health,
+        delivery: {
+          tickets: projectItems.length,
+          done,
+          completionPct: projectItems.length ? Math.round(done / projectItems.length * 100) : project.progress,
+          blocked,
+          overdueTickets,
+          openRisks: projectRisks.length,
+          criticalRisks,
+          scheduleOverdue,
+        },
+        finance: {
+          revenueBudgetCdf: financial?.revenueBudgetCdf ?? 0,
+          expenseBudgetCdf: financial?.expenseBudgetCdf ?? 0,
+          contractedCdf: financial?.contractedCdf ?? 0,
+          invoicedCdf: financial?.invoicedCdf ?? 0,
+          collectedCdf: financial?.collectedCdf ?? 0,
+          outstandingCdf: financial?.outstandingCdf ?? 0,
+          expensesCdf: financial?.expensesCdf ?? 0,
+          laborCostCdf: financial?.laborCostCdf ?? 0,
+          netProfitCdf: financial?.netProfitCdf ?? 0,
+          marginPct: financial?.marginPct ?? 0,
+          overdueInvoices,
+        },
+        operations: {
+          minutes: projectTime.reduce((sum, entry) => sum + entry.minutes, 0),
+          documents: documents.filter((document) => document.entityId === project.id).length,
+          pendingReminders: reminders.filter(
+            (reminder) => reminder.entityId === project.id && reminder.status === 'pending',
+          ).length,
+        },
       };
     });
   }
