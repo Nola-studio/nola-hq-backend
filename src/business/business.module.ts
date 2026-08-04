@@ -17,6 +17,7 @@ import { BusinessPdfService } from './business-pdf.service';
 import { BusinessQuote, BusinessQuoteLine } from './business-quote.entity';
 import { BusinessReminder } from './business-reminder.entity';
 import { ProjectTimeEntry } from './project-time-entry.entity';
+import { ProjectRisk } from '../work-items/project-risk.entity';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { ProjectTimeEntry } from './project-time-entry.entity';
       BusinessDocument,
       BusinessReminder,
       ProjectTimeEntry,
+      ProjectRisk,
     ]),
   ],
   controllers: [BusinessController, BusinessOperationsController],

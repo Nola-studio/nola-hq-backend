@@ -33,6 +33,11 @@ export class BusinessController {
     return this.svc.projectProfitability();
   }
 
+  @Get('project-portfolio')
+  projectPortfolio() {
+    return this.svc.projectPortfolio();
+  }
+
   @Get('clients')
   clients(@Query('status') status?: string) {
     return this.svc.listClients(status);
