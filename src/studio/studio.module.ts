@@ -5,6 +5,8 @@ import { StudioTask } from './studio-task.entity';
 import { StudioMeeting } from './studio-meeting.entity';
 import { StudioExpense } from './studio-expense.entity';
 import { StudioService } from './studio.service';
+import { StudioTasksService } from './studio-tasks.service';
+import { StudioTasksController } from './studio-tasks.controller';
 
 @Module({
   imports: [
@@ -15,7 +17,8 @@ import { StudioService } from './studio.service';
       StudioExpense,
     ]),
   ],
-  providers: [StudioService],
-  exports: [StudioService],
+  controllers: [StudioTasksController],
+  providers: [StudioService, StudioTasksService],
+  exports: [StudioService, StudioTasksService],
 })
 export class StudioModule {}
