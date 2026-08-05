@@ -2,16 +2,19 @@ import 'reflect-metadata';
 import { join } from 'path';
 import AppDataSource from '../../src/data-source';
 import { readWorkbook, excelSerialToIsoDate } from './xlsx-reader';
-import { StudioProject } from '../../src/studio/studio-project.entity';
+import { RoadmapInitiative } from '../../src/roadmap/roadmap-initiative.entity';
 import { StudioDomain } from '../../src/studio/studio-domain.entity';
 import { StudioRecurring } from '../../src/studio/studio-recurring.entity';
 import { StudioExpense } from '../../src/studio/studio-expense.entity';
 
 /**
  * One-off, idempotent import of the "Project Management Dashboard" workbook
- * into Studio. Run deliberately — NOT wired into `onModuleInit` (see
- * `docs/ops/studio-retirer-projets-semences.md` for why Studio never
- * auto-seeds anymore):
+ * into Studio. Projects land in `roadmap_initiatives` (the unified project
+ * backbone post-merge — was `studio_projects`); domains/recurring/expenses
+ * stay Studio entities, with `linkedProjectId` now resolving against
+ * `roadmap_initiatives.id`. Run deliberately — NOT wired into
+ * `onModuleInit` (see `docs/ops/studio-retirer-projets-semences.md` for why
+ * Studio never auto-seeds anymore):
  *
  *   DATABASE_URL=postgres://... npx ts-node -r tsconfig-paths/register \
  *     scripts/seed/seed-studio.ts
@@ -66,7 +69,9 @@ const PROJECT_TYPE_MAP: Record<string, string> = {
   Other: 'other',
 };
 
-const PROJECT_PRIORITY_MAP: Record<string, string> = { High: 'high', Medium: 'medium', Low: 'low' };
+// Studio's high/medium/low project priority → RoadmapInitiative's P0-P3
+// (a different scale/entity than work-item priority, so kept local here).
+const PROJECT_PRIORITY_TO_ROADMAP: Record<string, string> = { High: 'P1', Medium: 'P2', Low: 'P3' };
 const PROJECT_STATUS_MAP: Record<string, string> = {
   'On Track': 'on_track',
   'On Hold': 'on_hold',
@@ -130,8 +135,8 @@ async function main() {
     }
     console.log(`Assignees read from sheet: ${[...assigneeEmailByName.keys()].join(', ')}`);
 
-    // ── Projects ──
-    const projectRepo = ds.getRepository(StudioProject);
+    // ── Projects → roadmap_initiatives ──
+    const projectRepo = ds.getRepository(RoadmapInitiative);
     const projectIdByName = new Map<string, string>();
     const projectRows = wb.sheet('Projects');
     let projectsCreated = 0;
@@ -148,30 +153,37 @@ async function main() {
       const key = PROJECT_KEYS[name];
       if (!key) throw new Error(`No key mapping for project "${name}" — add one to PROJECT_KEYS`);
 
-      const existing = await projectRepo.findOne({ where: { key } });
+      const existing = await projectRepo.findOne({ where: { keyPrefix: key } });
       if (existing) {
         console.log(`Project "${name}" (${key}) already exists — skipping`);
         projectIdByName.set(name, existing.id);
         continue;
       }
 
+      const now = new Date();
       const saved = await projectRepo.save(
         projectRepo.create({
-          name,
-          key,
-          description,
-          status: 'active',
+          title: name,
+          keyPrefix: key,
+          summary: description,
+          status: 'idea',
+          kind: 'ops', // no workbook column maps to RoadmapInitiativeKind — neutral default, reclassify manually
           color: PROJECT_COLORS[name] ?? '#94A3B8',
-          ownerEmail: null,
-          type: type ? (PROJECT_TYPE_MAP[type] as StudioProject['type']) ?? null : null,
-          priority: priority ? (PROJECT_PRIORITY_MAP[priority] as StudioProject['priority']) ?? null : null,
-          healthStatus: status ? (PROJECT_STATUS_MAP[status] as StudioProject['healthStatus']) ?? null : null,
-          budget: null,
-          cost: null,
+          owner: null,
+          type: type ? (PROJECT_TYPE_MAP[type] as RoadmapInitiative['type']) ?? null : null,
+          priority: priority ? (PROJECT_PRIORITY_TO_ROADMAP[priority] as RoadmapInitiative['priority']) ?? 'P2' : 'P2',
+          healthStatus: status ? (PROJECT_STATUS_MAP[status] as RoadmapInitiative['healthStatus']) ?? null : null,
+          objectiveId: null,
+          quarter: null,
           startDate: null,
-          dueDate: null,
-          leadAssigneeEmail: null,
-          createdAt: new Date(),
+          targetDate: null,
+          appId: null,
+          tenantId: null,
+          progress: 0,
+          position: 0,
+          archived: false,
+          createdAt: now,
+          updatedAt: now,
         }),
       );
       projectIdByName.set(name, saved.id);
@@ -180,7 +192,8 @@ async function main() {
     }
     console.log(`Projects: ${projectsCreated} created, ${projectIdByName.size - projectsCreated} already present.`);
 
-    // Tasks sheet has zero data rows in this workbook — nothing to import.
+    // Tasks sheet has zero data rows in this workbook — nothing to import
+    // into work_items.
     const taskRows = wb.sheet('Tasks');
     const taskDataRows = taskRows.filter((r, i) => i >= 2 && r && r.some((c) => c !== null && c !== undefined));
     console.log(`Tasks sheet: ${taskDataRows.length} data row(s) found — none expected, none imported.`);
