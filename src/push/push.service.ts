@@ -130,6 +130,21 @@ export class PushService implements OnModuleInit {
     }
   }
 
+  /** Send to one HQ member, matched by Keycloak subject or subscription email. */
+  async sendTo(recipient: string, payload: PushPayload): Promise<{ sent: number }> {
+    if (!this.configured) return { sent: 0 };
+    try {
+      const all = await this.repo.find();
+      const subs = all.filter(
+        (sub) => sub.userId === recipient || sub.email?.toLowerCase() === recipient.toLowerCase(),
+      );
+      return await this.dispatch(subs, payload);
+    } catch (err) {
+      this.logger.warn(`targeted push failed: ${err instanceof Error ? err.message : err}`);
+      return { sent: 0 };
+    }
+  }
+
   private async dispatch(
     subs: PushSubscription[],
     payload: PushPayload,
