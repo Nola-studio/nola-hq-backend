@@ -36,16 +36,19 @@ export class WorkItemsController {
   ) {}
 
   @Get()
+  @HqRoles(HqRole.Viewer)
   list(@Query() query: ListWorkItemsDto) {
     return this.svc.list(query);
   }
 
   @Get('board')
+  @HqRoles(HqRole.Viewer)
   board(@Query() query: ListWorkItemsDto) {
     return this.svc.board(query);
   }
 
   @Get(':id')
+  @HqRoles(HqRole.Viewer)
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.svc.findDetail(id);
   }

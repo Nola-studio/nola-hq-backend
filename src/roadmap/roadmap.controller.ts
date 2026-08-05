@@ -35,9 +35,12 @@ import { HqRole } from '../common/auth/hq-role.enum';
  * trajectory) and **initiatives** → **milestones** (how it gets done). This
  * is the studio's own strategy tool — nothing here is tenant-scoped.
  *
- * Same RBAC posture as the pipeline board: reads only need authentication,
- * mutations need `hq:operator`. Deleting an **objective** is the one
- * `hq:owner` gate — it detaches every initiative planned under it.
+ * Reads need `hq:viewer` (or above), mutations need `hq:operator` —
+ * initiatives are also what `/studio/projects*`/`/studio/tasks*` serve
+ * post-merge, so this controller now matches Studio's stricter posture
+ * (every GET gated) rather than the pipeline board's auth-only reads.
+ * Deleting an **objective** is the one `hq:owner` gate — it detaches every
+ * initiative planned under it.
  */
 @ApiBearerAuth()
 @ApiTags('roadmap')
@@ -46,18 +49,21 @@ export class RoadmapController {
   constructor(private readonly svc: RoadmapService) {}
 
   @Get('board')
+  @HqRoles(HqRole.Viewer)
   @ApiOperation({ summary: 'Initiatives as kanban columns, ordered by position' })
   board() {
     return this.svc.board();
   }
 
   @Get('timeline')
+  @HqRoles(HqRole.Viewer)
   @ApiOperation({ summary: 'Initiatives bucketed by quarter (unscheduled last)' })
   timeline() {
     return this.svc.timeline();
   }
 
   @Get('metrics')
+  @HqRoles(HqRole.Viewer)
   @ApiOperation({
     summary: 'Metrics a key result can bind to (the console never hardcodes them)',
   })
@@ -68,6 +74,7 @@ export class RoadmapController {
   // ── objectives ───────────────────────────────────────────────────
 
   @Get('objectives')
+  @HqRoles(HqRole.Viewer)
   @ApiQuery({ name: 'quarter', required: false, type: String })
   @ApiQuery({ name: 'status', required: false, type: String })
   listObjectives(@Query() query: ListObjectivesDto) {
@@ -75,6 +82,7 @@ export class RoadmapController {
   }
 
   @Get('objectives/:id')
+  @HqRoles(HqRole.Viewer)
   @ApiOperation({
     summary: 'One objective with its key results, initiatives and children',
   })
@@ -107,6 +115,7 @@ export class RoadmapController {
   // ── key results ──────────────────────────────────────────────────
 
   @Get('objectives/:id/key-results')
+  @HqRoles(HqRole.Viewer)
   @ApiOperation({
     summary: 'Key results of an objective, with current / progress / status',
   })
@@ -138,6 +147,7 @@ export class RoadmapController {
   }
 
   @Get('key-results/:id/series')
+  @HqRoles(HqRole.Viewer)
   @ApiOperation({ summary: 'Planned vs measured curves, sorted by date' })
   series(@Param('id') id: string) {
     return this.svc.keyResultSeries(id);
@@ -176,6 +186,7 @@ export class RoadmapController {
   // ── initiatives ──────────────────────────────────────────────────
 
   @Get('initiatives')
+  @HqRoles(HqRole.Viewer)
   @ApiQuery({ name: 'status', required: false, type: String })
   @ApiQuery({ name: 'quarter', required: false, type: String })
   @ApiQuery({ name: 'objectiveId', required: false, type: String })
@@ -187,6 +198,7 @@ export class RoadmapController {
   }
 
   @Get('initiatives/:id')
+  @HqRoles(HqRole.Viewer)
   @ApiOperation({ summary: 'One initiative with its milestones' })
   findInitiative(@Param('id') id: string) {
     return this.svc.findInitiative(id);
