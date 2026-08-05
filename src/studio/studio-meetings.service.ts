@@ -1,9 +1,10 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { WorkItem } from '../work-items/work-item.entity';
+import { WORK_ITEM_STATUS_TO_STUDIO_STATUS } from '../work-items/work-item-studio-mapping';
 import { StudioMeeting } from './studio-meeting.entity';
-import { StudioTask } from './studio-task.entity';
-import { StudioTasksService } from './studio-tasks.service';
+import { StudioProjectsProxyService } from './studio-projects-proxy.service';
 import { CreateMeetingDto } from './dto/create-meeting.dto';
 import { UpdateMeetingDto } from './dto/update-meeting.dto';
 import { CreateMeetingTaskDto } from './dto/create-meeting-task.dto';
@@ -14,9 +15,9 @@ export class StudioMeetingsService {
   constructor(
     @InjectRepository(StudioMeeting)
     private readonly meetings: Repository<StudioMeeting>,
-    @InjectRepository(StudioTask)
-    private readonly tasks: Repository<StudioTask>,
-    private readonly tasksSvc: StudioTasksService,
+    @InjectRepository(WorkItem)
+    private readonly tasks: Repository<WorkItem>,
+    private readonly proxy: StudioProjectsProxyService,
   ) {}
 
   async findAll(): Promise<StudioMeeting[]> {
@@ -24,10 +25,15 @@ export class StudioMeetingsService {
   }
 
   /** One meeting with its linked tasks (identifier + status, for the drawer's chip list). */
-  async findOne(id: string): Promise<StudioMeeting & { tasks: StudioTask[] }> {
+  async findOne(id: string) {
     const meeting = await this.meetings.findOne({ where: { id } });
     if (!meeting) throw new NotFoundException(`Réunion ${id} introuvable`);
-    const tasks = await this.tasks.find({ where: { meetingId: id }, order: { createdAt: 'ASC' } });
+    const linked = await this.tasks.find({ where: { meetingId: id }, order: { createdAt: 'ASC' } });
+    const tasks = linked.map((t) => ({
+      id: String(t.id),
+      identifier: t.reference,
+      status: WORK_ITEM_STATUS_TO_STUDIO_STATUS[t.status],
+    }));
     return { ...meeting, tasks };
   }
 
@@ -62,9 +68,9 @@ export class StudioMeetingsService {
   }
 
   /** Creates a task pre-linked to this meeting — "décision → tâche en un clic". */
-  async createTask(meetingId: string, dto: CreateMeetingTaskDto, createdByEmail: string): Promise<StudioTask> {
+  async createTask(meetingId: string, dto: CreateMeetingTaskDto, createdByEmail: string) {
     const meeting = await this.meetings.findOne({ where: { id: meetingId } });
     if (!meeting) throw new NotFoundException(`Réunion ${meetingId} introuvable`);
-    return this.tasksSvc.create({ ...dto, meetingId }, createdByEmail);
+    return this.proxy.createTask({ ...dto, meetingId }, createdByEmail);
   }
 }

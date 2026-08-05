@@ -11,7 +11,8 @@ export class StudioNotificationDedup {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Column({ type: 'uuid', name: 'task_id' })
+  /** `work_items.id` (integer, stringified) — was `studio_tasks.id` (uuid) pre-merge. */
+  @Column({ type: 'varchar', name: 'task_id' })
   @Index()
   taskId!: string;
 

@@ -12,12 +12,17 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
-import type {
-  StudioTaskCategory,
-  StudioTaskPriority,
-  StudioTaskStatus,
-} from '../studio-task.entity';
-import { TASK_STATUSES } from '../studio.board';
+import type { StudioTaskPriority, StudioTaskStatus } from '../../work-items/work-item-studio-mapping';
+import type { WorkItemCategory } from '../../work-items/work-item.entity';
+
+export const TASK_STATUSES: StudioTaskStatus[] = [
+  'backlog',
+  'this_quarter',
+  'in_progress',
+  'blocked',
+  'in_review',
+  'done',
+];
 
 export const TASK_CATEGORIES = [
   'product',
@@ -33,13 +38,16 @@ export const TASK_PRIORITIES = ['none', 'low', 'medium', 'high', 'urgent'] as co
 export const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
- * POST /studio/tasks — `identifier` (e.g. `YEK-42`) is assigned server-side
- * from `projectId`, never accepted from the client.
+ * POST /studio/tasks — Studio's original request shape, kept for the Studio
+ * frontend. Internally translated and delegated to `WorkItemsService`
+ * (`work_items` is the unified task backbone post-merge) by
+ * `StudioProjectsProxyService`. `identifier` is assigned server-side, never
+ * accepted from the client.
  */
 export class CreateTaskDto {
   @IsUUID() projectId!: string;
   @IsString() @MinLength(1) @MaxLength(500) title!: string;
-  @IsIn(TASK_CATEGORIES as unknown as string[]) category!: StudioTaskCategory;
+  @IsIn(TASK_CATEGORIES as unknown as string[]) category!: WorkItemCategory;
   @IsOptional() @IsString() description?: string;
   @IsOptional() @IsIn(TASK_STATUSES as unknown as string[]) status?: StudioTaskStatus;
   /** Team member's email — soft reference (`team_members.email`). */

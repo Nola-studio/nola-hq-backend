@@ -7,6 +7,8 @@ mock.module('@nola-hq/nola-sdk', () => ({ NolaClientService: class {} }));
 
 const { StudioDueSoonScheduler } = await import('./studio-due-soon.scheduler');
 
+const team = [{ id: 'tm1', email: 'a@nola.dev' }];
+
 describe('StudioDueSoonScheduler', () => {
   const now = new Date('2026-08-15T12:00:00Z');
 
@@ -15,24 +17,26 @@ describe('StudioDueSoonScheduler', () => {
 
   test('notifies for a task due within 48h and records the dedup row', async () => {
     const task = {
-      id: 'task-1',
-      identifier: 'YEK-1',
+      id: 1,
+      reference: 'YEK-1',
       title: 'Ship it',
-      assigneeEmail: 'a@nola.dev',
+      assignee: 'tm1',
       dueDate: '2026-08-16',
+      status: 'todo',
     };
     const tasksRepo = { find: mock(async () => [task]) } as any;
+    const teamRepo = { find: mock(async () => team) } as any;
     const dedupsRepo = {
       create: mock((x: unknown) => x),
       save: mock(async (x: unknown) => x),
     } as any;
     const notify = { taskDueSoon: mock(async () => {}) } as any;
 
-    const scheduler = new StudioDueSoonScheduler(tasksRepo, dedupsRepo, notify);
+    const scheduler = new StudioDueSoonScheduler(tasksRepo, teamRepo, dedupsRepo, notify);
     await scheduler.run();
 
     expect(dedupsRepo.save).toHaveBeenCalledWith(
-      expect.objectContaining({ taskId: 'task-1', kind: 'due_soon', sentOn: '2026-08-15' }),
+      expect.objectContaining({ taskId: '1', kind: 'due_soon', sentOn: '2026-08-15' }),
     );
     expect(notify.taskDueSoon).toHaveBeenCalledWith(
       expect.objectContaining({ identifier: 'YEK-1', assigneeEmail: 'a@nola.dev' }),
@@ -40,8 +44,9 @@ describe('StudioDueSoonScheduler', () => {
   });
 
   test('skips a task already notified today (dedup unique constraint violation)', async () => {
-    const task = { id: 'task-1', identifier: 'YEK-1', title: 'Ship it', assigneeEmail: 'a@nola.dev', dueDate: '2026-08-16' };
+    const task = { id: 1, reference: 'YEK-1', title: 'Ship it', assignee: 'tm1', dueDate: '2026-08-16', status: 'todo' };
     const tasksRepo = { find: mock(async () => [task]) } as any;
+    const teamRepo = { find: mock(async () => team) } as any;
     const dedupsRepo = {
       create: mock((x: unknown) => x),
       save: mock(async () => {
@@ -50,7 +55,7 @@ describe('StudioDueSoonScheduler', () => {
     } as any;
     const notify = { taskDueSoon: mock(async () => {}) } as any;
 
-    const scheduler = new StudioDueSoonScheduler(tasksRepo, dedupsRepo, notify);
+    const scheduler = new StudioDueSoonScheduler(tasksRepo, teamRepo, dedupsRepo, notify);
     await scheduler.run();
 
     expect(notify.taskDueSoon).not.toHaveBeenCalled();
@@ -59,14 +64,15 @@ describe('StudioDueSoonScheduler', () => {
   test('skips tasks with no assignee or due beyond the 48h window', async () => {
     const tasksRepo = {
       find: mock(async () => [
-        { id: 't1', identifier: 'YEK-1', title: 'A', assigneeEmail: null, dueDate: '2026-08-16' },
-        { id: 't2', identifier: 'YEK-2', title: 'B', assigneeEmail: 'a@nola.dev', dueDate: '2026-09-01' },
+        { id: 1, reference: 'YEK-1', title: 'A', assignee: null, dueDate: '2026-08-16', status: 'todo' },
+        { id: 2, reference: 'YEK-2', title: 'B', assignee: 'tm1', dueDate: '2026-09-01', status: 'todo' },
       ]),
     } as any;
+    const teamRepo = { find: mock(async () => team) } as any;
     const dedupsRepo = { create: mock((x: unknown) => x), save: mock(async (x: unknown) => x) } as any;
     const notify = { taskDueSoon: mock(async () => {}) } as any;
 
-    const scheduler = new StudioDueSoonScheduler(tasksRepo, dedupsRepo, notify);
+    const scheduler = new StudioDueSoonScheduler(tasksRepo, teamRepo, dedupsRepo, notify);
     await scheduler.run();
 
     expect(notify.taskDueSoon).not.toHaveBeenCalled();

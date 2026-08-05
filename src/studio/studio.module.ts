@@ -1,16 +1,17 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { StudioProject } from './studio-project.entity';
-import { StudioTask } from './studio-task.entity';
+import { RoadmapModule } from '../roadmap/roadmap.module';
+import { RoadmapInitiative } from '../roadmap/roadmap-initiative.entity';
+import { WorkItemsModule } from '../work-items/work-items.module';
+import { WorkItem } from '../work-items/work-item.entity';
 import { StudioMeeting } from './studio-meeting.entity';
 import { StudioExpense } from './studio-expense.entity';
 import { StudioDomain } from './studio-domain.entity';
 import { StudioRecurring } from './studio-recurring.entity';
 import { StudioNotificationDedup } from './studio-notification-dedup.entity';
 import { TeamMember } from '../team/team-member.entity';
-import { StudioService } from './studio.service';
-import { StudioTasksService } from './studio-tasks.service';
-import { StudioTasksController } from './studio-tasks.controller';
+import { StudioProjectsProxyService } from './studio-projects-proxy.service';
+import { StudioProjectsProxyController } from './studio-projects-proxy.controller';
 import { StudioExpensesService } from './studio-expenses.service';
 import { StudioExpensesController } from './studio-expenses.controller';
 import { StudioDomainsService } from './studio-domains.service';
@@ -27,8 +28,8 @@ import { StudioDueSoonScheduler } from './studio-due-soon.scheduler';
 @Module({
   imports: [
     TypeOrmModule.forFeature([
-      StudioProject,
-      StudioTask,
+      RoadmapInitiative,
+      WorkItem,
       StudioMeeting,
       StudioExpense,
       StudioDomain,
@@ -36,9 +37,11 @@ import { StudioDueSoonScheduler } from './studio-due-soon.scheduler';
       StudioNotificationDedup,
       TeamMember,
     ]),
+    RoadmapModule,
+    WorkItemsModule,
   ],
   controllers: [
-    StudioTasksController,
+    StudioProjectsProxyController,
     StudioExpensesController,
     StudioDomainsController,
     StudioRecurringController,
@@ -46,8 +49,7 @@ import { StudioDueSoonScheduler } from './studio-due-soon.scheduler';
     StudioMeetingsController,
   ],
   providers: [
-    StudioService,
-    StudioTasksService,
+    StudioProjectsProxyService,
     StudioExpensesService,
     StudioDomainsService,
     StudioRecurringService,
@@ -57,8 +59,7 @@ import { StudioDueSoonScheduler } from './studio-due-soon.scheduler';
     StudioDueSoonScheduler,
   ],
   exports: [
-    StudioService,
-    StudioTasksService,
+    StudioProjectsProxyService,
     StudioExpensesService,
     StudioDomainsService,
     StudioRecurringService,

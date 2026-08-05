@@ -10,8 +10,7 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
-import { StudioTasksService } from './studio-tasks.service';
-import { StudioService } from './studio.service';
+import { StudioProjectsProxyService } from './studio-projects-proxy.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { MoveTaskDto } from './dto/move-task.dto';
@@ -23,57 +22,57 @@ import { HqRole } from '../common/auth/hq-role.enum';
 import { CurrentUser, type AuthenticatedUser } from '../common/auth/current-user.decorator';
 
 /**
- * Studio's internal task board: 6-column kanban filed under user-managed
- * workstreams (`GET /studio/projects`). Reads need `hq:viewer` (or above),
- * mutations need `hq:operator`.
+ * Studio's project/task board. `/studio/projects*` and `/studio/tasks*`
+ * keep their original shape for the Studio frontend, but every read/write
+ * now goes through `roadmap_initiatives`/`work_items` via
+ * `StudioProjectsProxyService` — `studio_projects`/`studio_tasks` are
+ * retired. Reads need `hq:viewer` (or above), mutations need
+ * `hq:operator`.
  */
 @ApiBearerAuth()
 @ApiTags('studio')
 @Controller('studio')
-export class StudioTasksController {
-  constructor(
-    private readonly tasksSvc: StudioTasksService,
-    private readonly studioSvc: StudioService,
-  ) {}
+export class StudioProjectsProxyController {
+  constructor(private readonly svc: StudioProjectsProxyService) {}
 
   @Get('projects')
   @HqRoles(HqRole.Viewer)
   @ApiOperation({ summary: 'Every workstream tasks are filed under, active and archived alike' })
   listProjects() {
-    return this.studioSvc.listProjects();
+    return this.svc.listProjects();
   }
 
   @Get('projects/:id')
   @HqRoles(HqRole.Viewer)
   findProject(@Param('id') id: string) {
-    return this.studioSvc.findProject(id);
+    return this.svc.findProject(id);
   }
 
   @Post('projects')
   @HqRoles(HqRole.Operator)
   @ApiOperation({ summary: 'Add a new workstream — its key prefixes every task identifier it files' })
   createProject(@Body() dto: CreateProjectDto) {
-    return this.studioSvc.createProject(dto);
+    return this.svc.createProject(dto);
   }
 
   @Patch('projects/:id')
   @HqRoles(HqRole.Operator)
   @ApiOperation({ summary: "Edit everything but the key (immutable — it's baked into task identifiers)" })
   updateProject(@Param('id') id: string, @Body() dto: UpdateProjectDto) {
-    return this.studioSvc.updateProject(id, dto);
+    return this.svc.updateProject(id, dto);
   }
 
   @Post('projects/:id/archive')
   @HqRoles(HqRole.Operator)
   @ApiOperation({ summary: 'Archive — blocked while the project has open (non-done) tasks' })
   archiveProject(@Param('id') id: string) {
-    return this.studioSvc.archiveProject(id);
+    return this.svc.archiveProject(id);
   }
 
   @Post('projects/:id/unarchive')
   @HqRoles(HqRole.Operator)
   unarchiveProject(@Param('id') id: string) {
-    return this.studioSvc.unarchiveProject(id);
+    return this.svc.unarchiveProject(id);
   }
 
   @Get('tasks')
@@ -84,38 +83,38 @@ export class StudioTasksController {
   @ApiQuery({ name: 'status', required: false, type: String })
   @ApiQuery({ name: 'late', required: false, type: Boolean })
   listTasks(@Query() query: ListTasksDto) {
-    return this.tasksSvc.findAll(query);
+    return this.svc.findAllTasks(query);
   }
 
   @Get('tasks/:id')
   @HqRoles(HqRole.Viewer)
   findTask(@Param('id') id: string) {
-    return this.tasksSvc.findOne(id);
+    return this.svc.findOneTask(id);
   }
 
   @Post('tasks')
   @HqRoles(HqRole.Operator)
   createTask(@Body() dto: CreateTaskDto, @CurrentUser() user: AuthenticatedUser) {
-    return this.tasksSvc.create(dto, user.email);
+    return this.svc.createTask(dto, user.email);
   }
 
   @Patch('tasks/:id')
   @HqRoles(HqRole.Operator)
-  updateTask(@Param('id') id: string, @Body() dto: UpdateTaskDto) {
-    return this.tasksSvc.update(id, dto);
+  updateTask(@Param('id') id: string, @Body() dto: UpdateTaskDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.svc.updateTask(id, dto, user.email);
   }
 
   @Post('tasks/:id/move')
   @HqRoles(HqRole.Operator)
   @ApiOperation({ summary: 'Move a task to a column/position (reorders it)' })
-  moveTask(@Param('id') id: string, @Body() dto: MoveTaskDto) {
-    return this.tasksSvc.move(id, dto);
+  moveTask(@Param('id') id: string, @Body() dto: MoveTaskDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.svc.moveTask(id, dto, user.email);
   }
 
   @Delete('tasks/:id')
   @HttpCode(204)
   @HqRoles(HqRole.Operator)
   async removeTask(@Param('id') id: string) {
-    await this.tasksSvc.remove(id);
+    await this.svc.removeTask(id);
   }
 }

@@ -2,9 +2,10 @@ import { Column, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
 
 /**
  * A domain the team owns or manages — mirrors the workbook's Domains sheet.
- * `linkedProjectId` is a soft reference (`studio_projects.id`, no FK): most
- * domains aren't tied to a project at all (e.g. shared infra), so this is
- * optional by design, not an oversight.
+ * `linkedProjectId` is a soft reference (`roadmap_initiatives.id`, no FK —
+ * was `studio_projects.id` pre-merge): most domains aren't tied to a
+ * project at all (e.g. shared infra), so this is optional by design, not
+ * an oversight.
  */
 @Entity('studio_domains')
 export class StudioDomain {
@@ -42,7 +43,7 @@ export class StudioDomain {
   @Column({ type: 'varchar', length: 120, nullable: true })
   status!: string | null;
 
-  /** Soft reference — `studio_projects.id`. */
+  /** Soft reference — `roadmap_initiatives.id` (was `studio_projects.id` pre-merge). */
   @Column({ type: 'uuid', name: 'linked_project_id', nullable: true })
   linkedProjectId!: string | null;
 

@@ -1,14 +1,14 @@
 import { IsEmail, IsIn, IsNumberString, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
 import type {
-  StudioProjectHealthStatus,
-  StudioProjectPriority,
-  StudioProjectType,
-} from '../studio-project.entity';
+  RoadmapInitiativeHealthStatus,
+  RoadmapInitiativeType,
+} from '../../roadmap/roadmap-initiative.entity';
 import {
   HEX_COLOR_PATTERN,
   PROJECT_HEALTH_STATUSES,
   PROJECT_PRIORITIES,
   PROJECT_TYPES,
+  type StudioProjectPriority,
 } from './create-project.dto';
 import { DATE_PATTERN } from './create-task.dto';
 
@@ -23,9 +23,9 @@ export class UpdateProjectDto {
   @IsOptional() @IsString() @Matches(HEX_COLOR_PATTERN, { message: 'La couleur doit être un hex #RRGGBB.' }) color?: string;
   @IsOptional() @IsEmail() @MaxLength(120) ownerEmail?: string | null;
 
-  @IsOptional() @IsIn(PROJECT_TYPES as unknown as string[]) type?: StudioProjectType | null;
+  @IsOptional() @IsIn(PROJECT_TYPES as unknown as string[]) type?: RoadmapInitiativeType | null;
   @IsOptional() @IsIn(PROJECT_PRIORITIES as unknown as string[]) priority?: StudioProjectPriority | null;
-  @IsOptional() @IsIn(PROJECT_HEALTH_STATUSES as unknown as string[]) healthStatus?: StudioProjectHealthStatus | null;
+  @IsOptional() @IsIn(PROJECT_HEALTH_STATUSES as unknown as string[]) healthStatus?: RoadmapInitiativeHealthStatus | null;
   @IsOptional() @IsNumberString() budget?: string | null;
   @IsOptional() @IsNumberString() cost?: string | null;
   @IsOptional() @Matches(DATE_PATTERN) startDate?: string | null;

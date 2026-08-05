@@ -1,6 +1,6 @@
 import { IsIn, IsInt, IsOptional, Min } from 'class-validator';
-import type { StudioTaskStatus } from '../studio-task.entity';
-import { TASK_STATUSES } from '../studio.board';
+import type { StudioTaskStatus } from '../../work-items/work-item-studio-mapping';
+import { TASK_STATUSES } from './create-task.dto';
 
 /**
  * POST /studio/tasks/:id/move — drag & drop on the kanban board.

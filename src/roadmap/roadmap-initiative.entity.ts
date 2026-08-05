@@ -128,6 +128,16 @@ export class RoadmapInitiative {
   @Column({ type: 'integer', default: 0 })
   position!: number;
 
+  /**
+   * Retired from the Studio project picker without deleting the row (its
+   * `keyPrefix` may still be referenced by historical work items). Distinct
+   * from `status` — a `shipped`/`dropped` initiative can still be archived
+   * or not; this is Studio's own on/off toggle, absorbed from
+   * `studio_projects.status`.
+   */
+  @Column({ type: 'boolean', default: false })
+  archived!: boolean;
+
   @Column({ name: 'created_at' })
   createdAt!: Date;
 
