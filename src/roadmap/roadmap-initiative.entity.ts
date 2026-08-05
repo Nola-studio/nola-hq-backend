@@ -17,6 +17,18 @@ export type RoadmapInitiativeStatus =
   | 'dropped';
 export type RoadmapInitiativePriority = 'P0' | 'P1' | 'P2' | 'P3';
 
+/** Operational project type (distinct from `kind`, the strategic classification). */
+export type RoadmapInitiativeType =
+  | 'infrastructure_cloud'
+  | 'web_app_development'
+  | 'mobile_app_development'
+  | 'website'
+  | 'administrative'
+  | 'maintenance_support'
+  | 'other';
+/** Project *health*, distinct from the `status` lifecycle. */
+export type RoadmapInitiativeHealthStatus = 'on_track' | 'on_hold' | 'behind' | 'completed';
+
 /**
  * Middle level of the roadmap: a **project / workstream** that serves an
  * objective. Initiatives are what the kanban board (`GET /roadmap/board`)
@@ -54,6 +66,27 @@ export class RoadmapInitiative {
 
   @Column({ type: 'varchar', default: 'P2' })
   priority!: RoadmapInitiativePriority;
+
+  /** Hex, e.g. `#4F46E5` — used to colour this project across dashboards. */
+  @Column({ type: 'varchar', length: 7, default: '#94A3B8' })
+  color!: string;
+
+  /** Health (On Track / On Hold / Behind / Completed) — not the `status` lifecycle. */
+  @Column({ type: 'varchar', name: 'health_status', nullable: true })
+  healthStatus!: RoadmapInitiativeHealthStatus | null;
+
+  /** Operational project type — distinct from `kind`. */
+  @Column({ type: 'varchar', nullable: true })
+  type!: RoadmapInitiativeType | null;
+
+  /**
+   * Immutable, user-typed prefix (e.g. `YEK`) tasks filed under this
+   * initiative use to build their identifiers. Not a reuse of `appId`,
+   * which is a soft reference into the apps registry `WorkItemsService`
+   * derives task-reference prefixes from — a different concept.
+   */
+  @Column({ type: 'varchar', length: 12, name: 'key_prefix', nullable: true })
+  keyPrefix!: string | null;
 
   /** Target quarter in `YYYY-Qn`. Null lands in the timeline's "unscheduled". */
   @Column({ type: 'varchar', length: 7, nullable: true })

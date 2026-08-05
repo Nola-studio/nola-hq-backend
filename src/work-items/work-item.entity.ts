@@ -7,6 +7,7 @@ import {
   PrimaryGeneratedColumn,
 } from 'typeorm';
 import { RoadmapInitiative } from '../roadmap/roadmap-initiative.entity';
+import { StudioMeeting } from '../studio/studio-meeting.entity';
 import { WorkSprint } from './work-sprint.entity';
 
 export const WORK_ITEM_TYPES = ['bug', 'feature', 'task', 'ops', 'debt'] as const;
@@ -24,6 +25,9 @@ export type WorkItemStatus = (typeof WORK_ITEM_STATUSES)[number];
 
 export const WORK_ITEM_PRIORITIES = ['P0', 'P1', 'P2', 'P3'] as const;
 export type WorkItemPriority = (typeof WORK_ITEM_PRIORITIES)[number];
+
+export const WORK_ITEM_CATEGORIES = ['product', 'sales', 'brand', 'admin_legal', 'infra'] as const;
+export type WorkItemCategory = (typeof WORK_ITEM_CATEGORIES)[number];
 
 /**
  * One piece of internal Nola Studio work. Support tickets deliberately live in
@@ -92,6 +96,25 @@ export class WorkItem {
 
   @Column({ type: 'integer', name: 'estimate_points', default: 0 })
   estimatePoints!: number;
+
+  /** Nola-internal work classification (absorbed from Studio's tasks). */
+  @Column({ type: 'varchar', nullable: true })
+  category!: WorkItemCategory | null;
+
+  @Column({ type: 'numeric', precision: 8, scale: 2, name: 'hours_spent', nullable: true })
+  hoursSpent!: string | null;
+
+  /** 0-100. */
+  @Column({ type: 'integer', name: 'progress_percent', nullable: true })
+  progressPercent!: number | null;
+
+  /** The meeting whose decision created this item, if any. */
+  @Column({ type: 'uuid', name: 'meeting_id', nullable: true })
+  meetingId!: string | null;
+
+  @ManyToOne(() => StudioMeeting, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'meeting_id' })
+  meeting?: StudioMeeting | null;
 
   @Column({ name: 'created_at' })
   createdAt!: Date;

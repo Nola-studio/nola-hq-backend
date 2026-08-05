@@ -9,6 +9,7 @@ import { WorkItemComment } from './work-item-comment.entity';
 import { WorkItemEvent, type WorkItemEventAction } from './work-item-event.entity';
 import { WorkItemSubtask } from './work-item-subtask.entity';
 import { WorkPlanningService } from './work-planning.service';
+import { planMove } from './work-items.board';
 import {
   WORK_ITEM_STATUSES,
   WorkItem,
@@ -138,6 +139,10 @@ export class WorkItemsService {
       blockedReason: dto.blockedReason?.trim() || null,
       sprintId: dto.sprintId ?? null,
       estimatePoints: dto.estimatePoints ?? 0,
+      category: dto.category ?? null,
+      hoursSpent: dto.hoursSpent ?? null,
+      progressPercent: dto.progressPercent ?? null,
+      meetingId: dto.meetingId ?? null,
       position,
       createdAt: now,
       updatedAt: now,
@@ -183,13 +188,25 @@ export class WorkItemsService {
   async move(id: number, status: WorkItemStatus, position: number | undefined, actor: string) {
     const item = await this.findOne(id);
     const from = item.status;
-    item.status = status;
-    item.position = position ?? await this.repo.count({ where: { status } });
-    item.closedAt = status === 'done' ? item.closedAt ?? new Date() : null;
-    item.updatedAt = new Date();
-    const saved = await this.repo.save(item);
+    const all = await this.repo.find();
+    const targetPosition = position ?? all.filter((i) => i.status === status && i.id !== id).length;
+    const placements = planMove(all, id, status, targetPosition);
+    if (placements.length === 0) return item;
+
+    const now = new Date();
+    const rows = placements.map(({ id: placedId, status: placedStatus, position: placedPosition }) => {
+      const row = placedId === id ? item : all.find((i) => i.id === placedId)!;
+      row.status = placedStatus;
+      row.position = placedPosition;
+      if (placedId === id) {
+        row.closedAt = placedStatus === 'done' ? row.closedAt ?? now : null;
+      }
+      row.updatedAt = now;
+      return row;
+    });
+    const saved = await this.repo.save(rows);
     if (from !== status) await this.record(id, actor, 'moved', { from, to: status });
-    return saved;
+    return saved.find((row) => row.id === id)!;
   }
 
   async addComment(id: number, dto: AddWorkItemCommentDto, actor: string) {

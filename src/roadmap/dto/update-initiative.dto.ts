@@ -11,17 +11,27 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
 import type {
+  RoadmapInitiativeHealthStatus,
   RoadmapInitiativeKind,
   RoadmapInitiativePriority,
   RoadmapInitiativeStatus,
+  RoadmapInitiativeType,
 } from '../roadmap-initiative.entity';
 import {
   INITIATIVE_PRIORITIES,
   INITIATIVE_STATUSES,
 } from '../roadmap.board';
 import { QUARTER_PATTERN } from './create-objective.dto';
-import { DATE_PATTERN, INITIATIVE_KINDS } from './create-initiative.dto';
+import {
+  DATE_PATTERN,
+  HEX_COLOR_PATTERN,
+  INITIATIVE_HEALTH_STATUSES,
+  INITIATIVE_KINDS,
+  INITIATIVE_TYPES,
+  KEY_PREFIX_PATTERN,
+} from './create-initiative.dto';
 
 /**
  * PATCH /roadmap/initiatives/:id — every field optional. Passing `null`
@@ -40,6 +50,13 @@ export class UpdateInitiativeDto {
   status?: RoadmapInitiativeStatus;
   @IsOptional() @IsIn(INITIATIVE_PRIORITIES as unknown as string[])
   priority?: RoadmapInitiativePriority;
+  @IsOptional() @Matches(HEX_COLOR_PATTERN) color?: string;
+  @IsOptional() @IsIn(INITIATIVE_HEALTH_STATUSES as unknown as string[])
+  healthStatus?: RoadmapInitiativeHealthStatus | null;
+  @IsOptional() @IsIn(INITIATIVE_TYPES as unknown as string[])
+  type?: RoadmapInitiativeType | null;
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toUpperCase() : value))
+  @IsOptional() @Matches(KEY_PREFIX_PATTERN) keyPrefix?: string | null;
   @IsOptional() @Matches(QUARTER_PATTERN) quarter?: string | null;
   @IsOptional() @Matches(DATE_PATTERN) startDate?: string | null;
   @IsOptional() @Matches(DATE_PATTERN) targetDate?: string | null;

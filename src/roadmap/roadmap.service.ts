@@ -482,6 +482,10 @@ export class RoadmapService {
       kind: dto.kind ?? 'product',
       status,
       priority: dto.priority ?? 'P2',
+      color: dto.color ?? '#94A3B8',
+      healthStatus: dto.healthStatus ?? null,
+      type: dto.type ?? null,
+      keyPrefix: dto.keyPrefix ?? null,
       quarter: dto.quarter ?? null,
       startDate: dto.startDate ?? null,
       targetDate: dto.targetDate ?? null,
@@ -513,6 +517,10 @@ export class RoadmapService {
     if (dto.kind !== undefined) initiative.kind = dto.kind;
     if (dto.status !== undefined) initiative.status = dto.status;
     if (dto.priority !== undefined) initiative.priority = dto.priority;
+    if (dto.color !== undefined) initiative.color = dto.color;
+    if (dto.healthStatus !== undefined) initiative.healthStatus = dto.healthStatus ?? null;
+    if (dto.type !== undefined) initiative.type = dto.type ?? null;
+    if (dto.keyPrefix !== undefined) initiative.keyPrefix = dto.keyPrefix ?? null;
     if (dto.quarter !== undefined) initiative.quarter = dto.quarter ?? null;
     if (dto.startDate !== undefined) initiative.startDate = dto.startDate ?? null;
     if (dto.targetDate !== undefined)
