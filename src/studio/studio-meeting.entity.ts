@@ -3,7 +3,7 @@ import { Column, Entity, PrimaryGeneratedColumn } from 'typeorm';
 /**
  * A team meeting: agenda + decisions (both freeform Markdown) and the
  * participants who attended. Tasks can optionally link back to the meeting
- * a decision was made in (`StudioTask.meetingId`).
+ * a decision was made in (`WorkItem.meetingId`).
  */
 @Entity('studio_meetings')
 export class StudioMeeting {
