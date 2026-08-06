@@ -5,13 +5,14 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsWhere, In, LessThanOrEqual, Repository } from 'typeorm';
+import { FindOptionsWhere, In, LessThanOrEqual, Like, Repository } from 'typeorm';
 import { RoadmapObjective } from './roadmap-objective.entity';
 import { RoadmapInitiative } from './roadmap-initiative.entity';
 import { RoadmapMilestone } from './roadmap-milestone.entity';
 import { RoadmapKeyResult } from './roadmap-key-result.entity';
 import { RoadmapTrajectoryPoint } from './roadmap-trajectory-point.entity';
 import { MetricSnapshot } from '../analytics/metric-snapshot.entity';
+import { WorkItem } from '../work-items/work-item.entity';
 import { METRIC_DEFS, MetricDef } from '../analytics/snapshot.metrics';
 import {
   RoadmapBoardColumn,
@@ -37,6 +38,7 @@ import { CreateObjectiveDto } from './dto/create-objective.dto';
 import { UpdateObjectiveDto } from './dto/update-objective.dto';
 import { CreateInitiativeDto } from './dto/create-initiative.dto';
 import { UpdateInitiativeDto } from './dto/update-initiative.dto';
+import { UpdateKeyPrefixDto } from './dto/update-key-prefix.dto';
 import { MoveInitiativeDto } from './dto/move-initiative.dto';
 import { CreateMilestoneDto } from './dto/create-milestone.dto';
 import { UpdateMilestoneDto } from './dto/update-milestone.dto';
@@ -134,6 +136,8 @@ export class RoadmapService {
     private readonly points: Repository<RoadmapTrajectoryPoint>,
     @InjectRepository(MetricSnapshot)
     private readonly snapshots: Repository<MetricSnapshot>,
+    @InjectRepository(WorkItem)
+    private readonly workItems: Repository<WorkItem>,
   ) {}
 
   // ── board & timeline ─────────────────────────────────────────────
@@ -558,6 +562,43 @@ export class RoadmapService {
       saved,
       await this.milestones.find({ where: { initiativeId: id } }),
     );
+  }
+
+  /**
+   * `hq:owner`-only escape hatch: `keyPrefix` is otherwise immutable once
+   * auto-generated. Exists to fix a prefix that came out truncated/ugly
+   * (see `slugifyProjectName`'s 10-char cap) before it's baked into any
+   * task reference — `T<keyPrefix><NN>` is a static string written once at
+   * task creation, never regenerated, so changing the prefix after a task
+   * exists would silently orphan that task's reference from its project's
+   * current identifier.
+   */
+  async updateKeyPrefix(id: string, dto: UpdateKeyPrefixDto): Promise<RoadmapInitiativeView> {
+    const initiative = await this.initiatives.findOne({ where: { id } });
+    if (!initiative) throw new NotFoundException(`Initiative ${id} introuvable`);
+
+    if (initiative.keyPrefix === dto.keyPrefix) {
+      return this.initiativeView(initiative, await this.milestones.find({ where: { initiativeId: id } }));
+    }
+
+    const clash = await this.initiatives.findOne({ where: { keyPrefix: dto.keyPrefix } });
+    if (clash) throw new ConflictException(`Le préfixe « ${dto.keyPrefix} » est déjà utilisé.`);
+
+    if (initiative.keyPrefix) {
+      const referencedCount = await this.workItems.count({
+        where: { reference: Like(`T${initiative.keyPrefix}%`) },
+      });
+      if (referencedCount > 0) {
+        throw new ConflictException(
+          `Impossible de changer le préfixe « ${initiative.keyPrefix} » : ${referencedCount} tâche(s) y font déjà référence.`,
+        );
+      }
+    }
+
+    initiative.keyPrefix = dto.keyPrefix;
+    initiative.updatedAt = new Date();
+    const saved = await this.initiatives.save(initiative);
+    return this.initiativeView(saved, await this.milestones.find({ where: { initiativeId: id } }));
   }
 
   /**

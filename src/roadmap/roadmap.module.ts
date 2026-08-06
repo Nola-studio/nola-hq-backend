@@ -6,6 +6,7 @@ import { RoadmapMilestone } from './roadmap-milestone.entity';
 import { RoadmapKeyResult } from './roadmap-key-result.entity';
 import { RoadmapTrajectoryPoint } from './roadmap-trajectory-point.entity';
 import { MetricSnapshot } from '../analytics/metric-snapshot.entity';
+import { WorkItem } from '../work-items/work-item.entity';
 import { RoadmapController } from './roadmap.controller';
 import { RoadmapService } from './roadmap.service';
 
@@ -20,6 +21,9 @@ import { RoadmapService } from './roadmap.service';
       // Read-only: metric-bound key results take their actuals from the
       // daily snapshot series captured by AnalyticsModule.
       MetricSnapshot,
+      // Read-only: updateKeyPrefix() checks no WorkItem already references
+      // the prefix being changed.
+      WorkItem,
     ]),
   ],
   controllers: [RoadmapController],

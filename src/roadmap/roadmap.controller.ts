@@ -15,6 +15,7 @@ import { CreateObjectiveDto } from './dto/create-objective.dto';
 import { UpdateObjectiveDto } from './dto/update-objective.dto';
 import { CreateInitiativeDto } from './dto/create-initiative.dto';
 import { UpdateInitiativeDto } from './dto/update-initiative.dto';
+import { UpdateKeyPrefixDto } from './dto/update-key-prefix.dto';
 import { MoveInitiativeDto } from './dto/move-initiative.dto';
 import { CreateMilestoneDto } from './dto/create-milestone.dto';
 import { UpdateMilestoneDto } from './dto/update-milestone.dto';
@@ -214,6 +215,16 @@ export class RoadmapController {
   @HqRoles(HqRole.Operator)
   updateInitiative(@Param('id') id: string, @Body() dto: UpdateInitiativeDto) {
     return this.svc.updateInitiative(id, dto);
+  }
+
+  @Patch('initiatives/:id/key-prefix')
+  @HqRoles(HqRole.Owner)
+  @ApiOperation({
+    summary:
+      'Owner-only: change an initiative\'s auto-generated keyPrefix. Blocked once any task references it.',
+  })
+  updateKeyPrefix(@Param('id') id: string, @Body() dto: UpdateKeyPrefixDto) {
+    return this.svc.updateKeyPrefix(id, dto);
   }
 
   @Post('initiatives/:id/move')
