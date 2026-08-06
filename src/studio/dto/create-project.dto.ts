@@ -36,9 +36,9 @@ export const PROJECT_HEALTH_STATUSES = ['on_track', 'on_hold', 'behind', 'comple
  * `RoadmapInitiative`) is auto-generated from `name` — never accepted from
  * the client.
  *
- * `budget`/`cost` are accepted but not persisted — `RoadmapInitiative` has
- * no equivalent columns, and the real workbook has both empty for every
- * project anyway.
+ * `budget`/`cost` persist to `RoadmapInitiative.budget`/`.cost` (USD,
+ * decimal string) — the real workbook has both empty for every project, so
+ * expect `null` until someone fills them in.
  */
 export class CreateProjectDto {
   @IsString() @MinLength(1) @MaxLength(120) name!: string;

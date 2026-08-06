@@ -41,9 +41,9 @@ const ROADMAP_PRIORITY_TO_PROJECT: Record<RoadmapInitiativePriority, StudioProje
  * `roadmap_initiatives`/`work_items` — the unified project/task backbone
  * post-merge. `studio_projects`/`studio_tasks` no longer exist.
  *
- * `budget`/`cost`/`leadAssigneeEmail` are accepted on the project DTOs for
- * request-shape compatibility but not persisted — `RoadmapInitiative` has
- * no equivalent columns.
+ * `leadAssigneeEmail` is accepted on the project DTOs for request-shape
+ * compatibility but not persisted — `RoadmapInitiative` has no equivalent
+ * column. `budget`/`cost` round-trip for real (see `RoadmapInitiative.budget`/`.cost`).
  */
 @Injectable()
 export class StudioProjectsProxyService {
@@ -81,6 +81,8 @@ export class StudioProjectsProxyService {
       startDate: dto.startDate,
       targetDate: dto.dueDate,
       status: 'idea',
+      budget: dto.budget,
+      cost: dto.cost,
     });
     return this.toStudioProject(created);
   }
@@ -97,6 +99,8 @@ export class StudioProjectsProxyService {
       owner: dto.ownerEmail,
       startDate: dto.startDate ?? undefined,
       targetDate: dto.dueDate ?? undefined,
+      budget: dto.budget,
+      cost: dto.cost,
     });
     return this.toStudioProject(updated);
   }
@@ -146,8 +150,8 @@ export class StudioProjectsProxyService {
       type: p.type,
       priority: ROADMAP_PRIORITY_TO_PROJECT[p.priority],
       healthStatus: p.healthStatus,
-      budget: null,
-      cost: null,
+      budget: p.budget,
+      cost: p.cost,
       startDate: p.startDate,
       dueDate: p.targetDate,
       leadAssigneeEmail: null,

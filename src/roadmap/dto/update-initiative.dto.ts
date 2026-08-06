@@ -2,6 +2,7 @@ import {
   IsEmail,
   IsIn,
   IsInt,
+  IsNumberString,
   IsOptional,
   IsString,
   IsUUID,
@@ -60,4 +61,6 @@ export class UpdateInitiativeDto {
   @IsOptional() @IsString() @MaxLength(64) appId?: string | null;
   @IsOptional() @IsString() @MaxLength(120) tenantId?: string | null;
   @IsOptional() @IsInt() @Min(0) @Max(100) progress?: number;
+  @IsOptional() @IsNumberString() budget?: string | null;
+  @IsOptional() @IsNumberString() cost?: string | null;
 }

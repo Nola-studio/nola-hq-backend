@@ -128,6 +128,16 @@ export class RoadmapInitiative {
   @Column({ type: 'integer', default: 0 })
   progress!: number;
 
+  /**
+   * USD, no currency column. `numeric` columns come back from TypeORM as
+   * strings (same convention as `WorkItem.hoursSpent`) — never `number`.
+   */
+  @Column({ type: 'numeric', precision: 12, scale: 2, nullable: true })
+  budget!: string | null;
+
+  @Column({ type: 'numeric', precision: 12, scale: 2, nullable: true })
+  cost!: string | null;
+
   /** Rank inside the `status` kanban column (0-based, dense). */
   @Column({ type: 'integer', default: 0 })
   position!: number;

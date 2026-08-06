@@ -49,8 +49,6 @@ const ROADMAP_PRIORITY_TO_STUDIO: Record<string, 'high' | 'medium' | 'low'> = {
  * `studio_projects`/`studio_tasks` — the rows below translate each entity's
  * shape back into Studio's original vocabulary so this dashboard keeps
  * rendering exactly as it did before (same donut buckets, same fields).
- * `RoadmapInitiative` has no `budget`/`cost` columns, so those always read
- * as 0 here — the real workbook has them empty for every project anyway.
  */
 @Injectable()
 export class StudioDashboardService {
@@ -89,8 +87,8 @@ export class StudioDashboardService {
       type: p.type,
       priority: ROADMAP_PRIORITY_TO_STUDIO[p.priority] ?? null,
       healthStatus: p.healthStatus,
-      budget: null,
-      cost: null,
+      budget: p.budget,
+      cost: p.cost,
       startDate: p.startDate,
       dueDate: p.targetDate,
       archived: p.archived,
