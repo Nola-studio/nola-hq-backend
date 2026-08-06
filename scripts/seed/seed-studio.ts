@@ -1,8 +1,10 @@
 import 'reflect-metadata';
 import { join } from 'path';
+import { Repository } from 'typeorm';
 import AppDataSource from '../../src/data-source';
 import { readWorkbook, excelSerialToIsoDate } from './xlsx-reader';
 import { RoadmapInitiative } from '../../src/roadmap/roadmap-initiative.entity';
+import { slugifyProjectName } from '../../src/roadmap/roadmap-identifier';
 import { StudioDomain } from '../../src/studio/studio-domain.entity';
 import { StudioRecurring } from '../../src/studio/studio-recurring.entity';
 import { StudioExpense } from '../../src/studio/studio-expense.entity';
@@ -16,19 +18,30 @@ import { StudioExpense } from '../../src/studio/studio-expense.entity';
  * `onModuleInit` (see `docs/ops/studio-retirer-projets-semences.md` for why
  * Studio never auto-seeds anymore):
  *
- *   DATABASE_URL=postgres://... npx ts-node -r tsconfig-paths/register \
- *     scripts/seed/seed-studio.ts
+ *   DATABASE_URL=postgres://... npm run seed:studio
+ *
+ * (equivalently: DATABASE_URL=... npx ts-node -r tsconfig-paths/register scripts/seed/seed-studio.ts)
  *
  * The workbook (`scripts/seed/Project Management Dashboard.xlsx`, gitignored
  * — never commit it) is a mostly-empty template: only 3 of the Projects
  * sheet's 9 columns are filled for 4 of its 5 rows, and the Tasks sheet has
  * zero data rows. This script imports exactly what's there and leaves
  * everything else `null` — it does not invent budgets, dates, or tasks.
+ * `RoadmapInitiative` has no `budget`/`cost` columns yet (tracked
+ * separately), so those workbook columns aren't read here either — nothing
+ * to seed until that lands.
+ *
+ * Project identifiers are auto-generated from the workbook's project name
+ * (`P<name>` / `T<name>NN`, see `roadmap-identifier.ts`) — never hardcoded
+ * here, matching how a project created through the UI gets one.
  *
  * Idempotency:
- *   - Projects/Domains/Recurring: skipped if a row with the same natural
- *     key (project `key`, domain name, recurring `service`) already exists.
- *     Re-running never overwrites a since-edited row.
+ *   - Projects: skipped if a row with the same `title` already exists (the
+ *     natural key used to be the hand-picked `key`; now that `keyPrefix` is
+ *     auto-generated it can't be known ahead of a row's first insert).
+ *   - Domains/Recurring: skipped if a row with the same natural key (domain
+ *     name, recurring `service`) already exists. Re-running never
+ *     overwrites a since-edited row.
  *   - Billing → StudioExpense: no natural key exists in the sheet (a few
  *     rows are exact duplicates by design, e.g. two same-day $11 domain
  *     purchases). Instead, for each distinct row *fingerprint* the script
@@ -42,14 +55,21 @@ import { StudioExpense } from '../../src/studio/studio-expense.entity';
 
 const WORKBOOK_PATH = join(__dirname, 'Project Management Dashboard.xlsx');
 
-// key: 2-10 chars, uppercase, starts with a letter — CreateProjectDto's rule.
-const PROJECT_KEYS: Record<string, string> = {
-  'Nolaa HQ': 'NOLAAHQ',
-  'K-River': 'KRIVER',
-  Yekoli: 'YEKOLI',
-  Butterfly: 'BUTTRFLY',
-  Mycvmatcher: 'MYCVMATCH',
-};
+/**
+ * Mirrors `RoadmapService.generateKeyPrefix()` (`src/roadmap/roadmap.service.ts`):
+ * slugify the title, then dedupe against existing rows with a numeric
+ * suffix. Duplicated here rather than imported because the live service
+ * isn't constructible outside Nest's DI container — this is a one-off
+ * script, not a request handler.
+ */
+async function generateKeyPrefix(projectRepo: Repository<RoadmapInitiative>, title: string): Promise<string> {
+  const base = slugifyProjectName(title);
+  let candidate = base;
+  for (let suffix = 2; await projectRepo.findOne({ where: { keyPrefix: candidate } }); suffix += 1) {
+    candidate = `${base}${suffix}`;
+  }
+  return candidate;
+}
 
 const PROJECT_COLORS: Record<string, string> = {
   'Nolaa HQ': '#4F46E5',
@@ -150,16 +170,18 @@ async function main() {
       const priority = str(cell(row, 4));
       const status = str(cell(row, 5));
 
-      const key = PROJECT_KEYS[name];
-      if (!key) throw new Error(`No key mapping for project "${name}" — add one to PROJECT_KEYS`);
-
-      const existing = await projectRepo.findOne({ where: { keyPrefix: key } });
+      // Idempotency key is the workbook's project name, not `keyPrefix` —
+      // the latter is now auto-generated (P<name> / T<name>NN convention,
+      // see `roadmap-identifier.ts`), so it can't be known ahead of a row's
+      // first insert.
+      const existing = await projectRepo.findOne({ where: { title: name } });
       if (existing) {
-        console.log(`Project "${name}" (${key}) already exists — skipping`);
+        console.log(`Project "${name}" (${existing.keyPrefix}) already exists — skipping`);
         projectIdByName.set(name, existing.id);
         continue;
       }
 
+      const key = await generateKeyPrefix(projectRepo, name);
       const now = new Date();
       const saved = await projectRepo.save(
         projectRepo.create({
