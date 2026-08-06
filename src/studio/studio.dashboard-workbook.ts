@@ -25,6 +25,7 @@ export interface DashboardProject {
   cost: string | null;
   startDate: string | null;
   dueDate: string | null;
+  archived: boolean;
 }
 
 export interface DashboardTask {
@@ -33,6 +34,8 @@ export interface DashboardTask {
   assigneeEmail: string | null;
   dueDate: string | null;
   hoursSpent: string | null;
+  /** Whether this task's project is archived — resolved by the caller from `WorkItem.projectId`. */
+  projectArchived: boolean;
 }
 
 export interface DashboardExpense {
@@ -154,9 +157,18 @@ const TASK_ACTIVITY_BUCKET: Record<string, 'completed' | 'inProgress' | 'pending
   in_progress: 'inProgress',
 };
 
-export function buildSectionA(projects: DashboardProject[], tasks: DashboardTask[], range: PeriodRange, today: string): SectionA {
-  const projectsInPeriod = projects.filter((p) => inPeriod(p.startDate, range));
-  const tasksInPeriod = tasks.filter((t) => inPeriod(t.dueDate, range));
+export function buildSectionA(
+  projects: DashboardProject[],
+  tasks: DashboardTask[],
+  range: PeriodRange,
+  today: string,
+  includeArchived = false,
+): SectionA {
+  const visibleProjects = includeArchived ? projects : projects.filter((p) => !p.archived);
+  const visibleTasks = includeArchived ? tasks : tasks.filter((t) => !t.projectArchived);
+
+  const projectsInPeriod = visibleProjects.filter((p) => inPeriod(p.startDate, range));
+  const tasksInPeriod = visibleTasks.filter((t) => inPeriod(t.dueDate, range));
 
   const budget = sum(projectsInPeriod.map((p) => p.budget));
   const spendInPeriodPlaceholder = 0; // filled in by the caller via `withCrossSectionCost`
@@ -187,8 +199,8 @@ export function buildSectionA(projects: DashboardProject[], tasks: DashboardTask
       hoursSpent: sum(tasksInPeriod.map((t) => t.hoursSpent)),
       // Overdue is always "as of today", independent of the period filter —
       // same semantics as the kanban board's own `isLate`.
-      overdueProjects: projects.filter((p) => p.dueDate && p.dueDate < today && p.healthStatus !== 'completed').length,
-      overdueTasks: tasks.filter((t) => t.dueDate && t.dueDate < today && t.status !== 'done').length,
+      overdueProjects: visibleProjects.filter((p) => p.dueDate && p.dueDate < today && p.healthStatus !== 'completed').length,
+      overdueTasks: visibleTasks.filter((t) => t.dueDate && t.dueDate < today && t.status !== 'done').length,
     },
     donuts: {
       projectsByType: groupCount(projectsInPeriod, (p) => p.type ?? 'unspecified'),

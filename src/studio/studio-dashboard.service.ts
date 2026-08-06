@@ -83,6 +83,8 @@ export class StudioDashboardService {
     ]);
     const emailById = new Map(allTeam.map((m) => [m.id, m.email]));
 
+    const archivedProjectIds = new Set(allProjects.filter((p) => p.archived).map((p) => p.id));
+
     const dashboardProjects: DashboardProject[] = allProjects.map((p) => ({
       type: p.type,
       priority: ROADMAP_PRIORITY_TO_STUDIO[p.priority] ?? null,
@@ -91,6 +93,7 @@ export class StudioDashboardService {
       cost: null,
       startDate: p.startDate,
       dueDate: p.targetDate,
+      archived: p.archived,
     }));
     const dashboardTasks: DashboardTask[] = allTasks.map((t) => ({
       status: WORK_ITEM_STATUS_TO_STUDIO_STATUS[t.status],
@@ -98,9 +101,10 @@ export class StudioDashboardService {
       assigneeEmail: (t.assignee && emailById.get(t.assignee)) ?? null,
       dueDate: t.dueDate,
       hoursSpent: t.hoursSpent,
+      projectArchived: !!t.projectId && archivedProjectIds.has(t.projectId),
     }));
 
-    const sectionA = buildSectionA(dashboardProjects, dashboardTasks, range, today);
+    const sectionA = buildSectionA(dashboardProjects, dashboardTasks, range, today, query.includeArchived ?? false);
     const sectionB = buildSectionB(allExpenses, allDomains, allRecurring, range);
 
     return {

@@ -23,6 +23,7 @@ function project(over: Partial<DashboardProject> = {}): DashboardProject {
     cost: null,
     startDate: null,
     dueDate: null,
+    archived: false,
     ...over,
   };
 }
@@ -34,6 +35,7 @@ function task(over: Partial<DashboardTask> = {}): DashboardTask {
     assigneeEmail: null,
     dueDate: null,
     hoursSpent: null,
+    projectArchived: false,
     ...over,
   };
 }
@@ -121,6 +123,40 @@ describe('buildSectionA', () => {
     const feb = result.bars.budgetVsCostByMonth.find((m) => m.month === 2)!;
     expect(feb).toEqual({ month: 2, budget: 1000, cost: 200 });
     expect(result.bars.budgetVsCostByMonth).toHaveLength(12);
+  });
+
+  test('archived projects are excluded by default, along with their tasks', () => {
+    const projects = [
+      project({ archived: false, budget: '100', healthStatus: 'behind', dueDate: '2026-01-01' }),
+      project({ archived: true, budget: '900', healthStatus: 'behind', dueDate: '2026-01-01' }),
+    ];
+    const tasks = [
+      task({ projectArchived: false, status: 'in_progress', hoursSpent: '2', dueDate: '2026-01-01' }),
+      task({ projectArchived: true, status: 'in_progress', hoursSpent: '20', dueDate: '2026-01-01' }),
+    ];
+    const result = buildSectionA(projects, tasks, RANGE, TODAY);
+    expect(result.stats.projects).toBe(1);
+    expect(result.stats.budget).toBe(100);
+    expect(result.stats.tasks).toBe(1);
+    expect(result.stats.hoursSpent).toBe(2);
+    expect(result.stats.overdueProjects).toBe(1);
+    expect(result.stats.overdueTasks).toBe(1);
+  });
+
+  test('includeArchived=true folds archived projects and their tasks back in', () => {
+    const projects = [
+      project({ archived: false, budget: '100' }),
+      project({ archived: true, budget: '900' }),
+    ];
+    const tasks = [
+      task({ projectArchived: false, hoursSpent: '2' }),
+      task({ projectArchived: true, hoursSpent: '20' }),
+    ];
+    const result = buildSectionA(projects, tasks, RANGE, TODAY, true);
+    expect(result.stats.projects).toBe(2);
+    expect(result.stats.budget).toBe(1000);
+    expect(result.stats.tasks).toBe(2);
+    expect(result.stats.hoursSpent).toBe(22);
   });
 });
 
