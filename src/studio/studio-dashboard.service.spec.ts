@@ -11,7 +11,7 @@ describe('StudioDashboardService', () => {
   beforeEach(() => setSystemTime(now));
   afterEach(() => setSystemTime());
 
-  test('defaults to YTD and returns both sections, cost folding in Section B spend', async () => {
+  test('YTD period returns both sections, cost folding in Section B spend', async () => {
     const projects = [
       { type: 'infrastructure_cloud', priority: 'P1', healthStatus: 'behind', startDate: null, targetDate: null },
     ];
@@ -31,12 +31,18 @@ describe('StudioDashboardService', () => {
       repo(domains),
       repo(recurring),
     );
-    const result = await svc.get();
+    const result = await svc.get({ period: 'ytd' });
 
     expect(result.period).toEqual({ start: '2026-01-01', end: '2026-08-04', label: '2026-01-01 → 2026-08-04' });
     expect(result.sectionA.stats.projects).toBe(1);
     expect(result.sectionA.stats.cost).toBe(437.02);
     expect(result.sectionB.stats.spendInPeriodCents).toBe(43702);
+  });
+
+  test('no query defaults to the current calendar month', async () => {
+    const svc = new StudioDashboardService(repo([]), repo([]), repo([]), repo([]), repo([]), repo([]));
+    const result = await svc.get();
+    expect(result.period).toEqual({ start: '2026-08-01', end: '2026-08-31', label: '2026-08-01 → 2026-08-31' });
   });
 
   test('resolves a work item assignee id to an email via the team roster', async () => {

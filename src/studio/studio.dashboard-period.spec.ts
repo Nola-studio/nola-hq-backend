@@ -50,11 +50,11 @@ describe('resolvePeriod', () => {
     });
   });
 
-  test('no query defaults to YTD of the current year', () => {
+  test('no query defaults to the current calendar month', () => {
     expect(resolvePeriod({}, '2026-08-04')).toEqual({
-      start: '2026-01-01',
-      end: '2026-08-04',
-      label: '2026-01-01 → 2026-08-04',
+      start: '2026-08-01',
+      end: '2026-08-31',
+      label: '2026-08-01 → 2026-08-31',
     });
   });
 });

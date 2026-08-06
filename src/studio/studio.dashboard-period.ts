@@ -48,19 +48,20 @@ export function resolvePeriod(query: StudioPeriodQuery, today: string): PeriodRa
   let start: string;
   let end: string;
 
-  if (query.period === 'month') {
-    const month = query.month ?? Number(today.split('-')[1]);
-    start = `${year}-${pad2(month)}-01`;
-    end = `${year}-${pad2(month)}-${pad2(lastDayOfMonth(year, month))}`;
-  } else if (query.period === 'year') {
+  if (query.period === 'year') {
     start = `${year}-01-01`;
     end = `${year}-12-31`;
-  } else {
-    // YTD (default): Jan 1 of `year` through `today`, capped at Dec 31 of
-    // `year` — for a past year this is the same as the full-year range.
+  } else if (query.period === 'ytd') {
+    // Jan 1 of `year` through `today`, capped at Dec 31 of `year` — for a
+    // past year this is the same as the full-year range.
     start = `${year}-01-01`;
     const yearEnd = `${year}-12-31`;
     end = today < yearEnd ? (today > start ? today : start) : yearEnd;
+  } else {
+    // Month (default when `period` is omitted): the current calendar month.
+    const month = query.month ?? Number(today.split('-')[1]);
+    start = `${year}-${pad2(month)}-01`;
+    end = `${year}-${pad2(month)}-${pad2(lastDayOfMonth(year, month))}`;
   }
 
   return { start, end, label: `${start} → ${end}` };
