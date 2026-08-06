@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { PaginationDto, type PaginatedResult } from '../common/dto/pagination.dto';
 import { RoadmapInitiative } from '../roadmap/roadmap-initiative.entity';
+import { slugifyProjectName, taskReference } from '../roadmap/roadmap-identifier';
 import { TeamMember } from '../team/team-member.entity';
 import { PushService } from '../push/push.service';
 import { WorkItemComment } from './work-item-comment.entity';
@@ -115,9 +116,34 @@ export class WorkItemsService {
     return project;
   }
 
+  /**
+   * `keyPrefix` is the authoritative, auto-generated project token (see
+   * `roadmap-identifier.ts`). Legacy projects created before that
+   * convention may still have a null `keyPrefix` — fall back to slugifying
+   * the title rather than `appId`, a soft app-registry reference that was
+   * never actually the right source for this (bug: previously read
+   * `appId` here despite the entity doc calling `keyPrefix` authoritative).
+   */
   private projectPrefix(project: RoadmapInitiative): string {
-    const raw = project.appId || 'HQ';
-    return raw.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8) || 'HQ';
+    return project.keyPrefix || slugifyProjectName(project.title);
+  }
+
+  /**
+   * Atomically increments the project's `task_seq` counter and returns the
+   * post-increment value — race-safe under concurrent task creation (a
+   * single `UPDATE ... RETURNING`, no read-then-write gap), and never
+   * reused since the counter is only ever incremented, never recomputed
+   * from existing rows.
+   */
+  private async nextTaskSeq(projectId: string): Promise<number> {
+    const result = await this.projects
+      .createQueryBuilder()
+      .update(RoadmapInitiative)
+      .set({ taskSeq: () => '"task_seq" + 1' })
+      .where('id = :projectId', { projectId })
+      .returning('task_seq')
+      .execute();
+    return (result.raw[0] as { task_seq: number }).task_seq;
   }
 
   async create(dto: CreateWorkItemDto, reporter: string) {
@@ -125,8 +151,9 @@ export class WorkItemsService {
     if (dto.sprintId) await this.planning.assertSprint(dto.sprintId, project.id);
     const position = await this.repo.count({ where: { status: dto.status ?? 'backlog' } });
     const now = new Date();
-    let item = this.repo.create({
-      reference: null,
+    const seq = await this.nextTaskSeq(project.id);
+    const item = this.repo.create({
+      reference: taskReference(this.projectPrefix(project), seq),
       projectId: project.id,
       title: dto.title.trim(),
       description: dto.description?.trim() || null,
@@ -148,17 +175,15 @@ export class WorkItemsService {
       updatedAt: now,
       closedAt: dto.status === 'done' ? now : null,
     });
-    item = await this.repo.save(item);
-    item.reference = `${this.projectPrefix(project)}-${item.id}`;
-    item = await this.repo.save(item);
-    await this.record(item.id, reporter, 'created', {
-      reference: item.reference,
-      projectId: item.projectId,
-      status: item.status,
-      priority: item.priority,
+    const saved = await this.repo.save(item);
+    await this.record(saved.id, reporter, 'created', {
+      reference: saved.reference,
+      projectId: saved.projectId,
+      status: saved.status,
+      priority: saved.priority,
     });
-    void this.notifyAssignee(item, reporter, 'Nouveau ticket assigné', item.title);
-    return item;
+    void this.notifyAssignee(saved, reporter, 'Nouveau ticket assigné', saved.title);
+    return saved;
   }
 
   async update(id: number, dto: UpdateWorkItemDto, actor: string) {

@@ -11,7 +11,6 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
-import { Transform } from 'class-transformer';
 import type {
   RoadmapInitiativeHealthStatus,
   RoadmapInitiativeKind,
@@ -30,7 +29,6 @@ import {
   INITIATIVE_HEALTH_STATUSES,
   INITIATIVE_KINDS,
   INITIATIVE_TYPES,
-  KEY_PREFIX_PATTERN,
 } from './create-initiative.dto';
 
 /**
@@ -55,8 +53,6 @@ export class UpdateInitiativeDto {
   healthStatus?: RoadmapInitiativeHealthStatus | null;
   @IsOptional() @IsIn(INITIATIVE_TYPES as unknown as string[])
   type?: RoadmapInitiativeType | null;
-  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toUpperCase() : value))
-  @IsOptional() @Matches(KEY_PREFIX_PATTERN) keyPrefix?: string | null;
   @IsOptional() @Matches(QUARTER_PATTERN) quarter?: string | null;
   @IsOptional() @Matches(DATE_PATTERN) startDate?: string | null;
   @IsOptional() @Matches(DATE_PATTERN) targetDate?: string | null;

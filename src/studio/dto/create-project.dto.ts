@@ -8,7 +8,6 @@ import {
   MaxLength,
   MinLength,
 } from 'class-validator';
-import { Transform } from 'class-transformer';
 import type {
   RoadmapInitiativeHealthStatus,
   RoadmapInitiativeType,
@@ -33,24 +32,15 @@ export const PROJECT_HEALTH_STATUSES = ['on_track', 'on_hold', 'behind', 'comple
 
 /**
  * POST /studio/projects — Studio's original request shape, kept for the
- * Studio frontend. `key` becomes the `keyPrefix` of the underlying
- * `RoadmapInitiative` (`roadmap_initiatives` is the unified project
- * backbone post-merge), so it's restricted to the same shape as the
- * original hand-picked defaults: uppercase letters/digits, starting with a
- * letter. Immutable once set — see `UpdateProjectDto`.
+ * Studio frontend. The project's identifier (`keyPrefix` on the underlying
+ * `RoadmapInitiative`) is auto-generated from `name` — never accepted from
+ * the client.
  *
  * `budget`/`cost` are accepted but not persisted — `RoadmapInitiative` has
  * no equivalent columns, and the real workbook has both empty for every
  * project anyway.
  */
 export class CreateProjectDto {
-  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toUpperCase() : value))
-  @IsString()
-  @Matches(/^[A-Z][A-Z0-9]{1,9}$/, {
-    message: 'Le code doit faire 2 à 10 caractères alphanumériques (majuscules), et commencer par une lettre.',
-  })
-  key!: string;
-
   @IsString() @MinLength(1) @MaxLength(120) name!: string;
 
   @IsOptional() @IsString() @MaxLength(2000) description?: string;

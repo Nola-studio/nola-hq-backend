@@ -80,10 +80,14 @@ export class RoadmapInitiative {
   type!: RoadmapInitiativeType | null;
 
   /**
-   * Immutable, user-typed prefix (e.g. `YEK`) tasks filed under this
-   * initiative use to build their identifiers. Not a reuse of `appId`,
-   * which is a soft reference into the apps registry `WorkItemsService`
-   * derives task-reference prefixes from — a different concept.
+   * Immutable, auto-generated from `title` at creation time (accents/spaces
+   * stripped, deduplicated with a numeric suffix on collision) — never
+   * typed by a user. Tasks filed under this initiative build their
+   * reference from it: project id is `P<keyPrefix>`, task references are
+   * `T<keyPrefix><NN>` (see `roadmap-identifier.ts`). Legacy rows created
+   * before this convention may still hold an old hand-typed value (e.g.
+   * `YEK`) — never backfilled. Not a reuse of `appId`, a soft reference
+   * into the apps registry, unrelated to identifiers.
    */
   @Column({ type: 'varchar', length: 12, name: 'key_prefix', nullable: true })
   keyPrefix!: string | null;
@@ -137,6 +141,14 @@ export class RoadmapInitiative {
    */
   @Column({ type: 'boolean', default: false })
   archived!: boolean;
+
+  /**
+   * Per-project monotonic counter backing auto-generated work item
+   * references (`T<keyPrefix><NN>`). Only ever incremented — a deleted
+   * task's number is never reused.
+   */
+  @Column({ type: 'integer', name: 'task_seq', default: 0 })
+  taskSeq!: number;
 
   @Column({ name: 'created_at' })
   createdAt!: Date;

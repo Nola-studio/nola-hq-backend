@@ -21,6 +21,7 @@ import {
   planMove,
 } from './roadmap.board';
 import { deriveInitiativeProgress } from './roadmap.progress';
+import { slugifyProjectName } from './roadmap-identifier';
 import {
   CascadeObjective,
   KeyResultComputed,
@@ -469,6 +470,21 @@ export class RoadmapService {
     return { ...this.initiativeView(initiative, milestones), milestones };
   }
 
+  /**
+   * Derives `keyPrefix` from the title: accents/spaces/punctuation
+   * stripped, source casing kept. On collision with an existing project,
+   * appends the smallest integer suffix (2, 3, ...) that's free — never
+   * typed by a user, never reused.
+   */
+  private async generateKeyPrefix(title: string): Promise<string> {
+    const base = slugifyProjectName(title);
+    let candidate = base;
+    for (let suffix = 2; await this.initiatives.findOne({ where: { keyPrefix: candidate } }); suffix += 1) {
+      candidate = `${base}${suffix}`;
+    }
+    return candidate;
+  }
+
   async createInitiative(
     dto: CreateInitiativeDto,
   ): Promise<RoadmapInitiativeView> {
@@ -485,7 +501,7 @@ export class RoadmapService {
       color: dto.color ?? '#94A3B8',
       healthStatus: dto.healthStatus ?? null,
       type: dto.type ?? null,
-      keyPrefix: dto.keyPrefix ?? null,
+      keyPrefix: await this.generateKeyPrefix(dto.title),
       quarter: dto.quarter ?? null,
       startDate: dto.startDate ?? null,
       targetDate: dto.targetDate ?? null,
@@ -520,7 +536,7 @@ export class RoadmapService {
     if (dto.color !== undefined) initiative.color = dto.color;
     if (dto.healthStatus !== undefined) initiative.healthStatus = dto.healthStatus ?? null;
     if (dto.type !== undefined) initiative.type = dto.type ?? null;
-    if (dto.keyPrefix !== undefined) initiative.keyPrefix = dto.keyPrefix ?? null;
+    // keyPrefix is immutable — auto-generated once at creation, never editable afterward.
     if (dto.quarter !== undefined) initiative.quarter = dto.quarter ?? null;
     if (dto.startDate !== undefined) initiative.startDate = dto.startDate ?? null;
     if (dto.targetDate !== undefined)

@@ -11,7 +11,6 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
-import { Transform } from 'class-transformer';
 import type {
   RoadmapInitiativeHealthStatus,
   RoadmapInitiativeKind,
@@ -37,7 +36,6 @@ export const INITIATIVE_TYPES = [
 ] as const;
 export const INITIATIVE_HEALTH_STATUSES = ['on_track', 'on_hold', 'behind', 'completed'] as const;
 export const HEX_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
-export const KEY_PREFIX_PATTERN = /^[A-Z][A-Z0-9]{1,11}$/;
 
 /** `2026-07-25` — plain calendar day, matching the `date` columns. */
 export const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -67,8 +65,6 @@ export class CreateInitiativeDto {
   healthStatus?: RoadmapInitiativeHealthStatus;
   @IsOptional() @IsIn(INITIATIVE_TYPES as unknown as string[])
   type?: RoadmapInitiativeType;
-  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toUpperCase() : value))
-  @IsOptional() @Matches(KEY_PREFIX_PATTERN) keyPrefix?: string;
   @IsOptional() @Matches(QUARTER_PATTERN) quarter?: string;
   @IsOptional() @Matches(DATE_PATTERN) startDate?: string;
   @IsOptional() @Matches(DATE_PATTERN) targetDate?: string;

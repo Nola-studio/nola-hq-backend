@@ -70,16 +70,12 @@ export class StudioProjectsProxyService {
   }
 
   async createProject(dto: CreateProjectDto) {
-    const clash = await this.projects.findOne({ where: { keyPrefix: dto.key } });
-    if (clash) throw new ConflictException(`Le code « ${dto.key} » est déjà utilisé`);
-
     const created = await this.roadmap.createInitiative({
       title: dto.name,
       summary: dto.description,
       color: dto.color,
       healthStatus: dto.healthStatus,
       type: dto.type,
-      keyPrefix: dto.key,
       priority: dto.priority ? PROJECT_PRIORITY_TO_ROADMAP[dto.priority] : undefined,
       owner: dto.ownerEmail,
       startDate: dto.startDate,
