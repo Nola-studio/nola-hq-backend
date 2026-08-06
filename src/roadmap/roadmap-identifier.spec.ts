@@ -1,5 +1,5 @@
 import { test, expect, describe } from 'bun:test';
-import { slugifyProjectName, projectIdentifier, taskReference } from './roadmap-identifier';
+import { slugifyProjectName, projectIdentifier, taskReference, backfillKeyPrefixes } from './roadmap-identifier';
 
 describe('slugifyProjectName', () => {
   test('strips spaces', () => {
@@ -36,5 +36,47 @@ describe('projectIdentifier / taskReference', () => {
 
   test('task reference does not truncate beyond 2 digits', () => {
     expect(taskReference('Nolaa', 123)).toBe('TNolaa123');
+  });
+});
+
+describe('backfillKeyPrefixes', () => {
+  test('assigns a slug to a null-key row that never had a keyPrefix', () => {
+    const assignments = backfillKeyPrefixes([{ id: '1', title: 'Nolaa HQ' }], []);
+    expect(assignments).toEqual([{ id: '1', keyPrefix: 'NolaaHQ' }]);
+  });
+
+  test('dedupes against already-assigned prefixes with a numeric suffix', () => {
+    const assignments = backfillKeyPrefixes([{ id: '1', title: 'Nolaa' }], ['Nolaa']);
+    expect(assignments).toEqual([{ id: '1', keyPrefix: 'Nolaa2' }]);
+  });
+
+  test('dedupes within the same batch, in row order', () => {
+    const assignments = backfillKeyPrefixes(
+      [
+        { id: '1', title: 'Nolaa' },
+        { id: '2', title: 'Nolaa' },
+        { id: '3', title: 'Nolaa' },
+      ],
+      [],
+    );
+    expect(assignments).toEqual([
+      { id: '1', keyPrefix: 'Nolaa' },
+      { id: '2', keyPrefix: 'Nolaa2' },
+      { id: '3', keyPrefix: 'Nolaa3' },
+    ]);
+  });
+
+  test('rows with distinct titles never collide', () => {
+    const assignments = backfillKeyPrefixes(
+      [
+        { id: '1', title: 'Yekoli' },
+        { id: '2', title: 'K-River' },
+      ],
+      ['Nolaa'],
+    );
+    expect(assignments).toEqual([
+      { id: '1', keyPrefix: 'Yekoli' },
+      { id: '2', keyPrefix: 'KRiver' },
+    ]);
   });
 });

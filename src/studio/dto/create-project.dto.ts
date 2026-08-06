@@ -9,9 +9,11 @@ import {
   MinLength,
 } from 'class-validator';
 import type {
+  RoadmapInitiativeCountry,
   RoadmapInitiativeHealthStatus,
   RoadmapInitiativeType,
 } from '../../roadmap/roadmap-initiative.entity';
+import { INITIATIVE_COUNTRIES } from '../../roadmap/dto/create-initiative.dto';
 import { DATE_PATTERN } from './create-task.dto';
 
 /** `#RRGGBB`. */
@@ -57,4 +59,5 @@ export class CreateProjectDto {
   @IsOptional() @Matches(DATE_PATTERN) startDate?: string;
   @IsOptional() @Matches(DATE_PATTERN) dueDate?: string;
   @IsOptional() @IsEmail() @MaxLength(120) leadAssigneeEmail?: string;
+  @IsOptional() @IsIn(INITIATIVE_COUNTRIES as unknown as string[]) country?: RoadmapInitiativeCountry;
 }

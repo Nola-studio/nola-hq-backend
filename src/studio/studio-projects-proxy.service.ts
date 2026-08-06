@@ -61,7 +61,9 @@ export class StudioProjectsProxyService {
   // ── projects ─────────────────────────────────────────────────────
 
   async listProjects() {
-    const rows = await this.projects.find({ order: { keyPrefix: 'ASC' } });
+    // `title` as a tiebreaker: `keyPrefix` can be null on a row that
+    // predates auto-generated identifiers and hasn't been backfilled yet.
+    const rows = await this.projects.find({ order: { keyPrefix: 'ASC', title: 'ASC' } });
     return rows.map((p) => this.toStudioProject(p));
   }
 
@@ -83,6 +85,7 @@ export class StudioProjectsProxyService {
       status: 'idea',
       budget: dto.budget,
       cost: dto.cost,
+      country: dto.country,
     });
     return this.toStudioProject(created);
   }
@@ -101,6 +104,7 @@ export class StudioProjectsProxyService {
       targetDate: dto.dueDate ?? undefined,
       budget: dto.budget,
       cost: dto.cost,
+      country: dto.country,
     });
     return this.toStudioProject(updated);
   }
@@ -152,6 +156,7 @@ export class StudioProjectsProxyService {
       healthStatus: p.healthStatus,
       budget: p.budget,
       cost: p.cost,
+      country: p.country,
       startDate: p.startDate,
       dueDate: p.targetDate,
       leadAssigneeEmail: null,

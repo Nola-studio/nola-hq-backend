@@ -511,6 +511,7 @@ export class RoadmapService {
       progress: dto.progress ?? 0,
       budget: dto.budget ?? null,
       cost: dto.cost ?? null,
+      country: dto.country ?? null,
       // Lands at the bottom of its column — a new card never jumps the queue.
       position: await this.initiatives.count({ where: { status } }),
       createdAt: now,
@@ -549,6 +550,7 @@ export class RoadmapService {
     if (dto.progress !== undefined) initiative.progress = dto.progress;
     if (dto.budget !== undefined) initiative.budget = dto.budget ?? null;
     if (dto.cost !== undefined) initiative.cost = dto.cost ?? null;
+    if (dto.country !== undefined) initiative.country = dto.country ?? null;
     initiative.updatedAt = new Date();
 
     const saved = await this.initiatives.save(initiative);

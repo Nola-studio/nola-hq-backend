@@ -13,6 +13,7 @@ import {
   MinLength,
 } from 'class-validator';
 import type {
+  RoadmapInitiativeCountry,
   RoadmapInitiativeHealthStatus,
   RoadmapInitiativeKind,
   RoadmapInitiativePriority,
@@ -36,6 +37,8 @@ export const INITIATIVE_TYPES = [
   'other',
 ] as const;
 export const INITIATIVE_HEALTH_STATUSES = ['on_track', 'on_hold', 'behind', 'completed'] as const;
+/** Where we operate today — add here (and nowhere else) to onboard a new country. */
+export const INITIATIVE_COUNTRIES = ['CA', 'CD'] as const;
 export const HEX_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
 
 /** `2026-07-25` — plain calendar day, matching the `date` columns. */
@@ -77,4 +80,5 @@ export class CreateInitiativeDto {
   /** USD, decimal string. */
   @IsOptional() @IsNumberString() budget?: string;
   @IsOptional() @IsNumberString() cost?: string;
+  @IsOptional() @IsIn(INITIATIVE_COUNTRIES as unknown as string[]) country?: RoadmapInitiativeCountry;
 }

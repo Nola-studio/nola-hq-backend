@@ -29,6 +29,9 @@ export type RoadmapInitiativeType =
 /** Project *health*, distinct from the `status` lifecycle. */
 export type RoadmapInitiativeHealthStatus = 'on_track' | 'on_hold' | 'behind' | 'completed';
 
+/** Where the project operates. Plain varchar (not a DB enum) so a third country is a code change, not a migration. */
+export type RoadmapInitiativeCountry = 'CA' | 'CD';
+
 /**
  * Middle level of the roadmap: a **project / workstream** that serves an
  * objective. Initiatives are what the kanban board (`GET /roadmap/board`)
@@ -86,8 +89,12 @@ export class RoadmapInitiative {
    * reference from it: project id is `P<keyPrefix>`, task references are
    * `T<keyPrefix><NN>` (see `roadmap-identifier.ts`). Legacy rows created
    * before this convention may still hold an old hand-typed value (e.g.
-   * `YEK`) — never backfilled. Not a reuse of `appId`, a soft reference
-   * into the apps registry, unrelated to identifiers.
+   * `YEK`) — left as-is. Rows that had no value at all were backfilled once
+   * by `1786900000000-BackfillNullKeyPrefixes`; every reader must still
+   * treat this as nullable (`WorkItemsService.projectPrefix()`, the Studio
+   * project list's sort/display) since that backfill can't be guaranteed to
+   * have run against every environment. Not a reuse of `appId`, a soft
+   * reference into the apps registry, unrelated to identifiers.
    */
   @Column({ type: 'varchar', length: 12, name: 'key_prefix', nullable: true })
   keyPrefix!: string | null;
@@ -137,6 +144,10 @@ export class RoadmapInitiative {
 
   @Column({ type: 'numeric', precision: 12, scale: 2, nullable: true })
   cost!: string | null;
+
+  /** ISO 3166-1 alpha-2. Just Canada/DRC today — see `RoadmapInitiativeCountry`. */
+  @Column({ type: 'varchar', length: 2, nullable: true })
+  country!: RoadmapInitiativeCountry | null;
 
   /** Rank inside the `status` kanban column (0-based, dense). */
   @Column({ type: 'integer', default: 0 })

@@ -13,6 +13,7 @@ import {
   MinLength,
 } from 'class-validator';
 import type {
+  RoadmapInitiativeCountry,
   RoadmapInitiativeHealthStatus,
   RoadmapInitiativeKind,
   RoadmapInitiativePriority,
@@ -27,6 +28,7 @@ import { QUARTER_PATTERN } from './create-objective.dto';
 import {
   DATE_PATTERN,
   HEX_COLOR_PATTERN,
+  INITIATIVE_COUNTRIES,
   INITIATIVE_HEALTH_STATUSES,
   INITIATIVE_KINDS,
   INITIATIVE_TYPES,
@@ -63,4 +65,5 @@ export class UpdateInitiativeDto {
   @IsOptional() @IsInt() @Min(0) @Max(100) progress?: number;
   @IsOptional() @IsNumberString() budget?: string | null;
   @IsOptional() @IsNumberString() cost?: string | null;
+  @IsOptional() @IsIn(INITIATIVE_COUNTRIES as unknown as string[]) country?: RoadmapInitiativeCountry | null;
 }

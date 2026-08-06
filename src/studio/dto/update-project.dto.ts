@@ -1,8 +1,10 @@
 import { IsEmail, IsIn, IsNumberString, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
 import type {
+  RoadmapInitiativeCountry,
   RoadmapInitiativeHealthStatus,
   RoadmapInitiativeType,
 } from '../../roadmap/roadmap-initiative.entity';
+import { INITIATIVE_COUNTRIES } from '../../roadmap/dto/create-initiative.dto';
 import {
   HEX_COLOR_PATTERN,
   PROJECT_HEALTH_STATUSES,
@@ -31,4 +33,5 @@ export class UpdateProjectDto {
   @IsOptional() @Matches(DATE_PATTERN) startDate?: string | null;
   @IsOptional() @Matches(DATE_PATTERN) dueDate?: string | null;
   @IsOptional() @IsEmail() @MaxLength(120) leadAssigneeEmail?: string | null;
+  @IsOptional() @IsIn(INITIATIVE_COUNTRIES as unknown as string[]) country?: RoadmapInitiativeCountry | null;
 }
