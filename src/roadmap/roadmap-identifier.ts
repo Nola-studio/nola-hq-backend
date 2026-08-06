@@ -8,10 +8,24 @@
 const COMBINING_MARKS = /[\u0300-\u036f]/g;
 const NON_ALPHANUMERIC = /[^A-Za-z0-9]/g;
 
-/** Strips accents, spaces and punctuation; keeps the source casing. Falls back to `Projet` for an all-punctuation name. */
+/**
+ * `roadmap_initiatives.key_prefix` is `varchar(12)`. Reserve 2 chars for a
+ * numeric collision suffix (`generateKeyPrefix`/`backfillKeyPrefixes` both
+ * append one on a duplicate) so the longest possible candidate
+ * (`<10 chars><2-digit suffix>`) still fits.
+ */
+const MAX_SLUG_LENGTH = 10;
+
+/**
+ * Strips accents, spaces and punctuation, then truncates to fit
+ * `key_prefix`; keeps the source casing. Falls back to `Projet` for an
+ * all-punctuation name. A title with no separators (e.g. "Ajouter
+ * connexion hors ligne" written as one run-on word) would otherwise slugify
+ * past the column limit and fail the `UPDATE`/`INSERT` outright.
+ */
 export function slugifyProjectName(name: string): string {
   const stripped = name.normalize('NFD').replace(COMBINING_MARKS, '').replace(NON_ALPHANUMERIC, '');
-  return stripped || 'Projet';
+  return stripped.slice(0, MAX_SLUG_LENGTH) || 'Projet';
 }
 
 export function projectIdentifier(keyPrefix: string): string {

@@ -21,6 +21,13 @@ describe('slugifyProjectName', () => {
   test('falls back to Projet for an all-punctuation name', () => {
     expect(slugifyProjectName('---')).toBe('Projet');
   });
+
+  test('truncates to fit key_prefix (varchar(12), 2 chars reserved for a collision suffix)', () => {
+    // A run-on title with no separators — real production case that once
+    // slipped past the column limit and failed the UPDATE outright.
+    expect(slugifyProjectName('Ajouter connexion hors ligne'.replace(/ /g, ''))).toBe('Ajoutercon');
+    expect(slugifyProjectName('Ajouter connexion hors ligne'.replace(/ /g, '')).length).toBeLessThanOrEqual(10);
+  });
 });
 
 describe('projectIdentifier / taskReference', () => {
