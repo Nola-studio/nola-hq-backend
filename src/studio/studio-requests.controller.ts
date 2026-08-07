@@ -5,6 +5,7 @@ import { CreateStudioRequestDto } from './dto/create-studio-request.dto';
 import { UpdateStudioRequestDto } from './dto/update-studio-request.dto';
 import { UpdateStudioRequestStatusDto } from './dto/update-studio-request-status.dto';
 import { ListStudioRequestsDto } from './dto/list-studio-requests.dto';
+import { ConvertStudioRequestDto } from './dto/convert-studio-request.dto';
 import { HqRoles } from '../common/auth/hq-roles.decorator';
 import { HqRole } from '../common/auth/hq-role.enum';
 import { CurrentUser, type AuthenticatedUser } from '../common/auth/current-user.decorator';
@@ -55,6 +56,13 @@ export class StudioRequestsController {
   @ApiOperation({ summary: 'The only way to move a request through its lifecycle' })
   updateStatus(@Param('id') id: string, @Body() dto: UpdateStudioRequestStatusDto) {
     return this.svc.updateStatus(id, dto);
+  }
+
+  @Post(':id/convert')
+  @HqRoles(HqRole.Operator)
+  @ApiOperation({ summary: 'Files the ticket a request resolves into and links the two, setting status to acceptee' })
+  convert(@Param('id') id: string, @Body() dto: ConvertStudioRequestDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.svc.convert(id, dto, user.email);
   }
 
   @Delete(':id')
