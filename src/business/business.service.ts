@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { FindOptionsWhere, Repository } from 'typeorm';
-import { RoadmapInitiative } from '../roadmap/roadmap-initiative.entity';
+import { RoadmapInitiative, type RoadmapInitiativeScope } from '../roadmap/roadmap-initiative.entity';
 import { BusinessClient } from './business-client.entity';
 import { BusinessContract } from './business-contract.entity';
 import { BusinessExpense } from './business-expense.entity';
@@ -468,10 +468,10 @@ export class BusinessService {
     });
   }
 
-  async projectPortfolio() {
+  async projectPortfolio(scope?: RoadmapInitiativeScope) {
     const [financials, projects, workItems, risks, invoices, timeEntries, documents, reminders] = await Promise.all([
       this.projectProfitability(),
-      this.projects.find({ order: { priority: 'ASC', updatedAt: 'DESC' } }),
+      this.projects.find({ where: scope ? { scope } : {}, order: { priority: 'ASC', updatedAt: 'DESC' } }),
       this.workItems.find(),
       this.risks.find(),
       this.invoices.find(),

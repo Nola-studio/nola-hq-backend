@@ -17,6 +17,7 @@ import { CreateInitiativeDto } from './dto/create-initiative.dto';
 import { UpdateInitiativeDto } from './dto/update-initiative.dto';
 import { UpdateKeyPrefixDto } from './dto/update-key-prefix.dto';
 import { UpdateScopeDto } from './dto/update-scope.dto';
+import { BoardQueryDto } from './dto/board-query.dto';
 import { MoveInitiativeDto } from './dto/move-initiative.dto';
 import { CreateMilestoneDto } from './dto/create-milestone.dto';
 import { UpdateMilestoneDto } from './dto/update-milestone.dto';
@@ -52,16 +53,18 @@ export class RoadmapController {
 
   @Get('board')
   @HqRoles(HqRole.Viewer)
-  @ApiOperation({ summary: 'Initiatives as kanban columns, ordered by position' })
-  board() {
-    return this.svc.board();
+  @ApiOperation({ summary: 'Kanban columns, ordered by position. Omit scope for every row; Roadmap itself passes scope=initiative.' })
+  @ApiQuery({ name: 'scope', required: false, enum: ['project', 'initiative'] })
+  board(@Query() query: BoardQueryDto) {
+    return this.svc.board(query.scope);
   }
 
   @Get('timeline')
   @HqRoles(HqRole.Viewer)
-  @ApiOperation({ summary: 'Initiatives bucketed by quarter (unscheduled last)' })
-  timeline() {
-    return this.svc.timeline();
+  @ApiOperation({ summary: 'Bucketed by quarter (unscheduled last). Omit scope for every row; Roadmap itself passes scope=initiative.' })
+  @ApiQuery({ name: 'scope', required: false, enum: ['project', 'initiative'] })
+  timeline(@Query() query: BoardQueryDto) {
+    return this.svc.timeline(query.scope);
   }
 
   @Get('metrics')

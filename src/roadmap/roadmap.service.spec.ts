@@ -270,7 +270,7 @@ function makeScopedInitiativesRepo(rows: Array<Row & { scope: 'project' | 'initi
 }
 
 describe('RoadmapService scope', () => {
-  test('board() excludes durable products (scope: project)', async () => {
+  test('board(undefined) returns every row — scope is opt-in, other screens\' pickers need durable products too', async () => {
     const repo = makeScopedInitiativesRepo([
       { ...row('a', 'planned', 0), scope: 'initiative' },
       { ...row('b', 'planned', 1), scope: 'project' },
@@ -278,6 +278,18 @@ describe('RoadmapService scope', () => {
     const svc = makeService(repo);
 
     const columns = await svc.board();
+    const planned = columns.find((c) => c.id === 'planned')!;
+    expect(planned.items.map((i) => i.id).sort()).toEqual(['a', 'b']);
+  });
+
+  test("board('initiative') excludes durable products — Roadmap's own board opts in", async () => {
+    const repo = makeScopedInitiativesRepo([
+      { ...row('a', 'planned', 0), scope: 'initiative' },
+      { ...row('b', 'planned', 1), scope: 'project' },
+    ]);
+    const svc = makeService(repo);
+
+    const columns = await svc.board('initiative');
     const planned = columns.find((c) => c.id === 'planned')!;
     expect(planned.items.map((i) => i.id)).toEqual(['a']);
   });

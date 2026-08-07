@@ -143,15 +143,20 @@ export class RoadmapService {
 
   // ── board & timeline ─────────────────────────────────────────────
 
-  /** Kanban columns by status, each ordered by `position`. Durable products (`scope: 'project'`) live on `/projects`, never here. */
-  async board(): Promise<RoadmapBoardColumn<RoadmapInitiativeView>[]> {
-    const views = await this.withProgress(await this.initiatives.find({ where: { scope: 'initiative' } }));
+  /**
+   * Kanban columns by status, each ordered by `position`. `scope` is
+   * opt-in: omitted, every row comes back (Work's and Business's project
+   * pickers need durable products too); Roadmap's own board passes
+   * `scope: 'initiative'` to see only bounded work.
+   */
+  async board(scope?: RoadmapInitiativeScope): Promise<RoadmapBoardColumn<RoadmapInitiativeView>[]> {
+    const views = await this.withProgress(await this.initiatives.find({ where: scope ? { scope } : {} }));
     return buildBoard(views);
   }
 
-  /** Initiatives bucketed by quarter, unscheduled ones last. Durable products never appear on the timeline. */
-  async timeline(): Promise<RoadmapTimelineBucket<RoadmapInitiativeView>[]> {
-    const views = await this.withProgress(await this.initiatives.find({ where: { scope: 'initiative' } }));
+  /** Bucketed by quarter, unscheduled ones last. Same opt-in `scope` as `board()`. */
+  async timeline(scope?: RoadmapInitiativeScope): Promise<RoadmapTimelineBucket<RoadmapInitiativeView>[]> {
+    const views = await this.withProgress(await this.initiatives.find({ where: scope ? { scope } : {} }));
     return buildTimeline(views);
   }
 

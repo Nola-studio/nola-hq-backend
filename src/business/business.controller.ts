@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { HqRole } from '../common/auth/hq-role.enum';
 import { HqRoles } from '../common/auth/hq-roles.decorator';
 import { BusinessService } from './business.service';
@@ -15,6 +15,7 @@ import {
   UpdateBusinessInvoiceDto,
   UpdateBusinessOpportunityDto,
   UpsertProjectBudgetDto,
+  ListProjectPortfolioDto,
 } from './dto/business.dto';
 
 @ApiBearerAuth()
@@ -34,8 +35,9 @@ export class BusinessController {
   }
 
   @Get('project-portfolio')
-  projectPortfolio() {
-    return this.svc.projectPortfolio();
+  @ApiQuery({ name: 'scope', required: false, enum: ['project', 'initiative'] })
+  projectPortfolio(@Query() query: ListProjectPortfolioDto) {
+    return this.svc.projectPortfolio(query.scope);
   }
 
   @Get('clients')
