@@ -30,6 +30,7 @@ describe('StudioDashboardService', () => {
       repo(expenses),
       repo(domains),
       repo(recurring),
+      repo([]),
     );
     const result = await svc.get({ period: 'ytd' });
 
@@ -40,7 +41,7 @@ describe('StudioDashboardService', () => {
   });
 
   test('no query defaults to the current calendar month', async () => {
-    const svc = new StudioDashboardService(repo([]), repo([]), repo([]), repo([]), repo([]), repo([]));
+    const svc = new StudioDashboardService(repo([]), repo([]), repo([]), repo([]), repo([]), repo([]), repo([]));
     const result = await svc.get();
     expect(result.period).toEqual({ start: '2026-08-01', end: '2026-08-31', label: '2026-08-01 → 2026-08-31' });
   });
@@ -59,6 +60,7 @@ describe('StudioDashboardService', () => {
       repo([]),
       repo([]),
       repo([]),
+      repo([]),
     );
     const result = await svc.get();
 
@@ -66,7 +68,7 @@ describe('StudioDashboardService', () => {
   });
 
   test('honours explicit period/year/month query params', async () => {
-    const svc = new StudioDashboardService(repo([]), repo([]), repo([]), repo([]), repo([]), repo([]));
+    const svc = new StudioDashboardService(repo([]), repo([]), repo([]), repo([]), repo([]), repo([]), repo([]));
     const result = await svc.get({ period: 'month', year: 2026, month: 2 });
     expect(result.period).toEqual({ start: '2026-02-01', end: '2026-02-28', label: '2026-02-01 → 2026-02-28' });
   });
