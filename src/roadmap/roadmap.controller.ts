@@ -16,6 +16,7 @@ import { UpdateObjectiveDto } from './dto/update-objective.dto';
 import { CreateInitiativeDto } from './dto/create-initiative.dto';
 import { UpdateInitiativeDto } from './dto/update-initiative.dto';
 import { UpdateKeyPrefixDto } from './dto/update-key-prefix.dto';
+import { UpdateScopeDto } from './dto/update-scope.dto';
 import { MoveInitiativeDto } from './dto/move-initiative.dto';
 import { CreateMilestoneDto } from './dto/create-milestone.dto';
 import { UpdateMilestoneDto } from './dto/update-milestone.dto';
@@ -225,6 +226,16 @@ export class RoadmapController {
   })
   updateKeyPrefix(@Param('id') id: string, @Body() dto: UpdateKeyPrefixDto) {
     return this.svc.updateKeyPrefix(id, dto);
+  }
+
+  @Patch('initiatives/:id/scope')
+  @HqRoles(HqRole.Owner)
+  @ApiOperation({
+    summary:
+      "Owner-only: reclassify between 'project' (durable product) and 'initiative' (bounded work). Works regardless of the row's current scope.",
+  })
+  updateScope(@Param('id') id: string, @Body() dto: UpdateScopeDto) {
+    return this.svc.updateScope(id, dto);
   }
 
   @Post('initiatives/:id/move')

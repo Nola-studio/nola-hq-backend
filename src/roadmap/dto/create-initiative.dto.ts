@@ -39,6 +39,14 @@ export const INITIATIVE_TYPES = [
 export const INITIATIVE_HEALTH_STATUSES = ['on_track', 'on_hold', 'behind', 'completed'] as const;
 /** Where we operate today — add here (and nowhere else) to onboard a new country. */
 export const INITIATIVE_COUNTRIES = ['CA', 'CD'] as const;
+/**
+ * Not a field on this DTO — `scope` is forced server-side by which endpoint
+ * creates the row (`RoadmapController.createInitiative` → `'initiative'`,
+ * `StudioProjectsProxyService.createProject` → `'project'`), never accepted
+ * from the client. Exported here for `UpdateScopeDto` and the Studio
+ * projects list filter to share.
+ */
+export const INITIATIVE_SCOPES = ['project', 'initiative'] as const;
 export const HEX_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
 
 /** `2026-07-25` — plain calendar day, matching the `date` columns. */

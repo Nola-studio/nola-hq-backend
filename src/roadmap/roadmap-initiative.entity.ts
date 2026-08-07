@@ -33,6 +33,17 @@ export type RoadmapInitiativeHealthStatus = 'on_track' | 'on_hold' | 'behind' | 
 export type RoadmapInitiativeCountry = 'CA' | 'CD';
 
 /**
+ * The three-screen split: `'project'` is a durable product the studio
+ * maintains indefinitely (Yekoli, K-River, Nolaa HQ — surfaced only on
+ * `/projects`); `'initiative'` is bounded work with a start and an end
+ * (surfaced only on `/roadmap`). Set once at creation — forced server-side
+ * by which endpoint created the row, never client-supplied — and otherwise
+ * immutable, same posture as `keyPrefix`: only `RoadmapService.updateScope`
+ * (`hq:owner`) can reclassify a row afterward.
+ */
+export type RoadmapInitiativeScope = 'project' | 'initiative';
+
+/**
  * Middle level of the roadmap: a **project / workstream** that serves an
  * objective. Initiatives are what the kanban board (`GET /roadmap/board`)
  * and the timeline (`GET /roadmap/timeline`) render.
@@ -62,6 +73,10 @@ export class RoadmapInitiative {
 
   @Column({ type: 'varchar', default: 'product' })
   kind!: RoadmapInitiativeKind;
+
+  @Column({ type: 'varchar', default: 'initiative' })
+  @Index()
+  scope!: RoadmapInitiativeScope;
 
   @Column({ type: 'varchar', default: 'idea' })
   @Index()

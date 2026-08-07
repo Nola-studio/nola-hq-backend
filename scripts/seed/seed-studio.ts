@@ -190,6 +190,7 @@ async function main() {
           summary: description,
           status: 'idea',
           kind: 'ops', // no workbook column maps to RoadmapInitiativeKind — neutral default, reclassify manually
+          scope: 'project', // every row this script creates is a durable product, never bounded work
           color: PROJECT_COLORS[name] ?? '#94A3B8',
           owner: null,
           type: type ? (PROJECT_TYPE_MAP[type] as RoadmapInitiative['type']) ?? null : null,

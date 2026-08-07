@@ -1,7 +1,11 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Not, Repository } from 'typeorm';
-import { RoadmapInitiative, type RoadmapInitiativePriority } from '../roadmap/roadmap-initiative.entity';
+import { FindOptionsWhere, Not, Repository } from 'typeorm';
+import {
+  RoadmapInitiative,
+  type RoadmapInitiativePriority,
+  type RoadmapInitiativeScope,
+} from '../roadmap/roadmap-initiative.entity';
 import { RoadmapService } from '../roadmap/roadmap.service';
 import { TeamMember } from '../team/team-member.entity';
 import { WorkItem, type WorkItemStatus } from '../work-items/work-item.entity';
@@ -18,6 +22,7 @@ import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { MoveTaskDto } from './dto/move-task.dto';
 import { ListTasksDto } from './dto/list-tasks.dto';
+import { ListStudioProjectsDto } from './dto/list-studio-projects.dto';
 
 /** Studio's `high|medium|low` project priority → `RoadmapInitiative`'s `P0-P3`. */
 const PROJECT_PRIORITY_TO_ROADMAP: Record<StudioProjectPriority, RoadmapInitiativePriority> = {
@@ -60,38 +65,45 @@ export class StudioProjectsProxyService {
 
   // ── projects ─────────────────────────────────────────────────────
 
-  async listProjects() {
+  async listProjects(filter: ListStudioProjectsDto = {}) {
     // `title` as a tiebreaker: `keyPrefix` can be null on a row that
     // predates auto-generated identifiers and hasn't been backfilled yet.
-    const rows = await this.projects.find({ order: { keyPrefix: 'ASC', title: 'ASC' } });
+    // No `scope` filter by default — the task composer's picker needs both,
+    // grouped client-side; the /projects screen passes `scope=project`.
+    const where: FindOptionsWhere<RoadmapInitiative> = {};
+    if (filter.scope) where.scope = filter.scope;
+    const rows = await this.projects.find({ where, order: { keyPrefix: 'ASC', title: 'ASC' } });
     return rows.map((p) => this.toStudioProject(p));
   }
 
   async findProject(id: string) {
-    return this.toStudioProject(await this.findInitiative(id));
+    return this.toStudioProject(await this.findInitiative(id, 'project'));
   }
 
   async createProject(dto: CreateProjectDto) {
-    const created = await this.roadmap.createInitiative({
-      title: dto.name,
-      summary: dto.description,
-      color: dto.color,
-      healthStatus: dto.healthStatus,
-      type: dto.type,
-      priority: dto.priority ? PROJECT_PRIORITY_TO_ROADMAP[dto.priority] : undefined,
-      owner: dto.ownerEmail,
-      startDate: dto.startDate,
-      targetDate: dto.dueDate,
-      status: 'idea',
-      budget: dto.budget,
-      cost: dto.cost,
-      country: dto.country,
-    });
+    const created = await this.roadmap.createInitiative(
+      {
+        title: dto.name,
+        summary: dto.description,
+        color: dto.color,
+        healthStatus: dto.healthStatus,
+        type: dto.type,
+        priority: dto.priority ? PROJECT_PRIORITY_TO_ROADMAP[dto.priority] : undefined,
+        owner: dto.ownerEmail,
+        startDate: dto.startDate,
+        targetDate: dto.dueDate,
+        status: 'idea',
+        budget: dto.budget,
+        cost: dto.cost,
+        country: dto.country,
+      },
+      'project',
+    );
     return this.toStudioProject(created);
   }
 
   async updateProject(id: string, dto: UpdateProjectDto) {
-    await this.findInitiative(id);
+    await this.findInitiative(id, 'project');
     const updated = await this.roadmap.updateInitiative(id, {
       title: dto.name,
       summary: dto.description,
@@ -116,7 +128,7 @@ export class StudioProjectsProxyService {
    * way to route new ones alongside them.
    */
   async archiveProject(id: string) {
-    const project = await this.findInitiative(id);
+    const project = await this.findInitiative(id, 'project');
     if (project.archived) return this.toStudioProject(project);
 
     const openCount = await this.tasks.count({ where: { projectId: id, status: Not('done') } });
@@ -131,13 +143,18 @@ export class StudioProjectsProxyService {
   }
 
   async unarchiveProject(id: string) {
-    const project = await this.findInitiative(id);
+    const project = await this.findInitiative(id, 'project');
     project.archived = false;
     return this.toStudioProject(await this.projects.save(project));
   }
 
-  private async findInitiative(id: string): Promise<RoadmapInitiative> {
-    const project = await this.projects.findOne({ where: { id } });
+  /**
+   * `expectedScope` firewalls this proxy from the Roadmap side of the same
+   * table: an initiative's id 404s here just as a project's id 404s on
+   * `RoadmapService`'s own methods — each screen only ever sees its own rows.
+   */
+  private async findInitiative(id: string, expectedScope: RoadmapInitiativeScope): Promise<RoadmapInitiative> {
+    const project = await this.projects.findOne({ where: { id, scope: expectedScope } });
     if (!project) throw new NotFoundException(`Projet ${id} introuvable`);
     return project;
   }
@@ -145,6 +162,7 @@ export class StudioProjectsProxyService {
   private toStudioProject(p: RoadmapInitiative) {
     return {
       id: p.id,
+      scope: p.scope,
       name: p.title,
       key: p.keyPrefix,
       description: p.summary,

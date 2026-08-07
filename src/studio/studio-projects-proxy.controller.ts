@@ -17,6 +17,7 @@ import { MoveTaskDto } from './dto/move-task.dto';
 import { ListTasksDto } from './dto/list-tasks.dto';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
+import { ListStudioProjectsDto } from './dto/list-studio-projects.dto';
 import { HqRoles } from '../common/auth/hq-roles.decorator';
 import { HqRole } from '../common/auth/hq-role.enum';
 import { CurrentUser, type AuthenticatedUser } from '../common/auth/current-user.decorator';
@@ -38,8 +39,14 @@ export class StudioProjectsProxyController {
   @Get('projects')
   @HqRoles(HqRole.Viewer)
   @ApiOperation({ summary: 'Every workstream tasks are filed under, active and archived alike' })
-  listProjects() {
-    return this.svc.listProjects();
+  @ApiQuery({
+    name: 'scope',
+    required: false,
+    enum: ['project', 'initiative'],
+    description: 'Omit for both (task composer picker); pass to get only one (the /projects screen).',
+  })
+  listProjects(@Query() query: ListStudioProjectsDto) {
+    return this.svc.listProjects(query);
   }
 
   @Get('projects/:id')

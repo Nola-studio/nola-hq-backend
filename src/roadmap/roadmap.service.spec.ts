@@ -246,6 +246,71 @@ describe('RoadmapService.updateKeyPrefix', () => {
   });
 });
 
+/**
+ * `scope` firewalls the roadmap surface from durable products: a row with
+ * `scope: 'project'` must behave as if it doesn't exist to every method
+ * here except `updateScope` itself. This mock's `findOne`/`find` — unlike
+ * `makeInitiativesRepo` above — actually honour `where.scope`, since that's
+ * exactly the behavior under test.
+ */
+function makeScopedInitiativesRepo(rows: Array<Row & { scope: 'project' | 'initiative' }>) {
+  return {
+    findOne: mock(async ({ where }: any) => {
+      const match = rows.find((r) => r.id === where.id);
+      if (!match) return null;
+      if (where.scope && match.scope !== where.scope) return null;
+      return match;
+    }),
+    find: mock(async ({ where }: any = {}) =>
+      rows.filter((r) => !where?.scope || r.scope === where.scope).map((r) => ({ ...r })),
+    ),
+    save: mock(async (x: unknown) => x),
+    count: mock(async ({ where }: any = {}) => rows.filter((r) => !where?.scope || r.scope === where.scope).length),
+  } as any;
+}
+
+describe('RoadmapService scope', () => {
+  test('board() excludes durable products (scope: project)', async () => {
+    const repo = makeScopedInitiativesRepo([
+      { ...row('a', 'planned', 0), scope: 'initiative' },
+      { ...row('b', 'planned', 1), scope: 'project' },
+    ]);
+    const svc = makeService(repo);
+
+    const columns = await svc.board();
+    const planned = columns.find((c) => c.id === 'planned')!;
+    expect(planned.items.map((i) => i.id)).toEqual(['a']);
+  });
+
+  test("findInitiative() 404s on a durable product's id — it's /projects' row, not /roadmap's", async () => {
+    const repo = makeScopedInitiativesRepo([{ ...row('a', 'planned', 0), scope: 'project' }]);
+    const svc = makeService(repo);
+
+    await expect(svc.findInitiative('a')).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  test('updateScope reclassifies regardless of current scope, and is a no-op when already correct', async () => {
+    const repo = makeScopedInitiativesRepo([{ ...row('a', 'planned', 0), scope: 'project' }]);
+    const svc = makeService(repo);
+
+    const reclassified = await svc.updateScope('a', { scope: 'initiative' });
+    expect(reclassified.scope).toBe('initiative');
+    expect(repo.save).toHaveBeenCalledTimes(1);
+
+    // The in-memory row was mutated in place by the first call — a second,
+    // identical request must be a silent no-op, not a second write.
+    await svc.updateScope('a', { scope: 'initiative' });
+    expect(repo.save).toHaveBeenCalledTimes(1);
+  });
+
+  test('unknown initiative → 404', async () => {
+    const repo = makeScopedInitiativesRepo([]);
+    const svc = makeService(repo);
+
+    await expect(svc.updateScope('ghost', { scope: 'project' })).rejects.toBeInstanceOf(NotFoundException);
+  });
+});
+
 describe('RoadmapService read model', () => {
   test('a listed initiative carries the progress derived from its milestones', async () => {
     const rows = [row('a', 'in_progress', 0)];
