@@ -11,12 +11,14 @@ import {
 import { StudioExpense } from './studio-expense.entity';
 import { StudioDomain } from './studio-domain.entity';
 import { StudioRecurring } from './studio-recurring.entity';
+import { StudioRequest } from './studio-request.entity';
 import { resolvePeriod } from './studio.dashboard-period';
 import {
   buildSectionA,
   buildSectionB,
   withCrossSectionCost,
   type DashboardProject,
+  type DashboardRequest,
   type DashboardTask,
   type SectionA,
   type SectionB,
@@ -65,19 +67,22 @@ export class StudioDashboardService {
     private readonly domains: Repository<StudioDomain>,
     @InjectRepository(StudioRecurring)
     private readonly recurring: Repository<StudioRecurring>,
+    @InjectRepository(StudioRequest)
+    private readonly requests: Repository<StudioRequest>,
   ) {}
 
   async get(query: GetDashboardDto = {}): Promise<StudioDashboard> {
     const today = new Date().toISOString().slice(0, 10);
     const range = resolvePeriod(query, today);
 
-    const [allProjects, allTasks, allTeam, allExpenses, allDomains, allRecurring] = await Promise.all([
+    const [allProjects, allTasks, allTeam, allExpenses, allDomains, allRecurring, allRequests] = await Promise.all([
       this.projects.find(),
       this.tasks.find(),
       this.team.find(),
       this.expenses.find(),
       this.domains.find(),
       this.recurring.find(),
+      this.requests.find(),
     ]);
     const emailById = new Map(allTeam.map((m) => [m.id, m.email]));
 
@@ -101,8 +106,19 @@ export class StudioDashboardService {
       hoursSpent: t.hoursSpent,
       projectArchived: !!t.projectId && archivedProjectIds.has(t.projectId),
     }));
+    const dashboardRequests: DashboardRequest[] = allRequests.map((r) => ({
+      type: r.type,
+      status: r.status,
+    }));
 
-    const sectionA = buildSectionA(dashboardProjects, dashboardTasks, range, today, query.includeArchived ?? false);
+    const sectionA = buildSectionA(
+      dashboardProjects,
+      dashboardTasks,
+      dashboardRequests,
+      range,
+      today,
+      query.includeArchived ?? false,
+    );
     const sectionB = buildSectionB(allExpenses, allDomains, allRecurring, range);
 
     return {

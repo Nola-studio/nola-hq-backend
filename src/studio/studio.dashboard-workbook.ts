@@ -65,6 +65,11 @@ export interface DashboardRecurring {
   cycle: string;
 }
 
+export interface DashboardRequest {
+  type: string;
+  status: string;
+}
+
 export interface DonutSlice {
   key: string;
   count: number;
@@ -122,6 +127,7 @@ export interface SectionA {
     hoursSpent: number;
     overdueProjects: number;
     overdueTasks: number;
+    requestsOpen: number;
   };
   donuts: {
     projectsByType: DonutSlice[];
@@ -130,6 +136,7 @@ export interface SectionA {
     tasksByStatus: DonutSlice[];
     tasksByPriority: DonutSlice[];
     tasksByAssignee: DonutSlice[];
+    requestsByType: DonutSlice[];
   };
   bars: {
     budgetVsCostByMonth: MonthBudgetCost[];
@@ -184,9 +191,13 @@ const TASK_ACTIVITY_BUCKET: Record<string, 'completed' | 'inProgress' | 'pending
   in_progress: 'inProgress',
 };
 
+/** Not yet at a terminal state — mirrors `StudioRequest`'s own lifecycle, independent of the period filter. */
+const OPEN_REQUEST_STATUSES = new Set(['nouvelle', 'en_revue', 'acceptee']);
+
 export function buildSectionA(
   projects: DashboardProject[],
   tasks: DashboardTask[],
+  requests: DashboardRequest[],
   range: PeriodRange,
   today: string,
   includeArchived = false,
@@ -228,6 +239,8 @@ export function buildSectionA(
       // same semantics as the kanban board's own `isLate`.
       overdueProjects: visibleProjects.filter((p) => p.dueDate && p.dueDate < today && p.healthStatus !== 'completed').length,
       overdueTasks: visibleTasks.filter((t) => t.dueDate && t.dueDate < today && t.status !== 'done').length,
+      // As-of-today, like the overdue counts above — not period-filtered.
+      requestsOpen: requests.filter((r) => OPEN_REQUEST_STATUSES.has(r.status)).length,
     },
     donuts: {
       projectsByType: groupCount(projectsInPeriod, (p) => p.type ?? 'unspecified'),
@@ -236,6 +249,10 @@ export function buildSectionA(
       tasksByStatus: groupCount(tasksInPeriod, (t) => t.status),
       tasksByPriority: groupCount(tasksInPeriod, (t) => t.priority),
       tasksByAssignee: groupCount(tasksInPeriod, (t) => t.assigneeEmail ?? 'unassigned'),
+      requestsByType: groupCount(
+        requests.filter((r) => OPEN_REQUEST_STATUSES.has(r.status)),
+        (r) => r.type,
+      ),
     },
     bars: { budgetVsCostByMonth, taskActivityByMonth },
   };

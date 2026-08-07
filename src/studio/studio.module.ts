@@ -24,6 +24,9 @@ import { StudioMeetingsService } from './studio-meetings.service';
 import { StudioMeetingsController } from './studio-meetings.controller';
 import { StudioNotifyService } from './studio-notify.service';
 import { StudioDueSoonScheduler } from './studio-due-soon.scheduler';
+import { StudioRequest } from './studio-request.entity';
+import { StudioRequestsService } from './studio-requests.service';
+import { StudioRequestsController } from './studio-requests.controller';
 
 @Module({
   imports: [
@@ -36,6 +39,7 @@ import { StudioDueSoonScheduler } from './studio-due-soon.scheduler';
       StudioRecurring,
       StudioNotificationDedup,
       TeamMember,
+      StudioRequest,
     ]),
     RoadmapModule,
     WorkItemsModule,
@@ -47,6 +51,7 @@ import { StudioDueSoonScheduler } from './studio-due-soon.scheduler';
     StudioRecurringController,
     StudioDashboardController,
     StudioMeetingsController,
+    StudioRequestsController,
   ],
   providers: [
     StudioProjectsProxyService,
@@ -57,6 +62,7 @@ import { StudioDueSoonScheduler } from './studio-due-soon.scheduler';
     StudioMeetingsService,
     StudioNotifyService,
     StudioDueSoonScheduler,
+    StudioRequestsService,
   ],
   exports: [
     StudioProjectsProxyService,
@@ -65,6 +71,7 @@ import { StudioDueSoonScheduler } from './studio-due-soon.scheduler';
     StudioRecurringService,
     StudioDashboardService,
     StudioMeetingsService,
+    StudioRequestsService,
   ],
 })
 export class StudioModule {}
