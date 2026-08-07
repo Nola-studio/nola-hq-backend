@@ -230,6 +230,63 @@ describe('buildSectionB', () => {
       ]),
     );
   });
+
+  describe('monthlyBreakdown', () => {
+    const recurring: DashboardRecurring[] = [{ service: 'ProtonMail', amount: '12', cycle: 'Monthly' }];
+
+    test('one row per month in range, even with no expenses at all', () => {
+      const result = buildSectionB([], [], recurring, RANGE); // RANGE spans Jan..Aug = 8 months
+      expect(result.monthlyBreakdown).toHaveLength(8);
+      expect(result.monthlyBreakdown.map((r) => r.month)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    });
+
+    test('buckets infra_hosting into subscriptionsCents and domains_saas into domainsCents, by month', () => {
+      const expenses = [
+        expense({ category: 'infra_hosting', amountCents: 2000, date: '2026-03-05' }),
+        expense({ category: 'domains_saas', amountCents: 500, date: '2026-03-20' }),
+        expense({ category: 'infra_hosting', amountCents: 3000, date: '2026-04-01' }),
+      ];
+      const result = buildSectionB(expenses, [], recurring, RANGE);
+      const march = result.monthlyBreakdown.find((r) => r.month === 3)!;
+      const april = result.monthlyBreakdown.find((r) => r.month === 4)!;
+      expect(march.subscriptionsCents).toBe(2000);
+      expect(march.domainsCents).toBe(500);
+      expect(april.subscriptionsCents).toBe(3000);
+      expect(april.domainsCents).toBe(0);
+    });
+
+    test('protonMailCents is the flat monthly recurring amount, identical every month, even with zero expenses', () => {
+      const result = buildSectionB([], [], recurring, RANGE);
+      expect(result.monthlyBreakdown.every((r) => r.protonMailCents === 1200)).toBe(true);
+    });
+
+    test('protonMailCents is 0 when no ProtonMail recurring row exists', () => {
+      const result = buildSectionB([], [], [{ service: 'Railway', amount: '20', cycle: 'Monthly' }], RANGE);
+      expect(result.monthlyBreakdown.every((r) => r.protonMailCents === 0)).toBe(true);
+    });
+
+    test('matches by service name case-insensitively', () => {
+      const result = buildSectionB([], [], [{ service: 'protonmail', amount: '12', cycle: 'Monthly' }], RANGE);
+      expect(result.monthlyBreakdown[0].protonMailCents).toBe(1200);
+    });
+
+    test('totalCents is subscriptions + domains + protonMail, not the actual billed total', () => {
+      const expenses = [expense({ category: 'infra_hosting', amountCents: 2000, date: '2026-03-05' })];
+      const result = buildSectionB(expenses, [], recurring, RANGE);
+      const march = result.monthlyBreakdown.find((r) => r.month === 3)!;
+      expect(march.totalCents).toBe(2000 + 0 + 1200);
+    });
+
+    test('void and non-USD expenses never reach the monthly breakdown', () => {
+      const expenses = [
+        expense({ category: 'infra_hosting', amountCents: 5000, date: '2026-03-05', status: 'void' }),
+        expense({ category: 'infra_hosting', amountCents: 5000, date: '2026-03-05', currency: 'CAD' }),
+      ];
+      const result = buildSectionB(expenses, [], recurring, RANGE);
+      const march = result.monthlyBreakdown.find((r) => r.month === 3)!;
+      expect(march.subscriptionsCents).toBe(0);
+    });
+  });
 });
 
 describe('withCrossSectionCost', () => {

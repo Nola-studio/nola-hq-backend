@@ -1,5 +1,5 @@
 import { annualizedAmount } from './studio.recurring';
-import { inPeriod, monthOf, monthsInRange, type PeriodRange } from './studio.dashboard-period';
+import { inPeriod, monthOf, monthNumbersInRange, monthsInRange, type PeriodRange } from './studio.dashboard-period';
 
 /**
  * Pure aggregation for the two-section, period-filtered Studio dashboard
@@ -15,6 +15,13 @@ import { inPeriod, monthOf, monthsInRange, type PeriodRange } from './studio.das
  * faithful to that here rather than "fixing" what reads like a workbook
  * quirk, since it's the one number in the sheet actually backed by real
  * data.
+ *
+ * Second one: the monthly breakdown's "ProtonMail" column (`MonthlyBreakdownRow`)
+ * is not a billed expense at all — production has zero expense rows
+ * describing it, only a $12/mo row in `studio_recurring`. The workbook's own
+ * cell is a formula reference into the Recurring sheet, not a Billing-sheet
+ * sum — so this column is a flat constant repeated for every month, not an
+ * aggregate.
  */
 
 export interface DashboardProject {
@@ -86,6 +93,24 @@ export interface CurrencyTotal {
   amountCents: number;
 }
 
+/**
+ * One row of the workbook's M:Q monthly pivot. `subscriptionsCents`
+ * ("Abonnements") and `domainsCents` ("Domaines") are billed expenses for
+ * that month, grouped by category (`infra_hosting`/`domains_saas`).
+ * `protonMailCents` is NOT billed per-invoice — it's the flat recurring
+ * subscription amount (`StudioRecurring` row, `=Recurring!$C$2` in the
+ * source sheet), the same value every month in range. `totalCents` is the
+ * sum of the three, not the actual billed total for the month (ProtonMail
+ * never appears as its own expense row — see the class doc comment).
+ */
+export interface MonthlyBreakdownRow {
+  month: number;
+  subscriptionsCents: number;
+  domainsCents: number;
+  protonMailCents: number;
+  totalCents: number;
+}
+
 export interface SectionA {
   stats: {
     projects: number;
@@ -128,6 +153,8 @@ export interface SectionB {
   };
   /** Never folded into the USD figures above — rendered separately. */
   otherCurrencyTotals: CurrencyTotal[];
+  /** The workbook's M:Q pivot — one row per month touched by `range`. */
+  monthlyBreakdown: MonthlyBreakdownRow[];
 }
 
 function sum(values: Array<string | null>): number {
@@ -242,6 +269,28 @@ export function buildSectionB(
   const otherCurrencyMap = new Map<string, number>();
   for (const e of otherInPeriod) otherCurrencyMap.set(e.currency, (otherCurrencyMap.get(e.currency) ?? 0) + e.amountCents);
 
+  const protonMail = recurring.find((r) => r.service.trim().toLowerCase() === 'protonmail');
+  const protonMailMonthlyCents = protonMail
+    ? Math.round((annualizedAmount(Number(protonMail.amount), protonMail.cycle) / 12) * 100)
+    : 0;
+
+  const monthlyBreakdown: MonthlyBreakdownRow[] = monthNumbersInRange(range).map((month) => {
+    const monthExpenses = usdInPeriod.filter((e) => monthOf(e.date) === month);
+    const subscriptionsCents = monthExpenses
+      .filter((e) => e.category === 'infra_hosting')
+      .reduce((t, e) => t + e.amountCents, 0);
+    const domainsCents = monthExpenses
+      .filter((e) => e.category === 'domains_saas')
+      .reduce((t, e) => t + e.amountCents, 0);
+    return {
+      month,
+      subscriptionsCents,
+      domainsCents,
+      protonMailCents: protonMailMonthlyCents,
+      totalCents: subscriptionsCents + domainsCents + protonMailMonthlyCents,
+    };
+  });
+
   return {
     stats: {
       spendInPeriodCents,
@@ -257,6 +306,7 @@ export function buildSectionB(
       recurringMonthlyMix: recurringMonthlyCentsByService,
     },
     otherCurrencyTotals: Array.from(otherCurrencyMap.entries()).map(([currency, amountCents]) => ({ currency, amountCents })),
+    monthlyBreakdown,
   };
 }
 

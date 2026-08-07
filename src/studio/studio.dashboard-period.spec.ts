@@ -1,5 +1,5 @@
 import { test, expect, describe } from 'bun:test';
-import { resolvePeriod, inPeriod, monthsInRange, monthOf } from './studio.dashboard-period';
+import { resolvePeriod, inPeriod, monthsInRange, monthNumbersInRange, monthOf } from './studio.dashboard-period';
 
 describe('resolvePeriod', () => {
   test('YTD defaults to the current year, capped at today', () => {
@@ -93,6 +93,28 @@ describe('monthsInRange', () => {
 
   test('a full year is 12', () => {
     expect(monthsInRange({ start: '2026-01-01', end: '2026-12-31', label: '' })).toBe(12);
+  });
+});
+
+describe('monthNumbersInRange', () => {
+  test('Jan through Aug lists 1..8', () => {
+    expect(monthNumbersInRange({ start: '2026-01-01', end: '2026-08-04', label: '' })).toEqual([
+      1, 2, 3, 4, 5, 6, 7, 8,
+    ]);
+  });
+
+  test('a single month lists just that month', () => {
+    expect(monthNumbersInRange({ start: '2026-02-01', end: '2026-02-28', label: '' })).toEqual([2]);
+  });
+
+  test('a full year lists 1..12', () => {
+    expect(monthNumbersInRange({ start: '2026-01-01', end: '2026-12-31', label: '' })).toEqual([
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+    ]);
+  });
+
+  test('crosses a year boundary correctly', () => {
+    expect(monthNumbersInRange({ start: '2025-11-01', end: '2026-02-28', label: '' })).toEqual([11, 12, 1, 2]);
   });
 });
 

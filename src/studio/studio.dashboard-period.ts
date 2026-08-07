@@ -80,6 +80,29 @@ export function monthsInRange(range: PeriodRange): number {
   return (ey - sy) * 12 + (em - sm) + 1;
 }
 
+/**
+ * Every calendar month a range touches, in order — e.g. Jan-Aug 2026 →
+ * `[1,2,3,4,5,6,7,8]`. Handles a range crossing a calendar year boundary
+ * correctly, though none of `resolvePeriod`'s modes actually produce one
+ * today (each is scoped to a single `year`).
+ */
+export function monthNumbersInRange(range: PeriodRange): number[] {
+  const [sy, sm] = range.start.split('-').map(Number);
+  const [ey, em] = range.end.split('-').map(Number);
+  const months: number[] = [];
+  let y = sy;
+  let m = sm;
+  while (y < ey || (y === ey && m <= em)) {
+    months.push(m);
+    m += 1;
+    if (m > 12) {
+      m = 1;
+      y += 1;
+    }
+  }
+  return months;
+}
+
 /** `YYYY-MM-DD` → `1`..`12`, or `null` if unset — for month-bucketed bars. */
 export function monthOf(dateStr: string | null | undefined): number | null {
   if (!dateStr) return null;
