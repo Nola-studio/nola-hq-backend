@@ -7,16 +7,16 @@ import { inPeriod, monthOf, monthNumbersInRange, monthsInRange, type PeriodRange
  * deps — `StudioDashboardService` feeds it plain rows; unit-tested
  * standalone (same split as `studio.board.ts` / `studio.dashboard-agg.ts`).
  *
- * A design decision worth flagging: `cost` in the Section A stat strip is
- * NOT just `sum(project.cost)`. The source workbook computes it as
- * `sum(project.cost) + spendInPeriod` (Section B's own total) — verified
- * against the real workbook, where every project's manual `cost` field is
- * empty and the "COST" KPI still shows the real infra/domain spend. Kept
- * faithful to that here rather than "fixing" what reads like a workbook
- * quirk, since it's the one number in the sheet actually backed by real
- * data.
+ * `cost` in the Section A stat strip is Section B's own spend
+ * (`spendInPeriodCents`, folded in by `withCrossSectionCost`) — there is no
+ * separate per-project cost figure anymore. `RoadmapInitiative.budget`/
+ * `.cost` (USD) were dropped once `ProjectBudget` (Business module, CDF,
+ * wired into invoices/expenses/margin) became the single source of truth
+ * for project financials; `budget`/`budgetUtilizedPercent` and the
+ * "Budget vs coût par mois" bar chart went with them — Section B's own
+ * Dépenses breakdown already covers this spend.
  *
- * Second one: the monthly breakdown's "ProtonMail" column (`MonthlyBreakdownRow`)
+ * The monthly breakdown's "ProtonMail" column (`MonthlyBreakdownRow`)
  * is not a billed expense at all — production has zero expense rows
  * describing it, only a $12/mo row in `studio_recurring`. The workbook's own
  * cell is a formula reference into the Recurring sheet, not a Billing-sheet
@@ -28,19 +28,12 @@ export interface DashboardProject {
   type: string | null;
   priority: string | null;
   healthStatus: string | null;
-  budget: string | null;
-  cost: string | null;
   startDate: string | null;
   dueDate: string | null;
   archived: boolean;
 }
 
-/**
- * Same shape as `DashboardProject` minus `budget`/`cost` — bounded work
- * (`RoadmapInitiative.scope === 'initiative'`) isn't budget-tracked the way
- * durable products are, so its dashboard section stays count/overdue/donuts
- * only. See `SectionA.stats.initiatives`/`.initiativesByType` etc.
- */
+/** Same shape as `DashboardProject`. See `SectionA.stats.initiatives`/`.initiativesByType` etc. */
 export interface DashboardInitiative {
   type: string | null;
   priority: string | null;
@@ -95,12 +88,6 @@ export interface MoneyDonutSlice {
   amountCents: number;
 }
 
-export interface MonthBudgetCost {
-  month: number;
-  budget: number;
-  cost: number;
-}
-
 export interface MonthTaskActivity {
   month: number;
   completed: number;
@@ -134,9 +121,7 @@ export interface MonthlyBreakdownRow {
 export interface SectionA {
   stats: {
     projects: number;
-    budget: number;
     cost: number;
-    budgetUtilizedPercent: number;
     tasks: number;
     tasksDone: number;
     hoursSpent: number;
@@ -159,7 +144,6 @@ export interface SectionA {
     initiativesByStatus: DonutSlice[];
   };
   bars: {
-    budgetVsCostByMonth: MonthBudgetCost[];
     taskActivityByMonth: MonthTaskActivity[];
   };
 }
@@ -231,15 +215,7 @@ export function buildSectionA(
   const initiativesInPeriod = visibleInitiatives.filter((i) => inPeriod(i.startDate, range));
   const tasksInPeriod = visibleTasks.filter((t) => inPeriod(t.dueDate, range));
 
-  const budget = sum(projectsInPeriod.map((p) => p.budget));
-  const spendInPeriodPlaceholder = 0; // filled in by the caller via `withCrossSectionCost`
-  const cost = sum(projectsInPeriod.map((p) => p.cost)) + spendInPeriodPlaceholder;
-
-  const budgetVsCostByMonth: MonthBudgetCost[] = Array.from({ length: 12 }, (_, i) => {
-    const month = i + 1;
-    const monthProjects = projectsInPeriod.filter((p) => monthOf(p.startDate) === month);
-    return { month, budget: sum(monthProjects.map((p) => p.budget)), cost: sum(monthProjects.map((p) => p.cost)) };
-  });
+  const cost = 0; // filled in by the caller via `withCrossSectionCost` — Section B's spend, nothing else
 
   const taskActivityByMonth: MonthTaskActivity[] = Array.from({ length: 12 }, (_, i) => {
     const month = i + 1;
@@ -252,9 +228,7 @@ export function buildSectionA(
   return {
     stats: {
       projects: projectsInPeriod.length,
-      budget,
       cost,
-      budgetUtilizedPercent: budget > 0 ? Math.round((cost / budget) * 100) : 0,
       tasks: tasksInPeriod.length,
       tasksDone: tasksInPeriod.filter((t) => t.status === 'done').length,
       hoursSpent: sum(tasksInPeriod.map((t) => t.hoursSpent)),
@@ -282,7 +256,7 @@ export function buildSectionA(
       initiativesByPriority: groupCount(initiativesInPeriod, (i) => i.priority ?? 'unspecified'),
       initiativesByStatus: groupCount(initiativesInPeriod, (i) => i.healthStatus ?? 'unspecified'),
     },
-    bars: { budgetVsCostByMonth, taskActivityByMonth },
+    bars: { taskActivityByMonth },
   };
 }
 
@@ -355,16 +329,13 @@ export function buildSectionB(
   };
 }
 
-/** Section A's `cost` KPI folds in Section B's spend — see file header. Applied after both sections are built. */
+/** Section A's `cost` KPI is entirely Section B's spend — see file header. Applied after both sections are built. */
 export function withCrossSectionCost(sectionA: SectionA, sectionB: SectionB): SectionA {
-  const cost = sectionA.stats.cost + sectionB.stats.spendInPeriodCents / 100;
-  const budget = sectionA.stats.budget;
   return {
     ...sectionA,
     stats: {
       ...sectionA.stats,
-      cost,
-      budgetUtilizedPercent: budget > 0 ? Math.round((cost / budget) * 100) : 0,
+      cost: sectionA.stats.cost + sectionB.stats.spendInPeriodCents / 100,
     },
   };
 }

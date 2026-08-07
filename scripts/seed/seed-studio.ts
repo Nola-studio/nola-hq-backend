@@ -27,9 +27,8 @@ import { StudioExpense } from '../../src/studio/studio-expense.entity';
  * sheet's 9 columns are filled for 4 of its 5 rows, and the Tasks sheet has
  * zero data rows. This script imports exactly what's there and leaves
  * everything else `null` — it does not invent budgets, dates, or tasks.
- * `RoadmapInitiative` has no `budget`/`cost` columns yet (tracked
- * separately), so those workbook columns aren't read here either — nothing
- * to seed until that lands.
+ * Financials live in `ProjectBudget` (Business module), not on
+ * `RoadmapInitiative` — this script doesn't touch that table.
  *
  * Project identifiers are auto-generated from the workbook's project name
  * (`P<name>` / `T<name>NN`, see `roadmap-identifier.ts`) — never hardcoded

@@ -150,16 +150,6 @@ export class RoadmapInitiative {
   @Column({ type: 'integer', default: 0 })
   progress!: number;
 
-  /**
-   * USD, no currency column. `numeric` columns come back from TypeORM as
-   * strings (same convention as `WorkItem.hoursSpent`) — never `number`.
-   */
-  @Column({ type: 'numeric', precision: 12, scale: 2, nullable: true })
-  budget!: string | null;
-
-  @Column({ type: 'numeric', precision: 12, scale: 2, nullable: true })
-  cost!: string | null;
-
   /** ISO 3166-1 alpha-2. Just Canada/DRC today — see `RoadmapInitiativeCountry`. */
   @Column({ type: 'varchar', length: 2, nullable: true })
   country!: RoadmapInitiativeCountry | null;

@@ -1,7 +1,6 @@
 import {
   IsEmail,
   IsIn,
-  IsNumberString,
   IsOptional,
   IsString,
   Matches,
@@ -38,9 +37,8 @@ export const PROJECT_HEALTH_STATUSES = ['on_track', 'on_hold', 'behind', 'comple
  * `RoadmapInitiative`) is auto-generated from `name` — never accepted from
  * the client.
  *
- * `budget`/`cost` persist to `RoadmapInitiative.budget`/`.cost` (USD,
- * decimal string) — the real workbook has both empty for every project, so
- * expect `null` until someone fills them in.
+ * Financials live entirely in `ProjectBudget` (Business module, CDF) —
+ * this entity has no budget/cost fields of its own anymore.
  */
 export class CreateProjectDto {
   @IsString() @MinLength(1) @MaxLength(120) name!: string;
@@ -54,8 +52,6 @@ export class CreateProjectDto {
   @IsOptional() @IsIn(PROJECT_TYPES as unknown as string[]) type?: RoadmapInitiativeType;
   @IsOptional() @IsIn(PROJECT_PRIORITIES as unknown as string[]) priority?: StudioProjectPriority;
   @IsOptional() @IsIn(PROJECT_HEALTH_STATUSES as unknown as string[]) healthStatus?: RoadmapInitiativeHealthStatus;
-  @IsOptional() @IsNumberString() budget?: string;
-  @IsOptional() @IsNumberString() cost?: string;
   @IsOptional() @Matches(DATE_PATTERN) startDate?: string;
   @IsOptional() @Matches(DATE_PATTERN) dueDate?: string;
   @IsOptional() @IsEmail() @MaxLength(120) leadAssigneeEmail?: string;

@@ -1,4 +1,4 @@
-import { IsEmail, IsIn, IsNumberString, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import { IsEmail, IsIn, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
 import type {
   RoadmapInitiativeCountry,
   RoadmapInitiativeHealthStatus,
@@ -28,8 +28,6 @@ export class UpdateProjectDto {
   @IsOptional() @IsIn(PROJECT_TYPES as unknown as string[]) type?: RoadmapInitiativeType | null;
   @IsOptional() @IsIn(PROJECT_PRIORITIES as unknown as string[]) priority?: StudioProjectPriority | null;
   @IsOptional() @IsIn(PROJECT_HEALTH_STATUSES as unknown as string[]) healthStatus?: RoadmapInitiativeHealthStatus | null;
-  @IsOptional() @IsNumberString() budget?: string | null;
-  @IsOptional() @IsNumberString() cost?: string | null;
   @IsOptional() @Matches(DATE_PATTERN) startDate?: string | null;
   @IsOptional() @Matches(DATE_PATTERN) dueDate?: string | null;
   @IsOptional() @IsEmail() @MaxLength(120) leadAssigneeEmail?: string | null;

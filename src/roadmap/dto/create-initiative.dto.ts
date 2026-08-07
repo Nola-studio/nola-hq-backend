@@ -2,7 +2,6 @@ import {
   IsEmail,
   IsIn,
   IsInt,
-  IsNumberString,
   IsOptional,
   IsString,
   IsUUID,
@@ -85,8 +84,5 @@ export class CreateInitiativeDto {
   @IsOptional() @IsString() @MaxLength(64) appId?: string;
   @IsOptional() @IsString() @MaxLength(120) tenantId?: string;
   @IsOptional() @IsInt() @Min(0) @Max(100) progress?: number;
-  /** USD, decimal string. */
-  @IsOptional() @IsNumberString() budget?: string;
-  @IsOptional() @IsNumberString() cost?: string;
   @IsOptional() @IsIn(INITIATIVE_COUNTRIES as unknown as string[]) country?: RoadmapInitiativeCountry;
 }

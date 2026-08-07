@@ -529,8 +529,6 @@ export class RoadmapService {
       appId: dto.appId ?? null,
       tenantId: dto.tenantId ?? null,
       progress: dto.progress ?? 0,
-      budget: dto.budget ?? null,
-      cost: dto.cost ?? null,
       country: dto.country ?? null,
       // Lands at the bottom of its column — a new card never jumps the queue.
       // Counted within its own scope: a project's "position" (unused by any
@@ -571,8 +569,6 @@ export class RoadmapService {
     if (dto.appId !== undefined) initiative.appId = dto.appId ?? null;
     if (dto.tenantId !== undefined) initiative.tenantId = dto.tenantId ?? null;
     if (dto.progress !== undefined) initiative.progress = dto.progress;
-    if (dto.budget !== undefined) initiative.budget = dto.budget ?? null;
-    if (dto.cost !== undefined) initiative.cost = dto.cost ?? null;
     if (dto.country !== undefined) initiative.country = dto.country ?? null;
     initiative.updatedAt = new Date();
 

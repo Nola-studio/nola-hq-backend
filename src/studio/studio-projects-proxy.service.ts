@@ -48,7 +48,9 @@ const ROADMAP_PRIORITY_TO_PROJECT: Record<RoadmapInitiativePriority, StudioProje
  *
  * `leadAssigneeEmail` is accepted on the project DTOs for request-shape
  * compatibility but not persisted — `RoadmapInitiative` has no equivalent
- * column. `budget`/`cost` round-trip for real (see `RoadmapInitiative.budget`/`.cost`).
+ * column. Same for `budget`/`cost`: financials live entirely in
+ * `ProjectBudget` (Business module, CDF) now — see that module for the
+ * real read/write path.
  */
 @Injectable()
 export class StudioProjectsProxyService {
@@ -93,8 +95,6 @@ export class StudioProjectsProxyService {
         startDate: dto.startDate,
         targetDate: dto.dueDate,
         status: 'idea',
-        budget: dto.budget,
-        cost: dto.cost,
         country: dto.country,
       },
       'project',
@@ -114,8 +114,6 @@ export class StudioProjectsProxyService {
       owner: dto.ownerEmail,
       startDate: dto.startDate ?? undefined,
       targetDate: dto.dueDate ?? undefined,
-      budget: dto.budget,
-      cost: dto.cost,
       country: dto.country,
     });
     return this.toStudioProject(updated);
@@ -172,8 +170,6 @@ export class StudioProjectsProxyService {
       type: p.type,
       priority: ROADMAP_PRIORITY_TO_PROJECT[p.priority],
       healthStatus: p.healthStatus,
-      budget: p.budget,
-      cost: p.cost,
       country: p.country,
       startDate: p.startDate,
       dueDate: p.targetDate,

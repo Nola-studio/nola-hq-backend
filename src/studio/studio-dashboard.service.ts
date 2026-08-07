@@ -97,8 +97,6 @@ export class StudioDashboardService {
         type: p.type,
         priority: ROADMAP_PRIORITY_TO_STUDIO[p.priority] ?? null,
         healthStatus: p.healthStatus,
-        budget: p.budget,
-        cost: p.cost,
         startDate: p.startDate,
         dueDate: p.targetDate,
         archived: p.archived,
