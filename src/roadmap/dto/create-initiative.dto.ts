@@ -12,9 +12,12 @@ import {
   MinLength,
 } from 'class-validator';
 import type {
+  RoadmapInitiativeCountry,
+  RoadmapInitiativeHealthStatus,
   RoadmapInitiativeKind,
   RoadmapInitiativePriority,
   RoadmapInitiativeStatus,
+  RoadmapInitiativeType,
 } from '../roadmap-initiative.entity';
 import {
   INITIATIVE_PRIORITIES,
@@ -23,6 +26,27 @@ import {
 import { QUARTER_PATTERN } from './create-objective.dto';
 
 export const INITIATIVE_KINDS = ['product', 'tech', 'gtm', 'ops'] as const;
+export const INITIATIVE_TYPES = [
+  'infrastructure_cloud',
+  'web_app_development',
+  'mobile_app_development',
+  'website',
+  'administrative',
+  'maintenance_support',
+  'other',
+] as const;
+export const INITIATIVE_HEALTH_STATUSES = ['on_track', 'on_hold', 'behind', 'completed'] as const;
+/** Where we operate today — add here (and nowhere else) to onboard a new country. */
+export const INITIATIVE_COUNTRIES = ['CA', 'CD'] as const;
+/**
+ * Not a field on this DTO — `scope` is forced server-side by which endpoint
+ * creates the row (`RoadmapController.createInitiative` → `'initiative'`,
+ * `StudioProjectsProxyService.createProject` → `'project'`), never accepted
+ * from the client. Exported here for `UpdateScopeDto` and the Studio
+ * projects list filter to share.
+ */
+export const INITIATIVE_SCOPES = ['project', 'initiative'] as const;
+export const HEX_COLOR_PATTERN = /^#[0-9A-Fa-f]{6}$/;
 
 /** `2026-07-25` — plain calendar day, matching the `date` columns. */
 export const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -47,6 +71,11 @@ export class CreateInitiativeDto {
   status?: RoadmapInitiativeStatus;
   @IsOptional() @IsIn(INITIATIVE_PRIORITIES as unknown as string[])
   priority?: RoadmapInitiativePriority;
+  @IsOptional() @Matches(HEX_COLOR_PATTERN) color?: string;
+  @IsOptional() @IsIn(INITIATIVE_HEALTH_STATUSES as unknown as string[])
+  healthStatus?: RoadmapInitiativeHealthStatus;
+  @IsOptional() @IsIn(INITIATIVE_TYPES as unknown as string[])
+  type?: RoadmapInitiativeType;
   @IsOptional() @Matches(QUARTER_PATTERN) quarter?: string;
   @IsOptional() @Matches(DATE_PATTERN) startDate?: string;
   @IsOptional() @Matches(DATE_PATTERN) targetDate?: string;
@@ -55,4 +84,5 @@ export class CreateInitiativeDto {
   @IsOptional() @IsString() @MaxLength(64) appId?: string;
   @IsOptional() @IsString() @MaxLength(120) tenantId?: string;
   @IsOptional() @IsInt() @Min(0) @Max(100) progress?: number;
+  @IsOptional() @IsIn(INITIATIVE_COUNTRIES as unknown as string[]) country?: RoadmapInitiativeCountry;
 }

@@ -15,6 +15,9 @@ import { CreateObjectiveDto } from './dto/create-objective.dto';
 import { UpdateObjectiveDto } from './dto/update-objective.dto';
 import { CreateInitiativeDto } from './dto/create-initiative.dto';
 import { UpdateInitiativeDto } from './dto/update-initiative.dto';
+import { UpdateKeyPrefixDto } from './dto/update-key-prefix.dto';
+import { UpdateScopeDto } from './dto/update-scope.dto';
+import { BoardQueryDto } from './dto/board-query.dto';
 import { MoveInitiativeDto } from './dto/move-initiative.dto';
 import { CreateMilestoneDto } from './dto/create-milestone.dto';
 import { UpdateMilestoneDto } from './dto/update-milestone.dto';
@@ -35,9 +38,12 @@ import { HqRole } from '../common/auth/hq-role.enum';
  * trajectory) and **initiatives** → **milestones** (how it gets done). This
  * is the studio's own strategy tool — nothing here is tenant-scoped.
  *
- * Same RBAC posture as the pipeline board: reads only need authentication,
- * mutations need `hq:operator`. Deleting an **objective** is the one
- * `hq:owner` gate — it detaches every initiative planned under it.
+ * Reads need `hq:viewer` (or above), mutations need `hq:operator` —
+ * initiatives are also what `/studio/projects*`/`/studio/tasks*` serve
+ * post-merge, so this controller now matches Studio's stricter posture
+ * (every GET gated) rather than the pipeline board's auth-only reads.
+ * Deleting an **objective** is the one `hq:owner` gate — it detaches every
+ * initiative planned under it.
  */
 @ApiBearerAuth()
 @ApiTags('roadmap')
@@ -46,18 +52,23 @@ export class RoadmapController {
   constructor(private readonly svc: RoadmapService) {}
 
   @Get('board')
-  @ApiOperation({ summary: 'Initiatives as kanban columns, ordered by position' })
-  board() {
-    return this.svc.board();
+  @HqRoles(HqRole.Viewer)
+  @ApiOperation({ summary: 'Kanban columns, ordered by position. Omit scope for every row; Roadmap itself passes scope=initiative.' })
+  @ApiQuery({ name: 'scope', required: false, enum: ['project', 'initiative'] })
+  board(@Query() query: BoardQueryDto) {
+    return this.svc.board(query.scope);
   }
 
   @Get('timeline')
-  @ApiOperation({ summary: 'Initiatives bucketed by quarter (unscheduled last)' })
-  timeline() {
-    return this.svc.timeline();
+  @HqRoles(HqRole.Viewer)
+  @ApiOperation({ summary: 'Bucketed by quarter (unscheduled last). Omit scope for every row; Roadmap itself passes scope=initiative.' })
+  @ApiQuery({ name: 'scope', required: false, enum: ['project', 'initiative'] })
+  timeline(@Query() query: BoardQueryDto) {
+    return this.svc.timeline(query.scope);
   }
 
   @Get('metrics')
+  @HqRoles(HqRole.Viewer)
   @ApiOperation({
     summary: 'Metrics a key result can bind to (the console never hardcodes them)',
   })
@@ -68,6 +79,7 @@ export class RoadmapController {
   // ── objectives ───────────────────────────────────────────────────
 
   @Get('objectives')
+  @HqRoles(HqRole.Viewer)
   @ApiQuery({ name: 'quarter', required: false, type: String })
   @ApiQuery({ name: 'status', required: false, type: String })
   listObjectives(@Query() query: ListObjectivesDto) {
@@ -75,6 +87,7 @@ export class RoadmapController {
   }
 
   @Get('objectives/:id')
+  @HqRoles(HqRole.Viewer)
   @ApiOperation({
     summary: 'One objective with its key results, initiatives and children',
   })
@@ -107,6 +120,7 @@ export class RoadmapController {
   // ── key results ──────────────────────────────────────────────────
 
   @Get('objectives/:id/key-results')
+  @HqRoles(HqRole.Viewer)
   @ApiOperation({
     summary: 'Key results of an objective, with current / progress / status',
   })
@@ -138,6 +152,7 @@ export class RoadmapController {
   }
 
   @Get('key-results/:id/series')
+  @HqRoles(HqRole.Viewer)
   @ApiOperation({ summary: 'Planned vs measured curves, sorted by date' })
   series(@Param('id') id: string) {
     return this.svc.keyResultSeries(id);
@@ -176,6 +191,7 @@ export class RoadmapController {
   // ── initiatives ──────────────────────────────────────────────────
 
   @Get('initiatives')
+  @HqRoles(HqRole.Viewer)
   @ApiQuery({ name: 'status', required: false, type: String })
   @ApiQuery({ name: 'quarter', required: false, type: String })
   @ApiQuery({ name: 'objectiveId', required: false, type: String })
@@ -187,6 +203,7 @@ export class RoadmapController {
   }
 
   @Get('initiatives/:id')
+  @HqRoles(HqRole.Viewer)
   @ApiOperation({ summary: 'One initiative with its milestones' })
   findInitiative(@Param('id') id: string) {
     return this.svc.findInitiative(id);
@@ -202,6 +219,26 @@ export class RoadmapController {
   @HqRoles(HqRole.Operator)
   updateInitiative(@Param('id') id: string, @Body() dto: UpdateInitiativeDto) {
     return this.svc.updateInitiative(id, dto);
+  }
+
+  @Patch('initiatives/:id/key-prefix')
+  @HqRoles(HqRole.Owner)
+  @ApiOperation({
+    summary:
+      'Owner-only: change an initiative\'s auto-generated keyPrefix. Blocked once any task references it.',
+  })
+  updateKeyPrefix(@Param('id') id: string, @Body() dto: UpdateKeyPrefixDto) {
+    return this.svc.updateKeyPrefix(id, dto);
+  }
+
+  @Patch('initiatives/:id/scope')
+  @HqRoles(HqRole.Owner)
+  @ApiOperation({
+    summary:
+      "Owner-only: reclassify between 'project' (durable product) and 'initiative' (bounded work). Works regardless of the row's current scope.",
+  })
+  updateScope(@Param('id') id: string, @Body() dto: UpdateScopeDto) {
+    return this.svc.updateScope(id, dto);
   }
 
   @Post('initiatives/:id/move')

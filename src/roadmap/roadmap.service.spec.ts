@@ -1,5 +1,5 @@
 import { test, expect, describe, mock } from 'bun:test';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { RoadmapService } from './roadmap.service';
 import type { RoadmapInitiativeStatus } from './roadmap-initiative.entity';
 
@@ -46,7 +46,7 @@ const objectives = { findOne: mock(async () => null) } as any;
 const empty = () => ({ find: mock(async () => []), count: mock(async () => 0) }) as any;
 
 /** The service under test, with only the repositories these cases touch. */
-function makeService(initiatives: any, milestones: any = noMilestones) {
+function makeService(initiatives: any, milestones: any = noMilestones, workItems: any = empty()) {
   return new RoadmapService(
     objectives,
     initiatives,
@@ -54,6 +54,7 @@ function makeService(initiatives: any, milestones: any = noMilestones) {
     empty(),
     empty(),
     empty(),
+    workItems,
   );
 }
 
@@ -154,6 +155,171 @@ describe('RoadmapService.move', () => {
       NotFoundException,
     );
     expect(repo.save).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * `updateKeyPrefix`'s repo needs `findOne` keyed on either `id` or
+ * `keyPrefix` (the two lookups the method does), and a `count` on the
+ * work-items repo that understands a `Like('T<prefix>%')` filter.
+ */
+function makeKeyPrefixRepos(initiativeRows: Array<{ id: string; keyPrefix: string | null }>, taskReferences: string[]) {
+  const initiatives = {
+    findOne: mock(async ({ where }: any) => {
+      if (where.id) return initiativeRows.find((r) => r.id === where.id) ?? null;
+      if (where.keyPrefix) return initiativeRows.find((r) => r.keyPrefix === where.keyPrefix) ?? null;
+      return null;
+    }),
+    save: mock(async (x: unknown) => x),
+  } as any;
+  const workItems = {
+    count: mock(async ({ where }: any) => {
+      const pattern: string = where.reference.value; // e.g. "TYek%"
+      const prefix = pattern.slice(0, -1); // strip the trailing "%"
+      return taskReferences.filter((r) => r.startsWith(prefix)).length;
+    }),
+  } as any;
+  return { initiatives, workItems };
+}
+
+describe('RoadmapService.updateKeyPrefix', () => {
+  test('renames a prefix nothing references yet', async () => {
+    const { initiatives, workItems } = makeKeyPrefixRepos(
+      [{ id: 'a', keyPrefix: 'ajoutercon' }],
+      [],
+    );
+    const svc = makeService(initiatives, noMilestones, workItems);
+
+    const view = await svc.updateKeyPrefix('a', { keyPrefix: 'Offline' });
+    expect(view.keyPrefix).toBe('Offline');
+    expect(initiatives.save).toHaveBeenCalledTimes(1);
+  });
+
+  test('blocks the rename once a task already references the current prefix', async () => {
+    const { initiatives, workItems } = makeKeyPrefixRepos(
+      [{ id: 'a', keyPrefix: 'ajoutercon' }],
+      ['Tajoutercon01'],
+    );
+    const svc = makeService(initiatives, noMilestones, workItems);
+
+    await expect(svc.updateKeyPrefix('a', { keyPrefix: 'Offline' })).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(initiatives.save).not.toHaveBeenCalled();
+  });
+
+  test('rejects a prefix already used by another initiative', async () => {
+    const { initiatives, workItems } = makeKeyPrefixRepos(
+      [
+        { id: 'a', keyPrefix: 'ajoutercon' },
+        { id: 'b', keyPrefix: 'Taken' },
+      ],
+      [],
+    );
+    const svc = makeService(initiatives, noMilestones, workItems);
+
+    await expect(svc.updateKeyPrefix('a', { keyPrefix: 'Taken' })).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(initiatives.save).not.toHaveBeenCalled();
+  });
+
+  test('a no-op rename (same prefix) is a silent success, not a conflict with itself', async () => {
+    const { initiatives, workItems } = makeKeyPrefixRepos(
+      [{ id: 'a', keyPrefix: 'ajoutercon' }],
+      ['Tajoutercon01'], // even with tasks already referencing it
+    );
+    const svc = makeService(initiatives, noMilestones, workItems);
+
+    const view = await svc.updateKeyPrefix('a', { keyPrefix: 'ajoutercon' });
+    expect(view.keyPrefix).toBe('ajoutercon');
+    expect(initiatives.save).not.toHaveBeenCalled();
+  });
+
+  test('unknown initiative → 404', async () => {
+    const { initiatives, workItems } = makeKeyPrefixRepos([], []);
+    const svc = makeService(initiatives, noMilestones, workItems);
+
+    await expect(svc.updateKeyPrefix('ghost', { keyPrefix: 'Anything' })).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+  });
+});
+
+/**
+ * `scope` firewalls the roadmap surface from durable products: a row with
+ * `scope: 'project'` must behave as if it doesn't exist to every method
+ * here except `updateScope` itself. This mock's `findOne`/`find` — unlike
+ * `makeInitiativesRepo` above — actually honour `where.scope`, since that's
+ * exactly the behavior under test.
+ */
+function makeScopedInitiativesRepo(rows: Array<Row & { scope: 'project' | 'initiative' }>) {
+  return {
+    findOne: mock(async ({ where }: any) => {
+      const match = rows.find((r) => r.id === where.id);
+      if (!match) return null;
+      if (where.scope && match.scope !== where.scope) return null;
+      return match;
+    }),
+    find: mock(async ({ where }: any = {}) =>
+      rows.filter((r) => !where?.scope || r.scope === where.scope).map((r) => ({ ...r })),
+    ),
+    save: mock(async (x: unknown) => x),
+    count: mock(async ({ where }: any = {}) => rows.filter((r) => !where?.scope || r.scope === where.scope).length),
+  } as any;
+}
+
+describe('RoadmapService scope', () => {
+  test('board(undefined) returns every row — scope is opt-in, other screens\' pickers need durable products too', async () => {
+    const repo = makeScopedInitiativesRepo([
+      { ...row('a', 'planned', 0), scope: 'initiative' },
+      { ...row('b', 'planned', 1), scope: 'project' },
+    ]);
+    const svc = makeService(repo);
+
+    const columns = await svc.board();
+    const planned = columns.find((c) => c.id === 'planned')!;
+    expect(planned.items.map((i) => i.id).sort()).toEqual(['a', 'b']);
+  });
+
+  test("board('initiative') excludes durable products — Roadmap's own board opts in", async () => {
+    const repo = makeScopedInitiativesRepo([
+      { ...row('a', 'planned', 0), scope: 'initiative' },
+      { ...row('b', 'planned', 1), scope: 'project' },
+    ]);
+    const svc = makeService(repo);
+
+    const columns = await svc.board('initiative');
+    const planned = columns.find((c) => c.id === 'planned')!;
+    expect(planned.items.map((i) => i.id)).toEqual(['a']);
+  });
+
+  test("findInitiative() 404s on a durable product's id — it's /projects' row, not /roadmap's", async () => {
+    const repo = makeScopedInitiativesRepo([{ ...row('a', 'planned', 0), scope: 'project' }]);
+    const svc = makeService(repo);
+
+    await expect(svc.findInitiative('a')).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  test('updateScope reclassifies regardless of current scope, and is a no-op when already correct', async () => {
+    const repo = makeScopedInitiativesRepo([{ ...row('a', 'planned', 0), scope: 'project' }]);
+    const svc = makeService(repo);
+
+    const reclassified = await svc.updateScope('a', { scope: 'initiative' });
+    expect(reclassified.scope).toBe('initiative');
+    expect(repo.save).toHaveBeenCalledTimes(1);
+
+    // The in-memory row was mutated in place by the first call — a second,
+    // identical request must be a silent no-op, not a second write.
+    await svc.updateScope('a', { scope: 'initiative' });
+    expect(repo.save).toHaveBeenCalledTimes(1);
+  });
+
+  test('unknown initiative → 404', async () => {
+    const repo = makeScopedInitiativesRepo([]);
+    const svc = makeService(repo);
+
+    await expect(svc.updateScope('ghost', { scope: 'project' })).rejects.toBeInstanceOf(NotFoundException);
   });
 });
 
@@ -263,6 +429,7 @@ function makeReadService(
     keyResultsRepo,
     pointsRepo,
     snapshotsRepo,
+    empty(),
   );
   return { svc, objectivesRepo };
 }

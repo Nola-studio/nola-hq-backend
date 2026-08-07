@@ -18,6 +18,8 @@ import { BUSINESS_CONTRACT_STATUSES, type BusinessContractStatus } from '../busi
 import { BUSINESS_EXPENSE_STATUSES, type BusinessExpenseStatus } from '../business-expense.entity';
 import { BUSINESS_INVOICE_STATUSES, type BusinessInvoiceStatus } from '../business-invoice.entity';
 import { BUSINESS_OPPORTUNITY_STAGES, type BusinessOpportunityStage } from '../business-opportunity.entity';
+import { INITIATIVE_SCOPES } from '../../roadmap/dto/create-initiative.dto';
+import type { RoadmapInitiativeScope } from '../../roadmap/roadmap-initiative.entity';
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const COUNTRY_PATTERN = /^[A-Z]{2}$/;
@@ -101,3 +103,12 @@ export class CreateBusinessInvoiceDto {
 }
 
 export class UpdateBusinessInvoiceDto extends PartialType(CreateBusinessInvoiceDto) {}
+
+/**
+ * GET /business/project-portfolio — omit `scope` to get every project row
+ * (pre-existing behavior); pass it to stop blending durable products and
+ * bounded initiatives in one table.
+ */
+export class ListProjectPortfolioDto {
+  @IsOptional() @IsIn(INITIATIVE_SCOPES as unknown as string[]) scope?: RoadmapInitiativeScope;
+}
