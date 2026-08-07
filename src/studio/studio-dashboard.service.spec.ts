@@ -13,7 +13,14 @@ describe('StudioDashboardService', () => {
 
   test('YTD period returns both sections, cost folding in Section B spend', async () => {
     const projects = [
-      { type: 'infrastructure_cloud', priority: 'P1', healthStatus: 'behind', startDate: null, targetDate: null },
+      {
+        scope: 'project',
+        type: 'infrastructure_cloud',
+        priority: 'P1',
+        healthStatus: 'behind',
+        startDate: null,
+        targetDate: null,
+      },
     ];
     const tasks: unknown[] = [];
     const team: unknown[] = [];
@@ -71,5 +78,25 @@ describe('StudioDashboardService', () => {
     const svc = new StudioDashboardService(repo([]), repo([]), repo([]), repo([]), repo([]), repo([]), repo([]));
     const result = await svc.get({ period: 'month', year: 2026, month: 2 });
     expect(result.period).toEqual({ start: '2026-02-01', end: '2026-02-28', label: '2026-02-01 → 2026-02-28' });
+  });
+
+  test('roadmap_initiatives rows split into Section A "projects" and "initiatives" by scope', async () => {
+    const rows = [
+      { scope: 'project', type: 'website', priority: 'P2', healthStatus: 'on_track', startDate: null, targetDate: null },
+      { scope: 'initiative', type: 'web_app_development', priority: 'P1', healthStatus: 'behind', startDate: null, targetDate: null },
+      { scope: 'initiative', type: 'other', priority: 'P3', healthStatus: 'on_track', startDate: null, targetDate: null },
+    ];
+    const svc = new StudioDashboardService(repo(rows), repo([]), repo([]), repo([]), repo([]), repo([]), repo([]));
+    const result = await svc.get();
+
+    expect(result.sectionA.stats.projects).toBe(1);
+    expect(result.sectionA.stats.initiatives).toBe(2);
+    expect(result.sectionA.donuts.projectsByType).toEqual([{ key: 'website', count: 1 }]);
+    expect(result.sectionA.donuts.initiativesByType).toEqual(
+      expect.arrayContaining([
+        { key: 'web_app_development', count: 1 },
+        { key: 'other', count: 1 },
+      ]),
+    );
   });
 });

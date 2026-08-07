@@ -35,6 +35,21 @@ export interface DashboardProject {
   archived: boolean;
 }
 
+/**
+ * Same shape as `DashboardProject` minus `budget`/`cost` — bounded work
+ * (`RoadmapInitiative.scope === 'initiative'`) isn't budget-tracked the way
+ * durable products are, so its dashboard section stays count/overdue/donuts
+ * only. See `SectionA.stats.initiatives`/`.initiativesByType` etc.
+ */
+export interface DashboardInitiative {
+  type: string | null;
+  priority: string | null;
+  healthStatus: string | null;
+  startDate: string | null;
+  dueDate: string | null;
+  archived: boolean;
+}
+
 export interface DashboardTask {
   status: string;
   priority: string;
@@ -128,6 +143,8 @@ export interface SectionA {
     overdueProjects: number;
     overdueTasks: number;
     requestsOpen: number;
+    initiatives: number;
+    overdueInitiatives: number;
   };
   donuts: {
     projectsByType: DonutSlice[];
@@ -137,6 +154,9 @@ export interface SectionA {
     tasksByPriority: DonutSlice[];
     tasksByAssignee: DonutSlice[];
     requestsByType: DonutSlice[];
+    initiativesByType: DonutSlice[];
+    initiativesByPriority: DonutSlice[];
+    initiativesByStatus: DonutSlice[];
   };
   bars: {
     budgetVsCostByMonth: MonthBudgetCost[];
@@ -196,6 +216,7 @@ const OPEN_REQUEST_STATUSES = new Set(['nouvelle', 'en_revue', 'acceptee']);
 
 export function buildSectionA(
   projects: DashboardProject[],
+  initiatives: DashboardInitiative[],
   tasks: DashboardTask[],
   requests: DashboardRequest[],
   range: PeriodRange,
@@ -203,9 +224,11 @@ export function buildSectionA(
   includeArchived = false,
 ): SectionA {
   const visibleProjects = includeArchived ? projects : projects.filter((p) => !p.archived);
+  const visibleInitiatives = includeArchived ? initiatives : initiatives.filter((i) => !i.archived);
   const visibleTasks = includeArchived ? tasks : tasks.filter((t) => !t.projectArchived);
 
   const projectsInPeriod = visibleProjects.filter((p) => inPeriod(p.startDate, range));
+  const initiativesInPeriod = visibleInitiatives.filter((i) => inPeriod(i.startDate, range));
   const tasksInPeriod = visibleTasks.filter((t) => inPeriod(t.dueDate, range));
 
   const budget = sum(projectsInPeriod.map((p) => p.budget));
@@ -241,6 +264,8 @@ export function buildSectionA(
       overdueTasks: visibleTasks.filter((t) => t.dueDate && t.dueDate < today && t.status !== 'done').length,
       // As-of-today, like the overdue counts above — not period-filtered.
       requestsOpen: requests.filter((r) => OPEN_REQUEST_STATUSES.has(r.status)).length,
+      initiatives: initiativesInPeriod.length,
+      overdueInitiatives: visibleInitiatives.filter((i) => i.dueDate && i.dueDate < today && i.healthStatus !== 'completed').length,
     },
     donuts: {
       projectsByType: groupCount(projectsInPeriod, (p) => p.type ?? 'unspecified'),
@@ -253,6 +278,9 @@ export function buildSectionA(
         requests.filter((r) => OPEN_REQUEST_STATUSES.has(r.status)),
         (r) => r.type,
       ),
+      initiativesByType: groupCount(initiativesInPeriod, (i) => i.type ?? 'unspecified'),
+      initiativesByPriority: groupCount(initiativesInPeriod, (i) => i.priority ?? 'unspecified'),
+      initiativesByStatus: groupCount(initiativesInPeriod, (i) => i.healthStatus ?? 'unspecified'),
     },
     bars: { budgetVsCostByMonth, taskActivityByMonth },
   };

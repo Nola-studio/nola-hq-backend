@@ -17,6 +17,7 @@ import {
   buildSectionA,
   buildSectionB,
   withCrossSectionCost,
+  type DashboardInitiative,
   type DashboardProject,
   type DashboardRequest,
   type DashboardTask,
@@ -86,18 +87,32 @@ export class StudioDashboardService {
     ]);
     const emailById = new Map(allTeam.map((m) => [m.id, m.email]));
 
+    // Both scopes share one archived flag — a task filed under either can be
+    // excluded, so this must not be scope-filtered.
     const archivedProjectIds = new Set(allProjects.filter((p) => p.archived).map((p) => p.id));
 
-    const dashboardProjects: DashboardProject[] = allProjects.map((p) => ({
-      type: p.type,
-      priority: ROADMAP_PRIORITY_TO_STUDIO[p.priority] ?? null,
-      healthStatus: p.healthStatus,
-      budget: p.budget,
-      cost: p.cost,
-      startDate: p.startDate,
-      dueDate: p.targetDate,
-      archived: p.archived,
-    }));
+    const dashboardProjects: DashboardProject[] = allProjects
+      .filter((p) => p.scope === 'project')
+      .map((p) => ({
+        type: p.type,
+        priority: ROADMAP_PRIORITY_TO_STUDIO[p.priority] ?? null,
+        healthStatus: p.healthStatus,
+        budget: p.budget,
+        cost: p.cost,
+        startDate: p.startDate,
+        dueDate: p.targetDate,
+        archived: p.archived,
+      }));
+    const dashboardInitiatives: DashboardInitiative[] = allProjects
+      .filter((p) => p.scope === 'initiative')
+      .map((i) => ({
+        type: i.type,
+        priority: ROADMAP_PRIORITY_TO_STUDIO[i.priority] ?? null,
+        healthStatus: i.healthStatus,
+        startDate: i.startDate,
+        dueDate: i.targetDate,
+        archived: i.archived,
+      }));
     const dashboardTasks: DashboardTask[] = allTasks.map((t) => ({
       status: WORK_ITEM_STATUS_TO_STUDIO_STATUS[t.status],
       priority: WORK_ITEM_PRIORITY_TO_STUDIO_PRIORITY[t.priority],
@@ -113,6 +128,7 @@ export class StudioDashboardService {
 
     const sectionA = buildSectionA(
       dashboardProjects,
+      dashboardInitiatives,
       dashboardTasks,
       dashboardRequests,
       range,

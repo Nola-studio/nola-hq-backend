@@ -4,6 +4,7 @@ import {
   buildSectionB,
   withCrossSectionCost,
   type DashboardProject,
+  type DashboardInitiative,
   type DashboardTask,
   type DashboardExpense,
   type DashboardDomain,
@@ -40,6 +41,18 @@ function task(over: Partial<DashboardTask> = {}): DashboardTask {
   };
 }
 
+function initiative(over: Partial<DashboardInitiative> = {}): DashboardInitiative {
+  return {
+    type: 'web_app_development',
+    priority: null,
+    healthStatus: null,
+    startDate: null,
+    dueDate: null,
+    archived: false,
+    ...over,
+  };
+}
+
 describe('buildSectionA', () => {
   test('reproduces the real workbook snapshot: 5 projects, 0 budget, 0 tasks', () => {
     const projects: DashboardProject[] = [
@@ -49,7 +62,7 @@ describe('buildSectionA', () => {
       project({ type: 'web_app_development' }),
       project({ type: 'web_app_development' }),
     ];
-    const result = buildSectionA(projects, [], [], RANGE, TODAY);
+    const result = buildSectionA(projects, [], [], [], RANGE, TODAY);
     expect(result.stats.projects).toBe(5);
     expect(result.stats.budget).toBe(0);
     expect(result.stats.cost).toBe(0); // cross-section cost added separately
@@ -63,38 +76,38 @@ describe('buildSectionA', () => {
   });
 
   test('a project with no startDate is always in period (workbook "In Period?" rule)', () => {
-    const result = buildSectionA([project({ startDate: null, budget: '100' })], [], [], RANGE, TODAY);
+    const result = buildSectionA([project({ startDate: null, budget: '100' })], [], [], [], RANGE, TODAY);
     expect(result.stats.projects).toBe(1);
     expect(result.stats.budget).toBe(100);
   });
 
   test('a project with a startDate outside the period is excluded', () => {
-    const result = buildSectionA([project({ startDate: '2025-01-01', budget: '100' })], [], [], RANGE, TODAY);
+    const result = buildSectionA([project({ startDate: '2025-01-01', budget: '100' })], [], [], [], RANGE, TODAY);
     expect(result.stats.projects).toBe(0);
     expect(result.stats.budget).toBe(0);
   });
 
   test('budgetUtilizedPercent is 0 when budget is 0, to avoid a NaN/Infinity', () => {
-    const result = buildSectionA([project({ budget: '0', cost: '50' })], [], [], RANGE, TODAY);
+    const result = buildSectionA([project({ budget: '0', cost: '50' })], [], [], [], RANGE, TODAY);
     expect(result.stats.budgetUtilizedPercent).toBe(0);
   });
 
   test('budgetUtilizedPercent rounds cost/budget as a percent', () => {
-    const result = buildSectionA([project({ budget: '200', cost: '150' })], [], [], RANGE, TODAY);
+    const result = buildSectionA([project({ budget: '200', cost: '150' })], [], [], [], RANGE, TODAY);
     expect(result.stats.budgetUtilizedPercent).toBe(75);
   });
 
   test('overdue projects/tasks ignore the period filter — always "as of today"', () => {
     const projects = [project({ dueDate: '2026-01-01', healthStatus: 'behind', startDate: '2020-01-01' })];
     const tasks = [task({ dueDate: '2026-01-01', status: 'in_progress', hoursSpent: null })];
-    const result = buildSectionA(projects, tasks, [], RANGE, TODAY);
+    const result = buildSectionA(projects, [], tasks, [], RANGE, TODAY);
     expect(result.stats.overdueProjects).toBe(1);
     expect(result.stats.overdueTasks).toBe(1);
   });
 
   test('a completed project past its due date does not count as overdue', () => {
     const projects = [project({ dueDate: '2026-01-01', healthStatus: 'completed' })];
-    expect(buildSectionA(projects, [], [], RANGE, TODAY).stats.overdueProjects).toBe(0);
+    expect(buildSectionA(projects, [], [], [], RANGE, TODAY).stats.overdueProjects).toBe(0);
   });
 
   test('hoursSpent sums only in-period tasks', () => {
@@ -103,7 +116,7 @@ describe('buildSectionA', () => {
       task({ dueDate: '2025-01-01', hoursSpent: '10' }), // outside range
       task({ dueDate: null, hoursSpent: '2' }), // no date -> in period
     ];
-    expect(buildSectionA([], tasks, [], RANGE, TODAY).stats.hoursSpent).toBe(6.5);
+    expect(buildSectionA([], [], tasks, [], RANGE, TODAY).stats.hoursSpent).toBe(6.5);
   });
 
   test('taskActivityByMonth buckets done/in_progress/everything-else', () => {
@@ -112,14 +125,14 @@ describe('buildSectionA', () => {
       task({ dueDate: '2026-03-20', status: 'in_progress' }),
       task({ dueDate: '2026-03-25', status: 'blocked' }),
     ];
-    const result = buildSectionA([], tasks, [], RANGE, TODAY);
+    const result = buildSectionA([], [], tasks, [], RANGE, TODAY);
     const march = result.bars.taskActivityByMonth.find((m) => m.month === 3)!;
     expect(march).toEqual({ month: 3, completed: 1, inProgress: 1, pending: 1 });
   });
 
   test('budgetVsCostByMonth buckets by project startDate month', () => {
     const projects = [project({ startDate: '2026-02-10', budget: '1000', cost: '200' })];
-    const result = buildSectionA(projects, [], [], RANGE, TODAY);
+    const result = buildSectionA(projects, [], [], [], RANGE, TODAY);
     const feb = result.bars.budgetVsCostByMonth.find((m) => m.month === 2)!;
     expect(feb).toEqual({ month: 2, budget: 1000, cost: 200 });
     expect(result.bars.budgetVsCostByMonth).toHaveLength(12);
@@ -134,7 +147,7 @@ describe('buildSectionA', () => {
       task({ projectArchived: false, status: 'in_progress', hoursSpent: '2', dueDate: '2026-01-01' }),
       task({ projectArchived: true, status: 'in_progress', hoursSpent: '20', dueDate: '2026-01-01' }),
     ];
-    const result = buildSectionA(projects, tasks, [], RANGE, TODAY);
+    const result = buildSectionA(projects, [], tasks, [], RANGE, TODAY);
     expect(result.stats.projects).toBe(1);
     expect(result.stats.budget).toBe(100);
     expect(result.stats.tasks).toBe(1);
@@ -152,11 +165,47 @@ describe('buildSectionA', () => {
       task({ projectArchived: false, hoursSpent: '2' }),
       task({ projectArchived: true, hoursSpent: '20' }),
     ];
-    const result = buildSectionA(projects, tasks, [], RANGE, TODAY, true);
+    const result = buildSectionA(projects, [], tasks, [], RANGE, TODAY, true);
     expect(result.stats.projects).toBe(2);
     expect(result.stats.budget).toBe(1000);
     expect(result.stats.tasks).toBe(2);
     expect(result.stats.hoursSpent).toBe(22);
+  });
+
+  test('initiatives are counted and donut-grouped separately from projects', () => {
+    const projects = [project({ type: 'website' })];
+    const initiatives = [
+      initiative({ type: 'infrastructure_cloud', priority: 'high' }),
+      initiative({ type: 'web_app_development' }),
+    ];
+    const result = buildSectionA(projects, initiatives, [], [], RANGE, TODAY);
+    expect(result.stats.projects).toBe(1);
+    expect(result.stats.initiatives).toBe(2);
+    expect(result.donuts.initiativesByType).toEqual(
+      expect.arrayContaining([
+        { key: 'infrastructure_cloud', count: 1 },
+        { key: 'web_app_development', count: 1 },
+      ]),
+    );
+    // The projects donut must not pick up the initiative's type.
+    expect(result.donuts.projectsByType).toEqual([{ key: 'website', count: 1 }]);
+  });
+
+  test('overdueInitiatives ignores the period filter, like overdueProjects', () => {
+    const initiatives = [
+      initiative({ dueDate: '2026-01-01', healthStatus: 'behind', startDate: '2020-01-01' }),
+    ];
+    const result = buildSectionA([], initiatives, [], [], RANGE, TODAY);
+    expect(result.stats.overdueInitiatives).toBe(1);
+  });
+
+  test('an archived initiative is excluded by default, folded back in with includeArchived', () => {
+    const initiatives = [
+      initiative({ archived: false, type: 'website' }),
+      initiative({ archived: true, type: 'other' }),
+    ];
+    expect(buildSectionA([], initiatives, [], [], RANGE, TODAY).stats.initiatives).toBe(1);
+    expect(buildSectionA([], initiatives, [], [], RANGE, TODAY, true).stats.initiatives).toBe(2);
   });
 });
 
@@ -291,7 +340,7 @@ describe('buildSectionB', () => {
 
 describe('withCrossSectionCost', () => {
   test('folds Section B spend into Section A cost, per the workbook formula', () => {
-    const sectionA = buildSectionA([project({ budget: '1000', cost: '0' })], [], [], RANGE, TODAY);
+    const sectionA = buildSectionA([project({ budget: '1000', cost: '0' })], [], [], [], RANGE, TODAY);
     const sectionB = buildSectionB(
       [{ amountCents: 43702, currency: 'USD', category: 'domains_saas', paidByEmail: 'a@nola.dev', date: '2026-03-01', status: 'paid' }],
       [],
