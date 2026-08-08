@@ -25,6 +25,8 @@ import {
   UpdateProjectTimeEntryDto,
 } from './dto/business-operations.dto';
 import { ProjectTimeEntry } from './project-time-entry.entity';
+import { DEFAULT_BUSINESS_CURRENCY } from './business-currency';
+import { sumByCurrency } from './currency-totals';
 
 @Injectable()
 export class BusinessOperationsService {
@@ -127,6 +129,7 @@ export class BusinessOperationsService {
         subtotalCdf: computed.subtotalCdf,
         taxCdf: computed.taxCdf,
         totalCdf: computed.totalCdf,
+        currency: dto.currency ?? DEFAULT_BUSINESS_CURRENCY,
         paymentTerms: this.clean(dto.paymentTerms),
         notes: this.clean(dto.notes),
         createdAt: now,
@@ -192,6 +195,7 @@ export class BusinessOperationsService {
       clientId: quote.clientId,
       projectId: quote.projectId,
       amountCdf: quote.totalCdf,
+      currency: quote.currency,
       issuedOn: new Date().toISOString().slice(0, 10),
       dueOn: dto.dueOn,
       status: dto.status ?? 'draft',
@@ -353,6 +357,7 @@ export class BusinessOperationsService {
       minutes: dto.minutes,
       billable: dto.billable ?? true,
       hourlyRateCdf: dto.hourlyRateCdf ?? 0,
+      hourlyRateCurrency: dto.hourlyRateCurrency ?? DEFAULT_BUSINESS_CURRENCY,
       description: this.clean(dto.description),
       createdAt: now,
       updatedAt: now,
@@ -371,8 +376,11 @@ export class BusinessOperationsService {
     const rows = await this.listTimeEntries(projectId);
     const totalMinutes = rows.reduce((sum, row) => sum + row.minutes, 0);
     const billableMinutes = rows.filter((row) => row.billable).reduce((sum, row) => sum + row.minutes, 0);
-    const laborCostCdf = Math.round(rows.reduce((sum, row) => sum + row.minutes / 60 * row.hourlyRateCdf, 0));
-    return { totalMinutes, billableMinutes, nonBillableMinutes: totalMinutes - billableMinutes, laborCostCdf, entries: rows.length };
+    const laborCost = sumByCurrency(rows, (row) => ({
+      amount: Math.round((row.minutes / 60) * row.hourlyRateCdf),
+      currency: row.hourlyRateCurrency,
+    }));
+    return { totalMinutes, billableMinutes, nonBillableMinutes: totalMinutes - billableMinutes, laborCost, entries: rows.length };
   }
 
   private async assertTimeLinks(projectId: string, workItemId?: number) {

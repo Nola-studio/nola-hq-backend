@@ -3,6 +3,7 @@ import { RoadmapInitiative } from '../roadmap/roadmap-initiative.entity';
 import { BusinessClient } from './business-client.entity';
 import { BusinessOpportunity } from './business-opportunity.entity';
 import { moneyTransformer } from './business-money';
+import { DEFAULT_BUSINESS_CURRENCY, type BusinessCurrency } from './business-currency';
 
 export const BUSINESS_CONTRACT_STATUSES = [
   'draft',
@@ -55,6 +56,9 @@ export class BusinessContract {
 
   @Column({ type: 'bigint', name: 'value_cdf', default: 0, transformer: moneyTransformer })
   valueCdf!: number;
+
+  @Column({ type: 'varchar', length: 3, name: 'value_currency', default: DEFAULT_BUSINESS_CURRENCY })
+  valueCurrency!: BusinessCurrency;
 
   @Column({ type: 'date', name: 'start_date', nullable: true })
   startDate!: string | null;
