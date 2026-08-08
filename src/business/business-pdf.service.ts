@@ -35,11 +35,11 @@ export class BusinessPdfService {
       doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(9).text('DESCRIPTION', 62, y + 10);
       doc.text('MONTANT', 430, y + 10, { width: 103, align: 'right' });
       doc.fillColor(INK).font('Helvetica').fontSize(10).text(invoice.description || 'Prestations et services', 62, y + 44, { width: 335 });
-      doc.font('Helvetica-Bold').text(this.money(invoice.amountCdf), 430, y + 44, { width: 103, align: 'right' });
+      doc.font('Helvetica-Bold').text(this.money(invoice.amountCdf, invoice.currency), 430, y + 44, { width: 103, align: 'right' });
       doc.strokeColor(LINE).moveTo(50, y + 70).lineTo(545, y + 70).stroke();
-      this.totals(doc, invoice.amountCdf, 0, invoice.amountCdf, 0, y + 95);
-      doc.fillColor(MUTE).font('Helvetica').fontSize(9).text(`Montant paye : ${this.money(invoice.paidAmountCdf)}`, 50, y + 178);
-      doc.text(`Solde : ${this.money(Math.max(0, invoice.amountCdf - invoice.paidAmountCdf))}`, 50, y + 194);
+      this.totals(doc, invoice.amountCdf, 0, invoice.amountCdf, 0, invoice.currency, y + 95);
+      doc.fillColor(MUTE).font('Helvetica').fontSize(9).text(`Montant paye : ${this.money(invoice.paidAmountCdf, invoice.currency)}`, 50, y + 178);
+      doc.text(`Solde : ${this.money(Math.max(0, invoice.amountCdf - invoice.paidAmountCdf), invoice.currency)}`, 50, y + 194);
       this.footer(doc, invoice.number);
     });
   }
@@ -89,22 +89,22 @@ export class BusinessPdfService {
       if (y + rowHeight > 690) { doc.addPage(); y = 60; header(); }
       doc.fillColor(INK).font('Helvetica').fontSize(9).text(line.description, 62, y + 6, { width: 230 });
       doc.text(String(line.quantity), 305, y + 6, { width: 45, align: 'right' });
-      doc.text(this.money(line.unitPriceCdf), 360, y + 6, { width: 80, align: 'right' });
-      doc.font('Helvetica-Bold').text(this.money(line.totalCdf), 450, y + 6, { width: 83, align: 'right' });
+      doc.text(this.money(line.unitPriceCdf, quote.currency), 360, y + 6, { width: 80, align: 'right' });
+      doc.font('Helvetica-Bold').text(this.money(line.totalCdf, quote.currency), 450, y + 6, { width: 83, align: 'right' });
       doc.strokeColor(LINE).moveTo(50, y + rowHeight).lineTo(545, y + rowHeight).stroke();
       y += rowHeight;
     }
-    this.totals(doc, quote.subtotalCdf, quote.taxCdf, quote.totalCdf, quote.taxRate, y + 18);
+    this.totals(doc, quote.subtotalCdf, quote.taxCdf, quote.totalCdf, quote.taxRate, quote.currency, y + 18);
   }
 
-  private totals(doc: PDFKit.PDFDocument, subtotal: number, tax: number, total: number, taxRate: number, y = 520) {
+  private totals(doc: PDFKit.PDFDocument, subtotal: number, tax: number, total: number, taxRate: number, currency: string, y = 520) {
     doc.fillColor(MUTE).font('Helvetica').fontSize(9).text('Sous-total', 350, y, { width: 90 });
-    doc.fillColor(INK).text(this.money(subtotal), 450, y, { width: 83, align: 'right' });
+    doc.fillColor(INK).text(this.money(subtotal, currency), 450, y, { width: 83, align: 'right' });
     doc.fillColor(MUTE).text(`Taxe (${taxRate}%)`, 350, y + 19, { width: 90 });
-    doc.fillColor(INK).text(this.money(tax), 450, y + 19, { width: 83, align: 'right' });
+    doc.fillColor(INK).text(this.money(tax, currency), 450, y + 19, { width: 83, align: 'right' });
     doc.fillColor(GREEN).rect(340, y + 42, 205, 34).fill();
     doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(10).text('TOTAL', 352, y + 54);
-    doc.text(this.money(total), 435, y + 54, { width: 98, align: 'right' });
+    doc.text(this.money(total, currency), 435, y + 54, { width: 98, align: 'right' });
   }
 
   private notes(doc: PDFKit.PDFDocument, terms?: string | null, notes?: string | null) {
@@ -126,8 +126,8 @@ export class BusinessPdfService {
     doc.text(reference, 400, bottom, { width: 145, align: 'right', lineBreak: false });
   }
 
-  private money(value: number) {
-    return `${new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(value).replace(/[\u202f\u00a0]/g, ' ')} CDF`;
+  private money(value: number, currency: string) {
+    return `${new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(value).replace(/[\u202f\u00a0]/g, ' ')} ${currency}`;
   }
 
   private date(value: string) {

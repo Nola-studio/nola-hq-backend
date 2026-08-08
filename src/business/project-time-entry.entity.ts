@@ -2,6 +2,7 @@ import { Column, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn } 
 import { RoadmapInitiative } from '../roadmap/roadmap-initiative.entity';
 import { WorkItem } from '../work-items/work-item.entity';
 import { moneyTransformer } from './business-money';
+import { DEFAULT_BUSINESS_CURRENCY, type BusinessCurrency } from './business-currency';
 
 @Entity('project_time_entries')
 export class ProjectTimeEntry {
@@ -40,6 +41,9 @@ export class ProjectTimeEntry {
 
   @Column({ type: 'bigint', name: 'hourly_rate_cdf', default: 0, transformer: moneyTransformer })
   hourlyRateCdf!: number;
+
+  @Column({ type: 'varchar', length: 3, name: 'hourly_rate_currency', default: DEFAULT_BUSINESS_CURRENCY })
+  hourlyRateCurrency!: BusinessCurrency;
 
   @Column({ type: 'text', nullable: true })
   description!: string | null;

@@ -7,6 +7,7 @@ import {
   PrimaryGeneratedColumn,
 } from 'typeorm';
 import { RoadmapInitiative } from '../roadmap/roadmap-initiative.entity';
+import { WorkItem } from '../work-items/work-item.entity';
 
 export const STUDIO_REQUEST_TYPES = ['bug', 'suggestion', 'demande'] as const;
 export type StudioRequestType = (typeof STUDIO_REQUEST_TYPES)[number];
@@ -25,10 +26,10 @@ export type StudioRequestPriority = (typeof STUDIO_REQUEST_PRIORITIES)[number];
 
 /**
  * A bug report, suggestion, or standalone request filed against the
- * platform — deliberately kept separate from `WorkItem`. Nothing here ever
- * converts into a task: a request that's accepted still needs someone to
- * manually file the resulting work, so `projectId` is just an optional
- * pointer to give it context, never a scheduling link.
+ * platform — deliberately kept separate from `WorkItem`. An operator can
+ * convert an accepted one into a ticket via `StudioRequestsService.convert`,
+ * which sets `linkedWorkItemId` and moves `status` to `acceptee`; unconverted
+ * requests just carry `projectId` as optional context.
  */
 @Entity('studio_requests')
 export class StudioRequest {
@@ -67,6 +68,15 @@ export class StudioRequest {
 
   @Column({ type: 'varchar', default: 'P2' })
   priority!: StudioRequestPriority;
+
+  /** Set once an operator converts this request into a ticket. */
+  @Column({ type: 'integer', name: 'linked_work_item_id', nullable: true })
+  @Index()
+  linkedWorkItemId!: number | null;
+
+  @ManyToOne(() => WorkItem, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'linked_work_item_id' })
+  linkedWorkItem?: WorkItem | null;
 
   @Column({ name: 'created_at' })
   createdAt!: Date;

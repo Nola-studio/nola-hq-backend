@@ -28,6 +28,7 @@ import {
   type BusinessReminderEntityType,
   type BusinessReminderStatus,
 } from '../business-reminder.entity';
+import { BUSINESS_CURRENCIES, type BusinessCurrency } from '../business-currency';
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_MONEY = 9_000_000_000_000_000;
@@ -48,6 +49,7 @@ export class CreateBusinessQuoteDto {
   @Matches(DATE_PATTERN) issuedOn!: string;
   @Matches(DATE_PATTERN) validUntil!: string;
   @IsOptional() @Type(() => Number) @IsInt() @Min(0) @Max(100) taxRate?: number;
+  @IsOptional() @IsIn(BUSINESS_CURRENCIES as unknown as string[]) currency?: BusinessCurrency;
   @IsOptional() @IsString() @MaxLength(5_000) paymentTerms?: string;
   @IsOptional() @IsString() @MaxLength(5_000) notes?: string;
   @IsArray() @ArrayMinSize(1) @ArrayMaxSize(100) @ValidateNested({ each: true }) @Type(() => BusinessQuoteLineDto)
@@ -95,6 +97,7 @@ export class CreateProjectTimeEntryDto {
   @Type(() => Number) @IsInt() @Min(1) @Max(1_440) minutes!: number;
   @IsOptional() @IsBoolean() billable?: boolean;
   @IsOptional() @Type(() => Number) @IsInt() @Min(0) @Max(MAX_MONEY) hourlyRateCdf?: number;
+  @IsOptional() @IsIn(BUSINESS_CURRENCIES as unknown as string[]) hourlyRateCurrency?: BusinessCurrency;
   @IsOptional() @IsString() @MaxLength(5_000) description?: string;
 }
 

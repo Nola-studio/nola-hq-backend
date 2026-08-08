@@ -25,6 +25,8 @@ import {
   UpdateProjectTimeEntryDto,
 } from './dto/business-operations.dto';
 import { ProjectTimeEntry } from './project-time-entry.entity';
+import { DEFAULT_BUSINESS_CURRENCY } from './business-currency';
+import { addByCurrency, netByCurrency, sumByCurrency, type CurrencyTotals } from './currency-totals';
 
 @Injectable()
 export class BusinessOperationsService {
@@ -127,6 +129,7 @@ export class BusinessOperationsService {
         subtotalCdf: computed.subtotalCdf,
         taxCdf: computed.taxCdf,
         totalCdf: computed.totalCdf,
+        currency: dto.currency ?? DEFAULT_BUSINESS_CURRENCY,
         paymentTerms: this.clean(dto.paymentTerms),
         notes: this.clean(dto.notes),
         createdAt: now,
@@ -192,6 +195,7 @@ export class BusinessOperationsService {
       clientId: quote.clientId,
       projectId: quote.projectId,
       amountCdf: quote.totalCdf,
+      currency: quote.currency,
       issuedOn: new Date().toISOString().slice(0, 10),
       dueOn: dto.dueOn,
       status: dto.status ?? 'draft',
@@ -353,6 +357,7 @@ export class BusinessOperationsService {
       minutes: dto.minutes,
       billable: dto.billable ?? true,
       hourlyRateCdf: dto.hourlyRateCdf ?? 0,
+      hourlyRateCurrency: dto.hourlyRateCurrency ?? DEFAULT_BUSINESS_CURRENCY,
       description: this.clean(dto.description),
       createdAt: now,
       updatedAt: now,
@@ -371,8 +376,11 @@ export class BusinessOperationsService {
     const rows = await this.listTimeEntries(projectId);
     const totalMinutes = rows.reduce((sum, row) => sum + row.minutes, 0);
     const billableMinutes = rows.filter((row) => row.billable).reduce((sum, row) => sum + row.minutes, 0);
-    const laborCostCdf = Math.round(rows.reduce((sum, row) => sum + row.minutes / 60 * row.hourlyRateCdf, 0));
-    return { totalMinutes, billableMinutes, nonBillableMinutes: totalMinutes - billableMinutes, laborCostCdf, entries: rows.length };
+    const laborCost = sumByCurrency(rows, (row) => ({
+      amount: Math.round((row.minutes / 60) * row.hourlyRateCdf),
+      currency: row.hourlyRateCurrency,
+    }));
+    return { totalMinutes, billableMinutes, nonBillableMinutes: totalMinutes - billableMinutes, laborCost, entries: rows.length };
   }
 
   private async assertTimeLinks(projectId: string, workItemId?: number) {
@@ -391,7 +399,14 @@ export class BusinessOperationsService {
     const start = new Date(`${startValue.slice(0, 7)}-01T00:00:00Z`);
     const buckets = Array.from({ length: months }, (_, index) => {
       const date = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + index, 1));
-      return { month: date.toISOString().slice(0, 7), inflowCdf: 0, outflowCdf: 0, laborCostCdf: 0, netCdf: 0, cumulativeCdf: 0 };
+      return {
+        month: date.toISOString().slice(0, 7),
+        inflow: {} as CurrencyTotals,
+        outflow: {} as CurrencyTotals,
+        laborCost: {} as CurrencyTotals,
+        net: {} as CurrencyTotals,
+        cumulative: {} as CurrencyTotals,
+      };
     });
     const [invoices, expenses, time] = await Promise.all([
       this.invoices.find({ ...(query.projectId ? { where: { projectId: query.projectId } } : {}) }),
@@ -403,38 +418,41 @@ export class BusinessOperationsService {
       if (key < buckets[0].month) return buckets[0];
       return buckets.find((item) => item.month === key);
     };
+    const add = (totals: CurrencyTotals, currency: string, amount: number) => {
+      totals[currency] = (totals[currency] ?? 0) + amount;
+    };
     for (const invoice of invoices.filter((item) => !['draft', 'cancelled'].includes(item.status))) {
       if (invoice.paidAmountCdf > 0) {
         const paidTarget = bucket(invoice.paidAt?.toISOString().slice(0, 10) ?? invoice.issuedOn);
-        if (paidTarget) paidTarget.inflowCdf += invoice.paidAmountCdf;
+        if (paidTarget) add(paidTarget.inflow, invoice.currency, invoice.paidAmountCdf);
       }
       const outstanding = Math.max(0, invoice.amountCdf - invoice.paidAmountCdf);
       const target = bucket(invoice.dueOn);
-      if (target) target.inflowCdf += outstanding;
+      if (target) add(target.inflow, invoice.currency, outstanding);
     }
     for (const expense of expenses.filter((item) => item.status !== 'rejected')) {
       const target = bucket(expense.incurredOn);
-      if (target) target.outflowCdf += expense.amountCdf;
+      if (target) add(target.outflow, expense.amountCurrency, expense.amountCdf);
     }
     for (const entry of time) {
       const target = bucket(entry.workDate);
-      if (target) target.laborCostCdf += Math.round(entry.minutes / 60 * entry.hourlyRateCdf);
+      if (target) add(target.laborCost, entry.hourlyRateCurrency, Math.round(entry.minutes / 60 * entry.hourlyRateCdf));
     }
-    let cumulative = 0;
+    let cumulative: CurrencyTotals = {};
     for (const item of buckets) {
-      item.outflowCdf += item.laborCostCdf;
-      item.netCdf = item.inflowCdf - item.outflowCdf;
-      cumulative += item.netCdf;
-      item.cumulativeCdf = cumulative;
+      item.outflow = addByCurrency(item.outflow, item.laborCost);
+      item.net = netByCurrency(item.inflow, item.outflow);
+      cumulative = addByCurrency(cumulative, item.net);
+      item.cumulative = { ...cumulative };
     }
     return {
       from: buckets[0].month,
       months,
       projectId: query.projectId ?? null,
       totals: {
-        inflowCdf: buckets.reduce((sum, item) => sum + item.inflowCdf, 0),
-        outflowCdf: buckets.reduce((sum, item) => sum + item.outflowCdf, 0),
-        netCdf: buckets.reduce((sum, item) => sum + item.netCdf, 0),
+        inflow: buckets.reduce((sum, item) => addByCurrency(sum, item.inflow), {} as CurrencyTotals),
+        outflow: buckets.reduce((sum, item) => addByCurrency(sum, item.outflow), {} as CurrencyTotals),
+        net: buckets.reduce((sum, item) => addByCurrency(sum, item.net), {} as CurrencyTotals),
       },
       buckets,
     };

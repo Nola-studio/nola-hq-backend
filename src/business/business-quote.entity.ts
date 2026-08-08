@@ -2,6 +2,7 @@ import { Column, Entity, Index, JoinColumn, ManyToOne, OneToMany, PrimaryGenerat
 import { RoadmapInitiative } from '../roadmap/roadmap-initiative.entity';
 import { BusinessClient } from './business-client.entity';
 import { moneyTransformer } from './business-money';
+import { DEFAULT_BUSINESS_CURRENCY, type BusinessCurrency } from './business-currency';
 import { BusinessOpportunity } from './business-opportunity.entity';
 
 export const BUSINESS_QUOTE_STATUSES = ['draft', 'sent', 'accepted', 'rejected', 'expired'] as const;
@@ -63,6 +64,10 @@ export class BusinessQuote {
 
   @Column({ type: 'bigint', name: 'total_cdf', default: 0, transformer: moneyTransformer })
   totalCdf!: number;
+
+  /** One currency for the whole quote — its lines inherit it, no column of their own. */
+  @Column({ type: 'varchar', length: 3, default: DEFAULT_BUSINESS_CURRENCY })
+  currency!: BusinessCurrency;
 
   @Column({ type: 'text', name: 'payment_terms', nullable: true })
   paymentTerms!: string | null;
