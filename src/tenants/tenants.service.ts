@@ -287,10 +287,13 @@ export class TenantsService {
       throw new BadRequestException('mobile_money_phone_required_for_paid_plans');
     }
 
+    // V1 : seule l'app scolaire expose le point d'entrée hq-provision. Ajouter
+    // une table de routage quand d'autres apps clientes offriront la même
+    // surface. `kelasi` est accepté le temps que les appelants non migrés
+    // disparaissent — l'app s'annonce sous `yekoli` depuis le 2026-08-09.
+    const PROVISIONABLE_APPS = new Set(['yekoli', 'kelasi']);
     const targetApp = (dto.apps?.[0] ?? '').trim();
-    if (targetApp !== 'kelasi') {
-      // V1: only kelasi has the hq-provision endpoint. Add a routing
-      // table later when other customer apps gain the same surface.
+    if (!PROVISIONABLE_APPS.has(targetApp)) {
       throw new BadRequestException(`unsupported_app: ${targetApp || '(none)'}`);
     }
 
