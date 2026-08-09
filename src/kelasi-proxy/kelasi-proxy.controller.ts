@@ -17,8 +17,11 @@ import { KelasiProvisionClient } from '../tenants/kelasi-provision.client';
  * is shared-secret-authed.
  */
 @ApiBearerAuth()
-@ApiTags('kelasi-proxy')
-@Controller('kelasi')
+@ApiTags('yekoli-proxy')
+// Deux préfixes le temps de la bascule : le front migre vers `yekoli`, mais un
+// appelant resté sur `kelasi` doit continuer d'être servi. Retirer l'ancien
+// quand plus personne ne l'appelle.
+@Controller(['yekoli', 'kelasi'])
 export class KelasiProxyController {
   constructor(private readonly client: KelasiProvisionClient) {}
 
