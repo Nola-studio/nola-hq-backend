@@ -1,6 +1,10 @@
 import { annualizedAmount } from './studio.recurring';
 import { inPeriod, monthOf, monthNumbersInRange, monthsInRange, type PeriodRange } from './studio.dashboard-period';
 
+function isSameMonth(dateStr: string, todayYearMonth: string): boolean {
+  return dateStr.slice(0, 7) === todayYearMonth;
+}
+
 /**
  * Pure aggregation for the two-section, period-filtered Studio dashboard
  * that mirrors the "Project Management Dashboard" workbook. No Nest/DB
@@ -151,6 +155,8 @@ export interface SectionA {
 export interface SectionB {
   stats: {
     spendInPeriodCents: number;
+    /** Current calendar month's USD spend — independent of the selected period filter, for the dashboard's "Dépenses ce mois" stat. */
+    spendThisMonthCents: number;
     avgPerMonthCents: number;
     recurringPerMonthCents: number;
     recurringPerYearCents: number;
@@ -217,8 +223,7 @@ export function buildSectionA(
 
   const cost = 0; // filled in by the caller via `withCrossSectionCost` — Section B's spend, nothing else
 
-  const taskActivityByMonth: MonthTaskActivity[] = Array.from({ length: 12 }, (_, i) => {
-    const month = i + 1;
+  const taskActivityByMonth: MonthTaskActivity[] = monthNumbersInRange(range).map((month) => {
     const monthTasks = tasksInPeriod.filter((t) => monthOf(t.dueDate) === month);
     const bucket = { completed: 0, inProgress: 0, pending: 0 };
     for (const t of monthTasks) bucket[TASK_ACTIVITY_BUCKET[t.status] ?? 'pending']++;
@@ -265,12 +270,17 @@ export function buildSectionB(
   domains: DashboardDomain[],
   recurring: DashboardRecurring[],
   range: PeriodRange,
+  today: string,
 ): SectionB {
   const paid = expenses.filter((e) => e.status !== 'void');
   const usdInPeriod = paid.filter((e) => e.currency === 'USD' && inPeriod(e.date, range));
   const otherInPeriod = paid.filter((e) => e.currency !== 'USD' && inPeriod(e.date, range));
 
   const spendInPeriodCents = usdInPeriod.reduce((total, e) => total + e.amountCents, 0);
+  const todayYearMonth = today.slice(0, 7);
+  const spendThisMonthCents = paid
+    .filter((e) => e.currency === 'USD' && isSameMonth(e.date, todayYearMonth))
+    .reduce((total, e) => total + e.amountCents, 0);
   const months = monthsInRange(range);
   const avgPerMonthCents = months > 0 ? Math.round(spendInPeriodCents / months) : 0;
 
@@ -313,6 +323,7 @@ export function buildSectionB(
   return {
     stats: {
       spendInPeriodCents,
+      spendThisMonthCents,
       avgPerMonthCents,
       recurringPerMonthCents,
       recurringPerYearCents,

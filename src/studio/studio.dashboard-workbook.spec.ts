@@ -195,18 +195,18 @@ describe('buildSectionB', () => {
       expense({ amountCents: 0, date: '2026-08-01', status: 'void' }),
       expense({ amountCents: 2000, date: '2026-07-28' }),
     ];
-    const result = buildSectionB(expenses, [], [], RANGE);
+    const result = buildSectionB(expenses, [], [], RANGE, TODAY);
     expect(result.stats.spendInPeriodCents).toBe(3100);
   });
 
   test('void expenses are excluded entirely', () => {
     const expenses = [expense({ amountCents: 5000, status: 'void' })];
-    expect(buildSectionB(expenses, [], [], RANGE).stats.spendInPeriodCents).toBe(0);
+    expect(buildSectionB(expenses, [], [], RANGE, TODAY).stats.spendInPeriodCents).toBe(0);
   });
 
   test('non-USD expenses never fold into spendInPeriodCents, surface separately', () => {
     const expenses = [expense({ amountCents: 1000, currency: 'USD' }), expense({ amountCents: 2000, currency: 'CAD' })];
-    const result = buildSectionB(expenses, [], [], RANGE);
+    const result = buildSectionB(expenses, [], [], RANGE, TODAY);
     expect(result.stats.spendInPeriodCents).toBe(1000);
     expect(result.otherCurrencyTotals).toEqual([{ currency: 'CAD', amountCents: 2000 }]);
   });
@@ -214,7 +214,7 @@ describe('buildSectionB', () => {
   test('avgPerMonthCents divides by the number of months in range', () => {
     const expenses = [expense({ amountCents: 8000, date: '2026-01-15' })];
     // RANGE spans Jan..Aug = 8 months
-    expect(buildSectionB(expenses, [], [], RANGE).stats.avgPerMonthCents).toBe(1000);
+    expect(buildSectionB(expenses, [], [], RANGE, TODAY).stats.avgPerMonthCents).toBe(1000);
   });
 
   test('recurring totals: monthly cycle summed as-is, annual cycle divided by 12', () => {
@@ -222,7 +222,7 @@ describe('buildSectionB', () => {
       { service: 'ProtonMail', amount: '12', cycle: 'Monthly' },
       { service: 'Domain reg', amount: '120', cycle: 'Annual' },
     ];
-    const result = buildSectionB([], [], recurring, RANGE);
+    const result = buildSectionB([], [], recurring, RANGE, TODAY);
     // 12/mo + (120/12)/mo = 22/mo
     expect(result.stats.recurringPerMonthCents).toBe(2200);
     expect(result.stats.recurringPerYearCents).toBe(26400);
@@ -230,8 +230,8 @@ describe('buildSectionB', () => {
 
   test('domainCostPerYearCents sums current domain prices, independent of period', () => {
     const domains: DashboardDomain[] = [{ price: '18', billingCycle: 'Annual' }, { price: '14', billingCycle: 'Annual' }];
-    expect(buildSectionB([], domains, [], RANGE).stats.domainCostPerYearCents).toBe(3200);
-    expect(buildSectionB([], domains, [], RANGE).stats.domainsOwned).toBe(2);
+    expect(buildSectionB([], domains, [], RANGE, TODAY).stats.domainCostPerYearCents).toBe(3200);
+    expect(buildSectionB([], domains, [], RANGE, TODAY).stats.domainsOwned).toBe(2);
   });
 
   test('spendByCategory and spendByPayer group only in-period, paid, USD expenses', () => {
@@ -240,7 +240,7 @@ describe('buildSectionB', () => {
       expense({ category: 'domains_saas', paidByEmail: 'b@nola.dev', amountCents: 500 }),
       expense({ category: 'infra_hosting', paidByEmail: 'a@nola.dev', amountCents: 2000 }),
     ];
-    const result = buildSectionB(expenses, [], [], RANGE);
+    const result = buildSectionB(expenses, [], [], RANGE, TODAY);
     expect(result.donuts.spendByCategory).toEqual(
       expect.arrayContaining([
         { key: 'domains_saas', amountCents: 1500 },
@@ -259,7 +259,7 @@ describe('buildSectionB', () => {
     const recurring: DashboardRecurring[] = [{ service: 'ProtonMail', amount: '12', cycle: 'Monthly' }];
 
     test('one row per month in range, even with no expenses at all', () => {
-      const result = buildSectionB([], [], recurring, RANGE); // RANGE spans Jan..Aug = 8 months
+      const result = buildSectionB([], [], recurring, RANGE, TODAY); // RANGE spans Jan..Aug = 8 months
       expect(result.monthlyBreakdown).toHaveLength(8);
       expect(result.monthlyBreakdown.map((r) => r.month)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
     });
@@ -270,7 +270,7 @@ describe('buildSectionB', () => {
         expense({ category: 'domains_saas', amountCents: 500, date: '2026-03-20' }),
         expense({ category: 'infra_hosting', amountCents: 3000, date: '2026-04-01' }),
       ];
-      const result = buildSectionB(expenses, [], recurring, RANGE);
+      const result = buildSectionB(expenses, [], recurring, RANGE, TODAY);
       const march = result.monthlyBreakdown.find((r) => r.month === 3)!;
       const april = result.monthlyBreakdown.find((r) => r.month === 4)!;
       expect(march.subscriptionsCents).toBe(2000);
@@ -280,23 +280,23 @@ describe('buildSectionB', () => {
     });
 
     test('protonMailCents is the flat monthly recurring amount, identical every month, even with zero expenses', () => {
-      const result = buildSectionB([], [], recurring, RANGE);
+      const result = buildSectionB([], [], recurring, RANGE, TODAY);
       expect(result.monthlyBreakdown.every((r) => r.protonMailCents === 1200)).toBe(true);
     });
 
     test('protonMailCents is 0 when no ProtonMail recurring row exists', () => {
-      const result = buildSectionB([], [], [{ service: 'Railway', amount: '20', cycle: 'Monthly' }], RANGE);
+      const result = buildSectionB([], [], [{ service: 'Railway', amount: '20', cycle: 'Monthly' }], RANGE, TODAY);
       expect(result.monthlyBreakdown.every((r) => r.protonMailCents === 0)).toBe(true);
     });
 
     test('matches by service name case-insensitively', () => {
-      const result = buildSectionB([], [], [{ service: 'protonmail', amount: '12', cycle: 'Monthly' }], RANGE);
+      const result = buildSectionB([], [], [{ service: 'protonmail', amount: '12', cycle: 'Monthly' }], RANGE, TODAY);
       expect(result.monthlyBreakdown[0].protonMailCents).toBe(1200);
     });
 
     test('totalCents is subscriptions + domains + protonMail, not the actual billed total', () => {
       const expenses = [expense({ category: 'infra_hosting', amountCents: 2000, date: '2026-03-05' })];
-      const result = buildSectionB(expenses, [], recurring, RANGE);
+      const result = buildSectionB(expenses, [], recurring, RANGE, TODAY);
       const march = result.monthlyBreakdown.find((r) => r.month === 3)!;
       expect(march.totalCents).toBe(2000 + 0 + 1200);
     });
@@ -306,7 +306,7 @@ describe('buildSectionB', () => {
         expense({ category: 'infra_hosting', amountCents: 5000, date: '2026-03-05', status: 'void' }),
         expense({ category: 'infra_hosting', amountCents: 5000, date: '2026-03-05', currency: 'CAD' }),
       ];
-      const result = buildSectionB(expenses, [], recurring, RANGE);
+      const result = buildSectionB(expenses, [], recurring, RANGE, TODAY);
       const march = result.monthlyBreakdown.find((r) => r.month === 3)!;
       expect(march.subscriptionsCents).toBe(0);
     });
@@ -321,6 +321,7 @@ describe('withCrossSectionCost', () => {
       [],
       [],
       RANGE,
+      TODAY,
     );
     const merged = withCrossSectionCost(sectionA, sectionB);
     expect(merged.stats.cost).toBe(437.02);
