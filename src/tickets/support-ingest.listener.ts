@@ -207,7 +207,7 @@ export class SupportIngestListener implements OnApplicationBootstrap {
       status: 'open',
       assignee: 'unassigned',
       category,
-      source: p.source ?? 'kelasi',
+      source: p.source ?? 'yekoli',
     });
 
     this.logger.log(
