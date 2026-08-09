@@ -133,7 +133,7 @@ export class StudioDashboardService {
       today,
       query.includeArchived ?? false,
     );
-    const sectionB = buildSectionB(allExpenses, allDomains, allRecurring, range);
+    const sectionB = buildSectionB(allExpenses, allDomains, allRecurring, range, today);
 
     return {
       period: range,
