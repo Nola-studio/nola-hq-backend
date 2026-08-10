@@ -1,0 +1,23 @@
+# Déploiement DEV du service nola-hq-backend (Railway, projet Nola-Core).
+# push sur `dev` ou Run workflow. Passe par `railway up` (workflow réutilisable
+# de l'infra) — déterministe, indépendant de l'auto-deploy GitHub de Railway.
+# Secret RAILWAY_WORKSPACE_TOKEN : environment GitHub `dev` de ce repo.
+
+name: deploy dev
+
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    uses: Nola-studio/infra/.github/workflows/deploy-service.yml@main
+    with:
+      project: Nola-Core
+      service: nola-hq-backend
+      environment: dev
+      gh_environment: dev
+      # Railpack construit côté Railway — pas d'installation dans le runner.
+      install_packages: false
+    secrets: inherit
