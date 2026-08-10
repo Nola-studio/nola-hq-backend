@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { ScheduleModule } from '@nestjs/schedule';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 
 import { NolaSdkModule } from '@nola-hq/nola-sdk';
@@ -38,6 +39,7 @@ import { KelasiProxyModule } from './kelasi-proxy/kelasi-proxy.module';
 import { AssistModule } from './assist/assist.module';
 import { ModulesModule } from './modules/modules.module';
 import { RoadmapModule } from './roadmap/roadmap.module';
+import { StudioModule } from './studio/studio.module';
 import { WorkItemsModule } from './work-items/work-items.module';
 import { BusinessModule } from './business/business.module';
 
@@ -51,6 +53,8 @@ import { validate } from './config/env.validation';
     // routes (login) tighten this with @Throttle. Blunts brute-force +
     // accidental client loops.
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
+    // Global cron registry — currently only Studio's due-soon reminder uses it.
+    ScheduleModule.forRoot(),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
@@ -126,6 +130,7 @@ import { validate } from './config/env.validation';
     AssistModule,
     ModulesModule,
     RoadmapModule,
+    StudioModule,
     WorkItemsModule,
     BusinessModule,
   ],

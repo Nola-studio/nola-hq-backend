@@ -97,8 +97,20 @@ Pour mémoire : décorateurs partagés `@CurrentUser()` et `@Tenant()` dans
 | Activity       | `GET /activity`, `POST /activity`                                              |
 | Broadcast      | `GET /broadcasts`, `POST /broadcasts`, `POST /broadcasts/:id/send`             |
 | Countries      | `GET /countries`, `GET /countries/:id`                                         |
+| Studio         | `GET/POST/PATCH/DELETE /studio/tasks`, `POST /studio/tasks/:id/move`, `GET/POST/PATCH/DELETE /studio/meetings`, `POST /studio/meetings/:id/tasks`, `GET/POST/PATCH/DELETE /studio/expenses`, `GET /studio/expenses/export.csv`, `GET /studio/dashboard` |
 
 La spécification OpenAPI complète est disponible sur `/docs`.
+
+### Studio — notifications
+
+`task.assigned` et `task.due_soon` (cron quotidien 08:00 America/Toronto,
+`StudioDueSoonScheduler`, dédupliqué via `StudioNotificationDedup`)
+publient `nola.commands.notify.send` avec les templates `studio.task_assigned`
+et `studio.task_due_soon` (variables : `identifier`, `title`, `assigneeName`,
+`dueDate`). **Ces templates doivent être enregistrés côté nola-notify** —
+ce repo n'y a pas accès ; tant qu'ils n'existent pas, la commande est
+publiée mais nola-notify la rejettera ou l'ignorera silencieusement selon
+son traitement des templates inconnus.
 
 ## Structure
 

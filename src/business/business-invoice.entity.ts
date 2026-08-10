@@ -3,6 +3,7 @@ import { RoadmapInitiative } from '../roadmap/roadmap-initiative.entity';
 import { BusinessClient } from './business-client.entity';
 import { BusinessContract } from './business-contract.entity';
 import { moneyTransformer } from './business-money';
+import { DEFAULT_BUSINESS_CURRENCY, type BusinessCurrency } from './business-currency';
 
 export const BUSINESS_INVOICE_STATUSES = [
   'draft',
@@ -51,6 +52,10 @@ export class BusinessInvoice {
 
   @Column({ type: 'bigint', name: 'paid_amount_cdf', default: 0, transformer: moneyTransformer })
   paidAmountCdf!: number;
+
+  /** One currency for both `amountCdf` and `paidAmountCdf` — they're the same money in two states. */
+  @Column({ type: 'varchar', length: 3, default: DEFAULT_BUSINESS_CURRENCY })
+  currency!: BusinessCurrency;
 
   @Column({ type: 'date', name: 'issued_on' })
   issuedOn!: string;

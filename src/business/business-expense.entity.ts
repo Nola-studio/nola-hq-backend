@@ -2,6 +2,7 @@ import { Column, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn } 
 import { RoadmapInitiative } from '../roadmap/roadmap-initiative.entity';
 import { BusinessContract } from './business-contract.entity';
 import { moneyTransformer } from './business-money';
+import { DEFAULT_BUSINESS_CURRENCY, type BusinessCurrency } from './business-currency';
 
 export const BUSINESS_EXPENSE_STATUSES = ['planned', 'approved', 'paid', 'rejected'] as const;
 export type BusinessExpenseStatus = (typeof BUSINESS_EXPENSE_STATUSES)[number];
@@ -35,6 +36,9 @@ export class BusinessExpense {
 
   @Column({ type: 'bigint', name: 'amount_cdf', default: 0, transformer: moneyTransformer })
   amountCdf!: number;
+
+  @Column({ type: 'varchar', length: 3, name: 'amount_currency', default: DEFAULT_BUSINESS_CURRENCY })
+  amountCurrency!: BusinessCurrency;
 
   @Column({ type: 'date', name: 'incurred_on' })
   incurredOn!: string;

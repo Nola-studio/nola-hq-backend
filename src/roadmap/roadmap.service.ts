@@ -5,13 +5,14 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsWhere, In, LessThanOrEqual, Repository } from 'typeorm';
+import { FindOptionsWhere, In, LessThanOrEqual, Like, Repository } from 'typeorm';
 import { RoadmapObjective } from './roadmap-objective.entity';
-import { RoadmapInitiative } from './roadmap-initiative.entity';
+import { RoadmapInitiative, type RoadmapInitiativeScope } from './roadmap-initiative.entity';
 import { RoadmapMilestone } from './roadmap-milestone.entity';
 import { RoadmapKeyResult } from './roadmap-key-result.entity';
 import { RoadmapTrajectoryPoint } from './roadmap-trajectory-point.entity';
 import { MetricSnapshot } from '../analytics/metric-snapshot.entity';
+import { WorkItem } from '../work-items/work-item.entity';
 import { METRIC_DEFS, MetricDef } from '../analytics/snapshot.metrics';
 import {
   RoadmapBoardColumn,
@@ -21,6 +22,7 @@ import {
   planMove,
 } from './roadmap.board';
 import { deriveInitiativeProgress } from './roadmap.progress';
+import { slugifyProjectName } from './roadmap-identifier';
 import {
   CascadeObjective,
   KeyResultComputed,
@@ -36,6 +38,8 @@ import { CreateObjectiveDto } from './dto/create-objective.dto';
 import { UpdateObjectiveDto } from './dto/update-objective.dto';
 import { CreateInitiativeDto } from './dto/create-initiative.dto';
 import { UpdateInitiativeDto } from './dto/update-initiative.dto';
+import { UpdateKeyPrefixDto } from './dto/update-key-prefix.dto';
+import { UpdateScopeDto } from './dto/update-scope.dto';
 import { MoveInitiativeDto } from './dto/move-initiative.dto';
 import { CreateMilestoneDto } from './dto/create-milestone.dto';
 import { UpdateMilestoneDto } from './dto/update-milestone.dto';
@@ -133,19 +137,26 @@ export class RoadmapService {
     private readonly points: Repository<RoadmapTrajectoryPoint>,
     @InjectRepository(MetricSnapshot)
     private readonly snapshots: Repository<MetricSnapshot>,
+    @InjectRepository(WorkItem)
+    private readonly workItems: Repository<WorkItem>,
   ) {}
 
   // ── board & timeline ─────────────────────────────────────────────
 
-  /** Kanban columns by status, each ordered by `position`. */
-  async board(): Promise<RoadmapBoardColumn<RoadmapInitiativeView>[]> {
-    const views = await this.withProgress(await this.initiatives.find());
+  /**
+   * Kanban columns by status, each ordered by `position`. `scope` is
+   * opt-in: omitted, every row comes back (Work's and Business's project
+   * pickers need durable products too); Roadmap's own board passes
+   * `scope: 'initiative'` to see only bounded work.
+   */
+  async board(scope?: RoadmapInitiativeScope): Promise<RoadmapBoardColumn<RoadmapInitiativeView>[]> {
+    const views = await this.withProgress(await this.initiatives.find({ where: scope ? { scope } : {} }));
     return buildBoard(views);
   }
 
-  /** Initiatives bucketed by quarter, unscheduled ones last. */
-  async timeline(): Promise<RoadmapTimelineBucket<RoadmapInitiativeView>[]> {
-    const views = await this.withProgress(await this.initiatives.find());
+  /** Bucketed by quarter, unscheduled ones last. Same opt-in `scope` as `board()`. */
+  async timeline(scope?: RoadmapInitiativeScope): Promise<RoadmapTimelineBucket<RoadmapInitiativeView>[]> {
+    const views = await this.withProgress(await this.initiatives.find({ where: scope ? { scope } : {} }));
     return buildTimeline(views);
   }
 
@@ -443,7 +454,9 @@ export class RoadmapService {
   async listInitiatives(
     filter: ListInitiativesDto = {},
   ): Promise<RoadmapInitiativeView[]> {
-    const where: FindOptionsWhere<RoadmapInitiative> = {};
+    // Always 'initiative' — durable products (scope: 'project') are
+    // `/projects`' rows, never `/roadmap`'s, so this is not client-toggleable.
+    const where: FindOptionsWhere<RoadmapInitiative> = { scope: 'initiative' };
     if (filter.status) where.status = filter.status;
     if (filter.quarter) where.quarter = filter.quarter;
     if (filter.objectiveId) where.objectiveId = filter.objectiveId;
@@ -458,9 +471,9 @@ export class RoadmapService {
     return this.withProgress(rows);
   }
 
-  /** Single initiative, hydrated with its milestones (checklist order). */
+  /** Single initiative, hydrated with its milestones (checklist order). A durable product's id 404s here — it's `/projects`' row, not `/roadmap`'s. */
   async findInitiative(id: string): Promise<RoadmapInitiativeView> {
-    const initiative = await this.initiatives.findOne({ where: { id } });
+    const initiative = await this.initiatives.findOne({ where: { id, scope: 'initiative' } });
     if (!initiative) throw new NotFoundException(`Initiative ${id} introuvable`);
     const milestones = await this.milestones.find({
       where: { initiativeId: id },
@@ -469,8 +482,30 @@ export class RoadmapService {
     return { ...this.initiativeView(initiative, milestones), milestones };
   }
 
+  /**
+   * Derives `keyPrefix` from the title: accents/spaces/punctuation
+   * stripped, source casing kept. On collision with an existing project,
+   * appends the smallest integer suffix (2, 3, ...) that's free — never
+   * typed by a user, never reused.
+   */
+  private async generateKeyPrefix(title: string): Promise<string> {
+    const base = slugifyProjectName(title);
+    let candidate = base;
+    for (let suffix = 2; await this.initiatives.findOne({ where: { keyPrefix: candidate } }); suffix += 1) {
+      candidate = `${base}${suffix}`;
+    }
+    return candidate;
+  }
+
+  /**
+   * `scope` is never client-supplied — it's forced by which endpoint calls
+   * this: `RoadmapController.createInitiative` (default, 'initiative') or
+   * `StudioProjectsProxyService.createProject` ('project'). See
+   * `RoadmapInitiativeScope`.
+   */
   async createInitiative(
     dto: CreateInitiativeDto,
+    scope: RoadmapInitiativeScope = 'initiative',
   ): Promise<RoadmapInitiativeView> {
     if (dto.objectiveId) await this.assertObjectiveExists(dto.objectiveId);
     const now = new Date();
@@ -480,8 +515,13 @@ export class RoadmapService {
       title: dto.title,
       summary: dto.summary ?? null,
       kind: dto.kind ?? 'product',
+      scope,
       status,
       priority: dto.priority ?? 'P2',
+      color: dto.color ?? '#94A3B8',
+      healthStatus: dto.healthStatus ?? null,
+      type: dto.type ?? null,
+      keyPrefix: await this.generateKeyPrefix(dto.title),
       quarter: dto.quarter ?? null,
       startDate: dto.startDate ?? null,
       targetDate: dto.targetDate ?? null,
@@ -489,8 +529,11 @@ export class RoadmapService {
       appId: dto.appId ?? null,
       tenantId: dto.tenantId ?? null,
       progress: dto.progress ?? 0,
+      country: dto.country ?? null,
       // Lands at the bottom of its column — a new card never jumps the queue.
-      position: await this.initiatives.count({ where: { status } }),
+      // Counted within its own scope: a project's "position" (unused by any
+      // UI today) must not be perturbed by how many initiatives share its status.
+      position: await this.initiatives.count({ where: { status, scope } }),
       createdAt: now,
       updatedAt: now,
     });
@@ -502,7 +545,7 @@ export class RoadmapService {
     id: string,
     dto: UpdateInitiativeDto,
   ): Promise<RoadmapInitiativeView> {
-    const initiative = await this.initiatives.findOne({ where: { id } });
+    const initiative = await this.initiatives.findOne({ where: { id, scope: 'initiative' } });
     if (!initiative) throw new NotFoundException(`Initiative ${id} introuvable`);
     if (dto.objectiveId) await this.assertObjectiveExists(dto.objectiveId);
 
@@ -513,6 +556,11 @@ export class RoadmapService {
     if (dto.kind !== undefined) initiative.kind = dto.kind;
     if (dto.status !== undefined) initiative.status = dto.status;
     if (dto.priority !== undefined) initiative.priority = dto.priority;
+    if (dto.color !== undefined) initiative.color = dto.color;
+    if (dto.healthStatus !== undefined) initiative.healthStatus = dto.healthStatus ?? null;
+    if (dto.type !== undefined) initiative.type = dto.type ?? null;
+    // keyPrefix is immutable — auto-generated once at creation, never editable afterward.
+    // scope is immutable via this PATCH too — see updateScope (owner-only).
     if (dto.quarter !== undefined) initiative.quarter = dto.quarter ?? null;
     if (dto.startDate !== undefined) initiative.startDate = dto.startDate ?? null;
     if (dto.targetDate !== undefined)
@@ -521,6 +569,7 @@ export class RoadmapService {
     if (dto.appId !== undefined) initiative.appId = dto.appId ?? null;
     if (dto.tenantId !== undefined) initiative.tenantId = dto.tenantId ?? null;
     if (dto.progress !== undefined) initiative.progress = dto.progress;
+    if (dto.country !== undefined) initiative.country = dto.country ?? null;
     initiative.updatedAt = new Date();
 
     const saved = await this.initiatives.save(initiative);
@@ -531,6 +580,64 @@ export class RoadmapService {
   }
 
   /**
+   * `hq:owner`-only escape hatch: `keyPrefix` is otherwise immutable once
+   * auto-generated. Exists to fix a prefix that came out truncated/ugly
+   * (see `slugifyProjectName`'s 10-char cap) before it's baked into any
+   * task reference — `T<keyPrefix><NN>` is a static string written once at
+   * task creation, never regenerated, so changing the prefix after a task
+   * exists would silently orphan that task's reference from its project's
+   * current identifier.
+   */
+  async updateKeyPrefix(id: string, dto: UpdateKeyPrefixDto): Promise<RoadmapInitiativeView> {
+    const initiative = await this.initiatives.findOne({ where: { id, scope: 'initiative' } });
+    if (!initiative) throw new NotFoundException(`Initiative ${id} introuvable`);
+
+    if (initiative.keyPrefix === dto.keyPrefix) {
+      return this.initiativeView(initiative, await this.milestones.find({ where: { initiativeId: id } }));
+    }
+
+    const clash = await this.initiatives.findOne({ where: { keyPrefix: dto.keyPrefix } });
+    if (clash) throw new ConflictException(`Le préfixe « ${dto.keyPrefix} » est déjà utilisé.`);
+
+    if (initiative.keyPrefix) {
+      const referencedCount = await this.workItems.count({
+        where: { reference: Like(`T${initiative.keyPrefix}%`) },
+      });
+      if (referencedCount > 0) {
+        throw new ConflictException(
+          `Impossible de changer le préfixe « ${initiative.keyPrefix} » : ${referencedCount} tâche(s) y font déjà référence.`,
+        );
+      }
+    }
+
+    initiative.keyPrefix = dto.keyPrefix;
+    initiative.updatedAt = new Date();
+    const saved = await this.initiatives.save(initiative);
+    return this.initiativeView(saved, await this.milestones.find({ where: { initiativeId: id } }));
+  }
+
+  /**
+   * `hq:owner`-only reclassification between `'project'` (durable product)
+   * and `'initiative'` (bounded work) — the one deliberate escape hatch for
+   * a row filed under the wrong screen. Looks the row up by `id` alone
+   * (unlike every other initiative method here), since its whole job is
+   * crossing the scope boundary those methods enforce.
+   */
+  async updateScope(id: string, dto: UpdateScopeDto): Promise<RoadmapInitiativeView> {
+    const initiative = await this.initiatives.findOne({ where: { id } });
+    if (!initiative) throw new NotFoundException(`Initiative ${id} introuvable`);
+
+    if (initiative.scope === dto.scope) {
+      return this.initiativeView(initiative, await this.milestones.find({ where: { initiativeId: id } }));
+    }
+
+    initiative.scope = dto.scope;
+    initiative.updatedAt = new Date();
+    const saved = await this.initiatives.save(initiative);
+    return this.initiativeView(saved, await this.milestones.find({ where: { initiativeId: id } }));
+  }
+
+  /**
    * Drag & drop on the board: places the initiative at `position` in the
    * `status` column and re-densifies both the target and (on a cross-column
    * move) the source column. Every touched row is saved in one `save([])`,
@@ -538,12 +645,14 @@ export class RoadmapService {
    * left with duplicate or gapped ranks.
    */
   async move(id: string, dto: MoveInitiativeDto): Promise<RoadmapInitiativeView> {
-    const initiative = await this.initiatives.findOne({ where: { id } });
+    const initiative = await this.initiatives.findOne({ where: { id, scope: 'initiative' } });
     if (!initiative) throw new NotFoundException(`Initiative ${id} introuvable`);
 
     // Only the two columns involved can change — no need to load the board.
+    // scope-qualified: a project can share a status value with an initiative
+    // (both reuse the same status enum) and must never be swept into the reorder.
     const columns = await this.initiatives.find({
-      where: { status: In([initiative.status, dto.status]) },
+      where: { status: In([initiative.status, dto.status]), scope: 'initiative' },
     });
     const placements = planMove(columns, id, dto.status, dto.position ?? 0);
 
@@ -570,7 +679,7 @@ export class RoadmapService {
 
   /** Deletes an initiative; its milestones go with it (FK ON DELETE CASCADE). */
   async removeInitiative(id: string) {
-    const initiative = await this.initiatives.findOne({ where: { id } });
+    const initiative = await this.initiatives.findOne({ where: { id, scope: 'initiative' } });
     if (!initiative) throw new NotFoundException(`Initiative ${id} introuvable`);
     await this.initiatives.remove(initiative);
     return { ok: true };
@@ -697,7 +806,7 @@ export class RoadmapService {
     const [initiatives, keyResults] = await Promise.all([
       allIds.length
         ? this.initiatives.find({
-            where: { objectiveId: In(allIds) },
+            where: { objectiveId: In(allIds), scope: 'initiative' },
             order: { position: 'ASC', createdAt: 'ASC' },
           })
         : Promise.resolve([]),

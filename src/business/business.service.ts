@@ -1,13 +1,18 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { FindOptionsWhere, Repository } from 'typeorm';
-import { RoadmapInitiative } from '../roadmap/roadmap-initiative.entity';
+import { RoadmapInitiative, type RoadmapInitiativeScope } from '../roadmap/roadmap-initiative.entity';
 import { BusinessClient } from './business-client.entity';
 import { BusinessContract } from './business-contract.entity';
 import { BusinessExpense } from './business-expense.entity';
 import { BusinessInvoice, type BusinessInvoiceStatus } from './business-invoice.entity';
 import { BusinessOpportunity } from './business-opportunity.entity';
 import { ProjectBudget } from './project-budget.entity';
+import { ProjectTimeEntry } from './project-time-entry.entity';
+import { WorkItem } from '../work-items/work-item.entity';
+import { ProjectRisk } from '../work-items/project-risk.entity';
+import { BusinessDocument } from './business-document.entity';
+import { BusinessReminder } from './business-reminder.entity';
 import {
   CreateBusinessClientDto,
   CreateBusinessContractDto,
@@ -21,6 +26,15 @@ import {
   UpdateBusinessOpportunityDto,
   UpsertProjectBudgetDto,
 } from './dto/business.dto';
+import { DEFAULT_BUSINESS_CURRENCY } from './business-currency';
+import {
+  addByCurrency,
+  clampNonNegative,
+  marginPctByCurrency,
+  netByCurrency,
+  sumByCurrency,
+  type CurrencyTotals,
+} from './currency-totals';
 
 @Injectable()
 export class BusinessService {
@@ -32,6 +46,11 @@ export class BusinessService {
     @InjectRepository(BusinessExpense) private readonly expenses: Repository<BusinessExpense>,
     @InjectRepository(BusinessInvoice) private readonly invoices: Repository<BusinessInvoice>,
     @InjectRepository(RoadmapInitiative) private readonly projects: Repository<RoadmapInitiative>,
+    @InjectRepository(ProjectTimeEntry) private readonly timeEntries: Repository<ProjectTimeEntry>,
+    @InjectRepository(WorkItem) private readonly workItems: Repository<WorkItem>,
+    @InjectRepository(ProjectRisk) private readonly risks: Repository<ProjectRisk>,
+    @InjectRepository(BusinessDocument) private readonly documents: Repository<BusinessDocument>,
+    @InjectRepository(BusinessReminder) private readonly reminders: Repository<BusinessReminder>,
   ) {}
 
   private clean(value?: string | null) {
@@ -135,7 +154,10 @@ export class BusinessService {
       id,
       label,
       items: items.filter((item) => item.stage === id),
-      totalCdf: items.filter((item) => item.stage === id).reduce((sum, item) => sum + item.valueCdf, 0),
+      total: sumByCurrency(items.filter((item) => item.stage === id), (item) => ({
+        amount: item.valueCdf,
+        currency: item.valueCurrency,
+      })),
     }));
   }
 
@@ -149,6 +171,7 @@ export class BusinessService {
       title: dto.title.trim(),
       stage: dto.stage ?? 'lead',
       valueCdf: dto.valueCdf,
+      valueCurrency: dto.valueCurrency ?? DEFAULT_BUSINESS_CURRENCY,
       probability: dto.probability ?? 10,
       expectedCloseDate: dto.expectedCloseDate ?? null,
       nextStep: this.clean(dto.nextStep),
@@ -198,6 +221,7 @@ export class BusinessService {
       title: dto.title.trim(),
       status: dto.status ?? 'draft',
       valueCdf: dto.valueCdf,
+      valueCurrency: dto.valueCurrency ?? DEFAULT_BUSINESS_CURRENCY,
       startDate: dto.startDate ?? null,
       endDate: dto.endDate ?? null,
       signedAt: ['signed', 'active'].includes(dto.status ?? '') ? now : null,
@@ -236,9 +260,15 @@ export class BusinessService {
     await this.project(projectId);
     const now = new Date();
     const existing = await this.budgets.findOne({ where: { projectId } });
+    const patch = {
+      revenueBudgetCdf: dto.revenueBudgetCdf,
+      revenueBudgetCurrency: dto.revenueBudgetCurrency ?? DEFAULT_BUSINESS_CURRENCY,
+      expenseBudgetCdf: dto.expenseBudgetCdf,
+      expenseBudgetCurrency: dto.expenseBudgetCurrency ?? DEFAULT_BUSINESS_CURRENCY,
+    };
     return this.budgets.save(existing
-      ? Object.assign(existing, dto, { updatedAt: now })
-      : this.budgets.create({ projectId, ...dto, currency: 'CDF', createdAt: now, updatedAt: now }));
+      ? Object.assign(existing, patch, { updatedAt: now })
+      : this.budgets.create({ projectId, ...patch, createdAt: now, updatedAt: now }));
   }
 
   listExpenses(projectId?: string) {
@@ -262,6 +292,7 @@ export class BusinessService {
       label: dto.label.trim(),
       category: dto.category?.trim() || 'other',
       amountCdf: dto.amountCdf,
+      amountCurrency: dto.amountCurrency ?? DEFAULT_BUSINESS_CURRENCY,
       incurredOn: dto.incurredOn,
       vendor: this.clean(dto.vendor),
       status: dto.status ?? 'planned',
@@ -317,6 +348,7 @@ export class BusinessService {
       contractId: dto.contractId ?? null,
       amountCdf: dto.amountCdf,
       paidAmountCdf: paid,
+      currency: dto.currency ?? DEFAULT_BUSINESS_CURRENCY,
       issuedOn: dto.issuedOn,
       dueOn: dto.dueOn,
       paidAt: status === 'paid' ? now : null,
@@ -369,22 +401,33 @@ export class BusinessService {
 
   async dashboard(projectId?: string) {
     if (projectId) await this.project(projectId);
-    const [clients, opportunities, contracts, budgets, expenses, invoices] = await Promise.all([
+    const [clients, opportunities, contracts, budgets, expenses, invoices, timeEntries] = await Promise.all([
       this.clients.find(),
       this.opportunities.find({ ...(projectId ? { where: { projectId } } : {}) }),
       this.contracts.find({ ...(projectId ? { where: { projectId } } : {}) }),
       this.budgets.find({ ...(projectId ? { where: { projectId } } : {}) }),
       this.expenses.find({ ...(projectId ? { where: { projectId } } : {}) }),
       this.invoices.find({ ...(projectId ? { where: { projectId } } : {}) }),
+      this.timeEntries.find({ ...(projectId ? { where: { projectId } } : {}) }),
     ]);
     const openOpportunities = opportunities.filter((item) => !['won', 'lost'].includes(item.stage));
     const invoicedRows = invoices.filter((item) => item.status !== 'cancelled' && item.status !== 'draft');
     const actualExpenses = expenses.filter((item) => ['approved', 'paid'].includes(item.status));
-    const sum = <T>(rows: T[], pick: (row: T) => number) => rows.reduce((total, row) => total + pick(row), 0);
-    const invoicedCdf = sum(invoicedRows, (item) => item.amountCdf);
-    const collectedCdf = sum(invoicedRows, (item) => item.paidAmountCdf);
-    const expensesCdf = sum(actualExpenses, (item) => item.amountCdf);
-    const netProfitCdf = invoicedCdf - expensesCdf;
+
+    const invoiced = sumByCurrency(invoicedRows, (item) => ({ amount: item.amountCdf, currency: item.currency }));
+    const collected = sumByCurrency(invoicedRows, (item) => ({ amount: item.paidAmountCdf, currency: item.currency }));
+    const laborCost = sumByCurrency(timeEntries, (item) => ({
+      amount: Math.round((item.minutes / 60) * item.hourlyRateCdf),
+      currency: item.hourlyRateCurrency,
+    }));
+    const expensesTotal = addByCurrency(
+      sumByCurrency(actualExpenses, (item) => ({ amount: item.amountCdf, currency: item.amountCurrency })),
+      laborCost,
+    );
+    const netProfit = netByCurrency(invoiced, expensesTotal);
+    const outstanding = clampNonNegative(netByCurrency(invoiced, collected));
+    const marginPct = marginPctByCurrency(invoiced, netProfit);
+
     const today = new Date().toISOString().slice(0, 10);
     const relatedClientIds = new Set([
       ...opportunities.map((item) => item.clientId),
@@ -396,17 +439,24 @@ export class BusinessService {
       totals: {
         clients: clients.filter((item) => item.status === 'active' && (!projectId || relatedClientIds.has(item.id))).length,
         openOpportunities: openOpportunities.length,
-        pipelineCdf: sum(openOpportunities, (item) => item.valueCdf),
-        weightedPipelineCdf: Math.round(sum(openOpportunities, (item) => item.valueCdf * item.probability / 100)),
-        contractedCdf: sum(contracts.filter((item) => ['signed', 'active', 'completed'].includes(item.status)), (item) => item.valueCdf),
-        revenueBudgetCdf: sum(budgets, (item) => item.revenueBudgetCdf),
-        expenseBudgetCdf: sum(budgets, (item) => item.expenseBudgetCdf),
-        invoicedCdf,
-        collectedCdf,
-        outstandingCdf: Math.max(0, invoicedCdf - collectedCdf),
-        expensesCdf,
-        netProfitCdf,
-        marginPct: invoicedCdf ? Math.round((netProfitCdf / invoicedCdf) * 1_000) / 10 : 0,
+        pipeline: sumByCurrency(openOpportunities, (item) => ({ amount: item.valueCdf, currency: item.valueCurrency })),
+        weightedPipeline: sumByCurrency(openOpportunities, (item) => ({
+          amount: Math.round((item.valueCdf * item.probability) / 100),
+          currency: item.valueCurrency,
+        })),
+        contracted: sumByCurrency(
+          contracts.filter((item) => ['signed', 'active', 'completed'].includes(item.status)),
+          (item) => ({ amount: item.valueCdf, currency: item.valueCurrency }),
+        ),
+        revenueBudget: sumByCurrency(budgets, (item) => ({ amount: item.revenueBudgetCdf, currency: item.revenueBudgetCurrency })),
+        expenseBudget: sumByCurrency(budgets, (item) => ({ amount: item.expenseBudgetCdf, currency: item.expenseBudgetCurrency })),
+        invoiced,
+        collected,
+        outstanding,
+        expenses: expensesTotal,
+        laborCost,
+        netProfit,
+        marginPct,
         overdueInvoices: invoices.filter((item) => !['paid', 'cancelled', 'draft'].includes(item.status) && item.dueOn < today).length,
       },
       byStage: Object.fromEntries(
@@ -419,34 +469,131 @@ export class BusinessService {
   }
 
   async projectProfitability() {
-    const [projects, budgets, contracts, expenses, invoices] = await Promise.all([
+    const [projects, budgets, contracts, expenses, invoices, timeEntries] = await Promise.all([
       this.projects.find({ order: { updatedAt: 'DESC' } }),
       this.budgets.find(),
       this.contracts.find(),
       this.expenses.find(),
       this.invoices.find(),
+      this.timeEntries.find(),
     ]);
-    const sum = <T>(rows: T[], pick: (row: T) => number) => rows.reduce((total, row) => total + pick(row), 0);
     return projects.map((project) => {
       const budget = budgets.find((item) => item.projectId === project.id);
       const projectContracts = contracts.filter((item) => item.projectId === project.id && ['signed', 'active', 'completed'].includes(item.status));
       const projectInvoices = invoices.filter((item) => item.projectId === project.id && !['draft', 'cancelled'].includes(item.status));
       const projectExpenses = expenses.filter((item) => item.projectId === project.id && ['approved', 'paid'].includes(item.status));
-      const invoicedCdf = sum(projectInvoices, (item) => item.amountCdf);
-      const collectedCdf = sum(projectInvoices, (item) => item.paidAmountCdf);
-      const expensesCdf = sum(projectExpenses, (item) => item.amountCdf);
-      const netProfitCdf = invoicedCdf - expensesCdf;
+      const projectTime = timeEntries.filter((item) => item.projectId === project.id);
+
+      const invoiced = sumByCurrency(projectInvoices, (item) => ({ amount: item.amountCdf, currency: item.currency }));
+      const collected = sumByCurrency(projectInvoices, (item) => ({ amount: item.paidAmountCdf, currency: item.currency }));
+      const laborCost = sumByCurrency(projectTime, (item) => ({
+        amount: Math.round((item.minutes / 60) * item.hourlyRateCdf),
+        currency: item.hourlyRateCurrency,
+      }));
+      const expensesTotal = addByCurrency(
+        sumByCurrency(projectExpenses, (item) => ({ amount: item.amountCdf, currency: item.amountCurrency })),
+        laborCost,
+      );
+      const netProfit = netByCurrency(invoiced, expensesTotal);
+      const outstanding = clampNonNegative(netByCurrency(invoiced, collected));
+      const marginPct = marginPctByCurrency(invoiced, netProfit);
+
       return {
         project: { id: project.id, title: project.title, status: project.status, owner: project.owner },
-        revenueBudgetCdf: budget?.revenueBudgetCdf ?? 0,
-        expenseBudgetCdf: budget?.expenseBudgetCdf ?? 0,
-        contractedCdf: sum(projectContracts, (item) => item.valueCdf),
-        invoicedCdf,
-        collectedCdf,
-        outstandingCdf: Math.max(0, invoicedCdf - collectedCdf),
-        expensesCdf,
-        netProfitCdf,
-        marginPct: invoicedCdf ? Math.round((netProfitCdf / invoicedCdf) * 1_000) / 10 : 0,
+        revenueBudget: budget ? { [budget.revenueBudgetCurrency]: budget.revenueBudgetCdf } : ({} as CurrencyTotals),
+        expenseBudget: budget ? { [budget.expenseBudgetCurrency]: budget.expenseBudgetCdf } : ({} as CurrencyTotals),
+        contracted: sumByCurrency(projectContracts, (item) => ({ amount: item.valueCdf, currency: item.valueCurrency })),
+        invoiced,
+        collected,
+        outstanding,
+        expenses: expensesTotal,
+        laborCost,
+        netProfit,
+        marginPct,
+      };
+    });
+  }
+
+  async projectPortfolio(scope?: RoadmapInitiativeScope) {
+    const [financials, projects, workItems, risks, invoices, timeEntries, documents, reminders] = await Promise.all([
+      this.projectProfitability(),
+      this.projects.find({ where: scope ? { scope } : {}, order: { priority: 'ASC', updatedAt: 'DESC' } }),
+      this.workItems.find(),
+      this.risks.find(),
+      this.invoices.find(),
+      this.timeEntries.find(),
+      this.documents.find({ where: { entityType: 'project' } }),
+      this.reminders.find({ where: { entityType: 'project' } }),
+    ]);
+    const today = new Date().toISOString().slice(0, 10);
+    const financialByProject = new Map(financials.map((row) => [row.project.id, row]));
+
+    return projects.map((project) => {
+      const projectItems = workItems.filter((item) => item.projectId === project.id);
+      const projectRisks = risks.filter((risk) => risk.projectId === project.id && risk.status === 'open');
+      const projectInvoices = invoices.filter((invoice) => invoice.projectId === project.id);
+      const projectTime = timeEntries.filter((entry) => entry.projectId === project.id);
+      const done = projectItems.filter((item) => item.status === 'done').length;
+      const blocked = projectItems.filter((item) => item.status === 'blocked').length;
+      const overdueTickets = projectItems.filter(
+        (item) => item.status !== 'done' && item.dueDate && item.dueDate < today,
+      ).length;
+      const overdueInvoices = projectInvoices.filter(
+        (invoice) => !['paid', 'cancelled', 'draft'].includes(invoice.status) && invoice.dueOn < today,
+      ).length;
+      const criticalRisks = projectRisks.filter((risk) => risk.level === 'critical').length;
+      const scheduleOverdue = Boolean(
+        project.targetDate && project.targetDate < today && !['shipped', 'dropped'].includes(project.status),
+      );
+      const completed = project.status === 'shipped';
+      const critical = criticalRisks > 0 || scheduleOverdue || overdueInvoices > 0;
+      const attention = blocked > 0 || overdueTickets > 0 || projectRisks.length > 0;
+      const health = completed ? 'completed' : critical ? 'critical' : attention ? 'attention' : 'healthy';
+      const financial = financialByProject.get(project.id);
+
+      return {
+        project: {
+          id: project.id,
+          title: project.title,
+          summary: project.summary,
+          status: project.status,
+          priority: project.priority,
+          owner: project.owner,
+          appId: project.appId,
+          startDate: project.startDate,
+          targetDate: project.targetDate,
+        },
+        health,
+        delivery: {
+          tickets: projectItems.length,
+          done,
+          completionPct: projectItems.length ? Math.round(done / projectItems.length * 100) : project.progress,
+          blocked,
+          overdueTickets,
+          openRisks: projectRisks.length,
+          criticalRisks,
+          scheduleOverdue,
+        },
+        finance: {
+          revenueBudget: financial?.revenueBudget ?? {},
+          expenseBudget: financial?.expenseBudget ?? {},
+          contracted: financial?.contracted ?? {},
+          invoiced: financial?.invoiced ?? {},
+          collected: financial?.collected ?? {},
+          outstanding: financial?.outstanding ?? {},
+          expenses: financial?.expenses ?? {},
+          laborCost: financial?.laborCost ?? {},
+          netProfit: financial?.netProfit ?? {},
+          marginPct: financial?.marginPct ?? {},
+          overdueInvoices,
+        },
+        operations: {
+          minutes: projectTime.reduce((sum, entry) => sum + entry.minutes, 0),
+          documents: documents.filter((document) => document.entityId === project.id).length,
+          pendingReminders: reminders.filter(
+            (reminder) => reminder.entityId === project.id && reminder.status === 'pending',
+          ).length,
+        },
       };
     });
   }

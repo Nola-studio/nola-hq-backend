@@ -10,3 +10,4 @@ data/
 .tsbuildinfo
 coverage/
 .claude/
+scripts/seed/*.xlsx

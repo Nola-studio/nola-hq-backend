@@ -18,9 +18,11 @@ const CATEGORIES: TicketCategory[] = [
 ];
 const PRIORITIES: TicketPriority[] = ['P1', 'P2', 'P3'];
 
-/** Wire shape published by the kelasi gateway on
- * `nola.events.kelasi.support.requested`. Everything is best-effort: a
- * malformed payload is dropped (acked) rather than retried forever. */
+/** Wire shape published by the kelasi/yekoli gateway on
+ * `nola.events.kelasi.support.requested` (variante historique) et
+ * `nola.events.yekoli.support.requested` (variante post-rename). Everything
+ * is best-effort: a malformed payload is dropped (acked) rather than
+ * retried forever. */
 interface SupportRequestPayload {
   /** School tenant id (or org id) the owner is writing about. */
   tenant?: string;
@@ -45,13 +47,24 @@ interface SupportRequestPayload {
 }
 
 /**
- * Turns owner support requests from the Kelasi apps into HQ tickets.
+ * Turns owner support requests from the Kelasi/Yekoli apps into HQ tickets.
  *
  * Flow:
  *   kelasi-gateway  POST /api/owner/support
- *     → NolaEventsService.emit('kelasi.support.requested', payload)
- *       → nola.events.kelasi.support.requested  (JetStream, stream NOLA_EVENTS)
+ *     → NolaEventsService.emit('<app>.support.requested', payload)
+ *       → nola.events.{kelasi|yekoli}.support.requested  (JetStream, NOLA_EVENTS)
  *         → THIS listener  → TicketsService.create(...)  → ticket (status=open)
+ *
+ * Rename Kelasi → Yekoli (Phase 6a) : le producteur va renommer le segment
+ * app de ses sujets (`kelasi` → `yekoli`). Pendant la transition, ce
+ * listener consomme LES DEUX variantes — même handler, mêmes garanties.
+ * Chaque variante a son consumer durable : `EventBus.consume` binde un
+ * durable existant TEL QUEL (le filtre passé n'est appliqué qu'à la
+ * création), donc changer le filtre du durable historique serait sans effet
+ * sur les environnements déjà déployés. Les deux sujets sont disjoints et le
+ * producteur ne publie chaque évènement que sur UNE variante : pas de
+ * doublon inter-consumers. Une fois le producteur 100 % yekoli (Phase 8),
+ * le durable kelasi pourra être retiré.
  *
  * Consumed over JetStream (EventBus.consume) — NOT raw core-NATS subscribe:
  * the `nola` user has no core `sub` permission on the nola.events.* space
@@ -73,8 +86,22 @@ export class SupportIngestListener implements OnApplicationBootstrap {
   private readonly enabled: boolean;
 
   private static readonly STREAM = 'NOLA_EVENTS';
-  private static readonly CONSUMER = 'nola-hq-support-ingest';
-  private static readonly FILTER = 'nola.events.kelasi.support.requested';
+  /** Un consumer durable par variante de sujet (voir doc de classe).
+   * Le nom historique reste lié au sujet kelasi pour préserver l'état
+   * (curseur/backlog) du durable déjà déployé. */
+  static readonly SOURCES: ReadonlyArray<{
+    consumer: string;
+    filter: string;
+  }> = [
+    {
+      consumer: 'nola-hq-support-ingest',
+      filter: 'nola.events.kelasi.support.requested',
+    },
+    {
+      consumer: 'nola-hq-support-ingest-yekoli',
+      filter: 'nola.events.yekoli.support.requested',
+    },
+  ];
 
   constructor(
     private readonly nolaClient: NolaClientService,
@@ -111,19 +138,30 @@ export class SupportIngestListener implements OnApplicationBootstrap {
     try {
       this.eventBus = new EventBus(this.nolaClient.getClient());
       await this.eventBus.init();
-      await this.eventBus.consume<SupportRequestPayload>(
-        SupportIngestListener.STREAM,
-        SupportIngestListener.CONSUMER,
-        SupportIngestListener.FILTER,
-        (env) => this.handle(env),
-      );
-      this.logger.log(
-        `Ingesting support requests from ${SupportIngestListener.FILTER}`,
-      );
     } catch (err: unknown) {
       this.logger.error(
         `Support ingestion init failed: ${err instanceof Error ? err.message : String(err)}`,
       );
+      return;
+    }
+
+    // Chaque variante est branchée indépendamment : l'échec d'un consumer
+    // (ex. création du nouveau durable yekoli refusée) ne doit pas priver
+    // HQ des tickets arrivant encore sur l'autre sujet.
+    for (const { consumer, filter } of SupportIngestListener.SOURCES) {
+      try {
+        await this.eventBus.consume<SupportRequestPayload>(
+          SupportIngestListener.STREAM,
+          consumer,
+          filter,
+          (env) => this.handle(env),
+        );
+        this.logger.log(`Ingesting support requests from ${filter}`);
+      } catch (err: unknown) {
+        this.logger.error(
+          `Support ingestion init failed for ${filter}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
   }
 
@@ -169,7 +207,7 @@ export class SupportIngestListener implements OnApplicationBootstrap {
       status: 'open',
       assignee: 'unassigned',
       category,
-      source: p.source ?? 'kelasi',
+      source: p.source ?? 'yekoli',
     });
 
     this.logger.log(

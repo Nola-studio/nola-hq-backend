@@ -17,6 +17,12 @@ import { RoadmapKeyResult } from './roadmap/roadmap-key-result.entity';
 import { RoadmapMilestone } from './roadmap/roadmap-milestone.entity';
 import { RoadmapObjective } from './roadmap/roadmap-objective.entity';
 import { RoadmapTrajectoryPoint } from './roadmap/roadmap-trajectory-point.entity';
+import { StudioDomain } from './studio/studio-domain.entity';
+import { StudioExpense } from './studio/studio-expense.entity';
+import { StudioMeeting } from './studio/studio-meeting.entity';
+import { StudioNotificationDedup } from './studio/studio-notification-dedup.entity';
+import { StudioRecurring } from './studio/studio-recurring.entity';
+import { StudioRequest } from './studio/studio-request.entity';
 import { TeamMember } from './team/team-member.entity';
 import { Tenant } from './tenants/tenant.entity';
 import { TenantCrm } from './tenants/tenant-crm.entity';
@@ -34,6 +40,10 @@ import { BusinessContract } from './business/business-contract.entity';
 import { ProjectBudget } from './business/project-budget.entity';
 import { BusinessExpense } from './business/business-expense.entity';
 import { BusinessInvoice } from './business/business-invoice.entity';
+import { BusinessQuote, BusinessQuoteLine } from './business/business-quote.entity';
+import { BusinessDocument } from './business/business-document.entity';
+import { BusinessReminder } from './business/business-reminder.entity';
+import { ProjectTimeEntry } from './business/project-time-entry.entity';
 
 // Le registry des apps n'a PAS de table — c'est une projection in-memory
 // reconstruite à partir du JetStream NOLA_REGISTRY (cf. AppsService).
@@ -58,6 +68,12 @@ export const entities = [
   RoadmapObjective,
   RoadmapTrajectoryPoint,
   PushSubscription,
+  StudioDomain,
+  StudioExpense,
+  StudioMeeting,
+  StudioNotificationDedup,
+  StudioRecurring,
+  StudioRequest,
   TeamMember,
   Tenant,
   TenantCrm,
@@ -75,4 +91,9 @@ export const entities = [
   ProjectBudget,
   BusinessExpense,
   BusinessInvoice,
+  BusinessQuote,
+  BusinessQuoteLine,
+  BusinessDocument,
+  BusinessReminder,
+  ProjectTimeEntry,
 ];

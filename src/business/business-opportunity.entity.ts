@@ -2,6 +2,7 @@ import { Column, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn } 
 import { RoadmapInitiative } from '../roadmap/roadmap-initiative.entity';
 import { BusinessClient } from './business-client.entity';
 import { moneyTransformer } from './business-money';
+import { DEFAULT_BUSINESS_CURRENCY, type BusinessCurrency } from './business-currency';
 
 export const BUSINESS_OPPORTUNITY_STAGES = [
   'lead',
@@ -43,6 +44,9 @@ export class BusinessOpportunity {
 
   @Column({ type: 'bigint', name: 'value_cdf', default: 0, transformer: moneyTransformer })
   valueCdf!: number;
+
+  @Column({ type: 'varchar', length: 3, name: 'value_currency', default: DEFAULT_BUSINESS_CURRENCY })
+  valueCurrency!: BusinessCurrency;
 
   @Column({ type: 'integer', default: 10 })
   probability!: number;

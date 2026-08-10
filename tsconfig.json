@@ -27,6 +27,6 @@
       "@nola-studio/sdk/events":   ["node_modules/@nola-studio/sdk/dist/events"]
     }
   },
-  "include": ["src/**/*.ts", "libs/**/*.ts"],
+  "include": ["src/**/*.ts", "libs/**/*.ts", "scripts/**/*.ts"],
   "exclude": ["node_modules", "dist", "**/*.spec.ts"]
 }

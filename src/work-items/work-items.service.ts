@@ -3,12 +3,14 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { PaginationDto, type PaginatedResult } from '../common/dto/pagination.dto';
 import { RoadmapInitiative } from '../roadmap/roadmap-initiative.entity';
+import { slugifyProjectName, taskReference } from '../roadmap/roadmap-identifier';
 import { TeamMember } from '../team/team-member.entity';
 import { PushService } from '../push/push.service';
 import { WorkItemComment } from './work-item-comment.entity';
 import { WorkItemEvent, type WorkItemEventAction } from './work-item-event.entity';
 import { WorkItemSubtask } from './work-item-subtask.entity';
 import { WorkPlanningService } from './work-planning.service';
+import { planMove } from './work-items.board';
 import {
   WORK_ITEM_STATUSES,
   WorkItem,
@@ -114,9 +116,34 @@ export class WorkItemsService {
     return project;
   }
 
+  /**
+   * `keyPrefix` is the authoritative, auto-generated project token (see
+   * `roadmap-identifier.ts`). Legacy projects created before that
+   * convention may still have a null `keyPrefix` — fall back to slugifying
+   * the title rather than `appId`, a soft app-registry reference that was
+   * never actually the right source for this (bug: previously read
+   * `appId` here despite the entity doc calling `keyPrefix` authoritative).
+   */
   private projectPrefix(project: RoadmapInitiative): string {
-    const raw = project.appId || 'HQ';
-    return raw.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8) || 'HQ';
+    return project.keyPrefix || slugifyProjectName(project.title);
+  }
+
+  /**
+   * Atomically increments the project's `task_seq` counter and returns the
+   * post-increment value — race-safe under concurrent task creation (a
+   * single `UPDATE ... RETURNING`, no read-then-write gap), and never
+   * reused since the counter is only ever incremented, never recomputed
+   * from existing rows.
+   */
+  private async nextTaskSeq(projectId: string): Promise<number> {
+    const result = await this.projects
+      .createQueryBuilder()
+      .update(RoadmapInitiative)
+      .set({ taskSeq: () => '"task_seq" + 1' })
+      .where('id = :projectId', { projectId })
+      .returning('task_seq')
+      .execute();
+    return (result.raw[0] as { task_seq: number }).task_seq;
   }
 
   async create(dto: CreateWorkItemDto, reporter: string) {
@@ -124,8 +151,9 @@ export class WorkItemsService {
     if (dto.sprintId) await this.planning.assertSprint(dto.sprintId, project.id);
     const position = await this.repo.count({ where: { status: dto.status ?? 'backlog' } });
     const now = new Date();
-    let item = this.repo.create({
-      reference: null,
+    const seq = await this.nextTaskSeq(project.id);
+    const item = this.repo.create({
+      reference: taskReference(this.projectPrefix(project), seq),
       projectId: project.id,
       title: dto.title.trim(),
       description: dto.description?.trim() || null,
@@ -138,22 +166,24 @@ export class WorkItemsService {
       blockedReason: dto.blockedReason?.trim() || null,
       sprintId: dto.sprintId ?? null,
       estimatePoints: dto.estimatePoints ?? 0,
+      category: dto.category ?? null,
+      hoursSpent: dto.hoursSpent ?? null,
+      progressPercent: dto.progressPercent ?? null,
+      meetingId: dto.meetingId ?? null,
       position,
       createdAt: now,
       updatedAt: now,
       closedAt: dto.status === 'done' ? now : null,
     });
-    item = await this.repo.save(item);
-    item.reference = `${this.projectPrefix(project)}-${item.id}`;
-    item = await this.repo.save(item);
-    await this.record(item.id, reporter, 'created', {
-      reference: item.reference,
-      projectId: item.projectId,
-      status: item.status,
-      priority: item.priority,
+    const saved = await this.repo.save(item);
+    await this.record(saved.id, reporter, 'created', {
+      reference: saved.reference,
+      projectId: saved.projectId,
+      status: saved.status,
+      priority: saved.priority,
     });
-    void this.notifyAssignee(item, reporter, 'Nouveau ticket assigné', item.title);
-    return item;
+    void this.notifyAssignee(saved, reporter, 'Nouveau ticket assigné', saved.title);
+    return saved;
   }
 
   async update(id: number, dto: UpdateWorkItemDto, actor: string) {
@@ -183,13 +213,25 @@ export class WorkItemsService {
   async move(id: number, status: WorkItemStatus, position: number | undefined, actor: string) {
     const item = await this.findOne(id);
     const from = item.status;
-    item.status = status;
-    item.position = position ?? await this.repo.count({ where: { status } });
-    item.closedAt = status === 'done' ? item.closedAt ?? new Date() : null;
-    item.updatedAt = new Date();
-    const saved = await this.repo.save(item);
+    const all = await this.repo.find();
+    const targetPosition = position ?? all.filter((i) => i.status === status && i.id !== id).length;
+    const placements = planMove(all, id, status, targetPosition);
+    if (placements.length === 0) return item;
+
+    const now = new Date();
+    const rows = placements.map(({ id: placedId, status: placedStatus, position: placedPosition }) => {
+      const row = placedId === id ? item : all.find((i) => i.id === placedId)!;
+      row.status = placedStatus;
+      row.position = placedPosition;
+      if (placedId === id) {
+        row.closedAt = placedStatus === 'done' ? row.closedAt ?? now : null;
+      }
+      row.updatedAt = now;
+      return row;
+    });
+    const saved = await this.repo.save(rows);
     if (from !== status) await this.record(id, actor, 'moved', { from, to: status });
-    return saved;
+    return saved.find((row) => row.id === id)!;
   }
 
   async addComment(id: number, dto: AddWorkItemCommentDto, actor: string) {

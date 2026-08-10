@@ -16,7 +16,7 @@ export class BusinessClient {
   @Index()
   status!: BusinessClientStatus;
 
-  @Column({ type: 'varchar', length: 160, nullable: true })
+  @Column({ type: 'varchar', length: 160, name: 'contact_name', nullable: true })
   contactName!: string | null;
 
   @Column({ type: 'varchar', length: 180, nullable: true })

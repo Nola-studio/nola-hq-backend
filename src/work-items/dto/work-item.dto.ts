@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   IsIn,
   IsInt,
+  IsNumberString,
   IsOptional,
   IsString,
   IsUUID,
@@ -13,9 +14,11 @@ import {
 } from 'class-validator';
 import { PaginationDto } from '../../common/dto/pagination.dto';
 import {
+  WORK_ITEM_CATEGORIES,
   WORK_ITEM_PRIORITIES,
   WORK_ITEM_STATUSES,
   WORK_ITEM_TYPES,
+  type WorkItemCategory,
   type WorkItemPriority,
   type WorkItemStatus,
   type WorkItemType,
@@ -50,6 +53,11 @@ export class CreateWorkItemDto {
   @IsOptional() @IsString() @MaxLength(2_000) blockedReason?: string;
   @IsOptional() @IsUUID() sprintId?: string;
   @IsOptional() @Type(() => Number) @IsInt() @Min(0) @Max(100) estimatePoints?: number;
+  @IsOptional() @IsIn(WORK_ITEM_CATEGORIES as unknown as string[])
+  category?: WorkItemCategory;
+  @IsOptional() @IsNumberString() hoursSpent?: string;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(0) @Max(100) progressPercent?: number;
+  @IsOptional() @IsUUID() meetingId?: string;
 }
 
 export class UpdateWorkItemDto {
@@ -65,6 +73,11 @@ export class UpdateWorkItemDto {
   @IsOptional() @IsString() @MaxLength(2_000) blockedReason?: string | null;
   @IsOptional() @IsUUID() sprintId?: string | null;
   @IsOptional() @Type(() => Number) @IsInt() @Min(0) @Max(100) estimatePoints?: number;
+  @IsOptional() @IsIn(WORK_ITEM_CATEGORIES as unknown as string[])
+  category?: WorkItemCategory | null;
+  @IsOptional() @IsNumberString() hoursSpent?: string | null;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(0) @Max(100) progressPercent?: number | null;
+  @IsOptional() @IsUUID() meetingId?: string | null;
 }
 
 export class MoveWorkItemDto {

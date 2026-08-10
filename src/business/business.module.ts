@@ -9,6 +9,15 @@ import { BusinessInvoice } from './business-invoice.entity';
 import { BusinessOpportunity } from './business-opportunity.entity';
 import { BusinessService } from './business.service';
 import { ProjectBudget } from './project-budget.entity';
+import { WorkItem } from '../work-items/work-item.entity';
+import { BusinessDocument } from './business-document.entity';
+import { BusinessOperationsController } from './business-operations.controller';
+import { BusinessOperationsService } from './business-operations.service';
+import { BusinessPdfService } from './business-pdf.service';
+import { BusinessQuote, BusinessQuoteLine } from './business-quote.entity';
+import { BusinessReminder } from './business-reminder.entity';
+import { ProjectTimeEntry } from './project-time-entry.entity';
+import { ProjectRisk } from '../work-items/project-risk.entity';
 
 @Module({
   imports: [
@@ -20,10 +29,17 @@ import { ProjectBudget } from './project-budget.entity';
       BusinessExpense,
       BusinessInvoice,
       RoadmapInitiative,
+      WorkItem,
+      BusinessQuote,
+      BusinessQuoteLine,
+      BusinessDocument,
+      BusinessReminder,
+      ProjectTimeEntry,
+      ProjectRisk,
     ]),
   ],
-  controllers: [BusinessController],
-  providers: [BusinessService],
-  exports: [BusinessService],
+  controllers: [BusinessController, BusinessOperationsController],
+  providers: [BusinessService, BusinessOperationsService, BusinessPdfService],
+  exports: [BusinessService, BusinessOperationsService],
 })
 export class BusinessModule {}
