@@ -8,8 +8,14 @@ import {
   Patch,
   Post,
   Query,
+  Res,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { MAX_ATTACHMENT_BYTES } from '../work-items/work-item-attachment-storage';
 import { StudioProjectsProxyService } from './studio-projects-proxy.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
@@ -123,5 +129,45 @@ export class StudioProjectsProxyController {
   @HqRoles(HqRole.Operator)
   async removeTask(@Param('id') id: string) {
     await this.svc.removeTask(id);
+  }
+
+  @Get('tasks/:id/attachments')
+  @HqRoles(HqRole.Viewer)
+  listAttachments(@Param('id') id: string) {
+    return this.svc.listAttachments(id);
+  }
+
+  @Post('tasks/:id/attachments')
+  @HqRoles(HqRole.Operator)
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_ATTACHMENT_BYTES } }))
+  uploadAttachment(
+    @Param('id') id: string,
+    @UploadedFile() file: { originalname: string; mimetype: string; size: number; buffer: Buffer },
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.svc.addAttachment(id, file, user.email);
+  }
+
+  @Get('tasks/:id/attachments/:attachmentId')
+  @HqRoles(HqRole.Viewer)
+  async downloadAttachment(
+    @Param('id') id: string,
+    @Param('attachmentId') attachmentId: string,
+    @Res() res: Response,
+  ) {
+    const { attachment, buffer } = await this.svc.getAttachmentFile(id, attachmentId);
+    res.setHeader('Content-Type', attachment.mimeType);
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(attachment.originalName)}"`);
+    res.send(buffer);
+  }
+
+  @Delete('tasks/:id/attachments/:attachmentId')
+  @HqRoles(HqRole.Operator)
+  removeAttachment(
+    @Param('id') id: string,
+    @Param('attachmentId') attachmentId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.svc.removeAttachment(id, attachmentId, user.email);
   }
 }
