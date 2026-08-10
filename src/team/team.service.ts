@@ -1,13 +1,15 @@
 import {
   BadRequestException,
+  ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { TeamMember } from './team-member.entity';
+import { IsNull, Repository } from 'typeorm';
+import { TeamMember, type TeamHqAccessLevel } from './team-member.entity';
 import { KeycloakAdminService } from '../directory/keycloak-admin.service';
 import { generateTempPassword } from './temp-password.util';
 import type { HqAccessLevel } from './dto/invite-team-member.dto';
@@ -20,6 +22,8 @@ export interface UpdateTeamMemberDto {
   country?: string;
   perms?: string[];
   online?: boolean;
+  hqAccess?: HqAccessLevel;
+  notifyEmail?: string | null;
 }
 
 export interface InviteTeamMemberData {
@@ -88,12 +92,100 @@ export class TeamService {
     return stripPassword(m);
   }
 
-  async update(id: string, dto: UpdateTeamMemberDto) {
+  /**
+   * `actorEmail` is who's making the change — required to enforce the two
+   * self-protection rules: you can't demote your own Owner role, and you
+   * can't demote the last remaining Owner (yourself or anyone else).
+   */
+  async update(id: string, dto: UpdateTeamMemberDto, actorEmail: string) {
     const m = await this.repo.findOne({ where: { id } });
     if (!m) throw new NotFoundException(`Membre ${id} introuvable`);
+
+    if (dto.hqAccess !== undefined && dto.hqAccess !== m.hqAccess && m.hqAccess === 'owner') {
+      if (m.email.toLowerCase() === actorEmail.toLowerCase()) {
+        throw new ForbiddenException('Vous ne pouvez pas retirer votre propre rôle Owner.');
+      }
+      const totalOwners = await this.repo.count({ where: { hqAccess: 'owner' } });
+      if (totalOwners <= 1) {
+        throw new ConflictException("Impossible de retirer le dernier Owner.");
+      }
+    }
+
+    const previousHqAccess = m.hqAccess;
     Object.assign(m, dto);
     const saved = await this.repo.save(m);
+
+    if (dto.hqAccess !== undefined && dto.hqAccess !== previousHqAccess) {
+      const synced = await this.syncKeycloakRole(saved.email, previousHqAccess ?? null, dto.hqAccess);
+      if (!synced) {
+        // Roll back the DB change rather than leave HQ access and the
+        // Keycloak realm role telling two different stories.
+        saved.hqAccess = previousHqAccess ?? null;
+        await this.repo.save(saved);
+        throw new BadRequestException(
+          'Le changement de rôle HQ a échoué côté Keycloak — rôle inchangé (voir logs).',
+        );
+      }
+    }
     return stripPassword(saved);
+  }
+
+  /** Assigns the new `hq:*` realm role and removes the old one. Returns false on any Keycloak failure. */
+  private async syncKeycloakRole(
+    email: string,
+    from: TeamHqAccessLevel | null,
+    to: HqAccessLevel,
+  ): Promise<boolean> {
+    if (!this.kc.isConfigured()) return true; // degraded mode — nothing to sync against
+    const realm = this.hqRealm();
+    const user = await this.kc.findUserByEmail(realm, email);
+    if (!user?.id) {
+      this.logger.warn(`syncKeycloakRole: no Keycloak user for ${email}`);
+      return false;
+    }
+    const assigned = await this.kc.assignRealmRole(realm, user.id, HQ_ACCESS_TO_REALM_ROLE[to]);
+    if (!assigned) return false;
+    if (from && from !== to) {
+      await this.kc.removeRealmRole(realm, user.id, HQ_ACCESS_TO_REALM_ROLE[from]);
+    }
+    return true;
+  }
+
+  /**
+   * Owner-only, idempotent: for every member with no persisted `hqAccess`,
+   * looks up their Keycloak realm roles and backfills the highest `hq:*`
+   * one found. Members with no matching Keycloak account (or no `hq:*`
+   * role there) are left null and reported as `unresolved` — this never
+   * guesses.
+   */
+  async backfillHqAccessFromKeycloak() {
+    if (!this.kc.isConfigured()) {
+      throw new BadRequestException('Keycloak admin non configuré — rien à synchroniser.');
+    }
+    const realm = this.hqRealm();
+    const pending = await this.repo.find({ where: { hqAccess: IsNull() } });
+    const resolved: string[] = [];
+    const unresolved: string[] = [];
+    for (const member of pending) {
+      const user = await this.kc.findUserByEmail(realm, member.email);
+      if (!user?.id) {
+        unresolved.push(member.email);
+        continue;
+      }
+      const roles = await this.kc.userRealmRoles(realm, user.id);
+      const roleNames = new Set(roles.map((r) => r.name));
+      const level = (['owner', 'operator', 'viewer'] as const).find(
+        (l) => roleNames.has(HQ_ACCESS_TO_REALM_ROLE[l]),
+      );
+      if (!level) {
+        unresolved.push(member.email);
+        continue;
+      }
+      member.hqAccess = level;
+      await this.repo.save(member);
+      resolved.push(member.email);
+    }
+    return { resolved, unresolved };
   }
 
   /**
@@ -129,7 +221,9 @@ export class TeamService {
         online: false,
         country: data.country ?? 'CD',
         perms: data.perms ?? [],
-        last: 'jamais',
+        hqAccess: data.hqAccess ?? 'viewer',
+        notifyEmail: null,
+        lastLoginAt: null,
         passwordHash: undefined,
       }),
     );
@@ -210,9 +304,27 @@ export class TeamService {
     }
   }
 
-  async remove(id: string) {
+  /**
+   * `actorEmail` guards the same two rules as `update()`'s role-demotion
+   * path: you can't remove yourself while you're the Owner, and you can't
+   * remove the last remaining Owner.
+   *
+   * Keycloak deprovisioning is intentionally NOT done here yet — see the
+   * P0 security report: removing a member today only deletes this row,
+   * leaving their Keycloak account and `hq:*` realm role fully active.
+   */
+  async remove(id: string, actorEmail: string) {
     const m = await this.repo.findOne({ where: { id } });
     if (!m) throw new NotFoundException(`Membre ${id} introuvable`);
+    if (m.hqAccess === 'owner') {
+      if (m.email.toLowerCase() === actorEmail.toLowerCase()) {
+        throw new ForbiddenException('Vous ne pouvez pas vous retirer vous-même en tant que Owner.');
+      }
+      const totalOwners = await this.repo.count({ where: { hqAccess: 'owner' } });
+      if (totalOwners <= 1) {
+        throw new ConflictException('Impossible de retirer le dernier Owner.');
+      }
+    }
     await this.repo.remove(m);
     return { ok: true };
   }

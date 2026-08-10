@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsWhere, MoreThanOrEqual, Not, Repository } from 'typeorm';
+import { FindOptionsWhere, In, MoreThanOrEqual, Not, Repository } from 'typeorm';
 import { TeamMember } from '../team/team-member.entity';
 import { WorkItem } from '../work-items/work-item.entity';
 import { StudioNotificationDedup } from './studio-notification-dedup.entity';
@@ -42,14 +42,14 @@ export class StudioDueSoonScheduler {
 
     const where: FindOptionsWhere<WorkItem> = {
       dueDate: MoreThanOrEqual(today),
-      status: Not('done'),
+      status: Not(In(['resolved', 'closed'])),
     };
     const dueSoon = await this.tasks.find({ where });
     const withinWindow = dueSoon.filter((t) => t.dueDate && t.dueDate <= in48h && t.assignee);
     if (withinWindow.length === 0) return;
 
     const team = await this.team.find();
-    const emailById = new Map(team.map((m) => [m.id, m.email]));
+    const emailById = new Map(team.map((m) => [m.id, m.notifyEmail || m.email]));
 
     for (const task of withinWindow) {
       const assigneeEmail = task.assignee ? emailById.get(task.assignee) : undefined;

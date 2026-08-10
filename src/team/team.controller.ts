@@ -14,6 +14,11 @@ import { UpdateTeamMemberDto } from './dto/update-team-member.dto';
 import { InviteTeamMemberDto } from './dto/invite-team-member.dto';
 import { HqRoles } from '../common/auth/hq-roles.decorator';
 import { HqRole } from '../common/auth/hq-role.enum';
+import { CurrentUser, type AuthenticatedUser } from '../common/auth/current-user.decorator';
+
+function actor(user?: AuthenticatedUser): string {
+  return user?.email ?? user?.sub ?? 'unknown';
+}
 
 @ApiBearerAuth()
 @ApiTags('team')
@@ -51,14 +56,31 @@ export class TeamController {
 
   @Patch(':id')
   @HqRoles(HqRole.Owner)
-  update(@Param('id') id: string, @Body() dto: UpdateTeamMemberDto) {
-    return this.svc.update(id, dto);
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateTeamMemberDto,
+    @CurrentUser() user?: AuthenticatedUser,
+  ) {
+    return this.svc.update(id, dto, actor(user));
   }
 
   @Delete(':id')
   @HqRoles(HqRole.Owner)
   @HttpCode(204)
-  async remove(@Param('id') id: string) {
-    await this.svc.remove(id);
+  async remove(@Param('id') id: string, @CurrentUser() user?: AuthenticatedUser) {
+    await this.svc.remove(id, actor(user));
+  }
+
+  /**
+   * Backfills `hqAccess` for every member that predates the column, by
+   * reading their current Keycloak realm roles. Idempotent — safe to call
+   * repeatedly (a no-op once every member is resolved). Never guesses: a
+   * member with no matching Keycloak account or no `hq:*` role there is
+   * reported `unresolved`, not defaulted.
+   */
+  @Post('backfill-hq-access')
+  @HqRoles(HqRole.Owner)
+  backfillHqAccess() {
+    return this.svc.backfillHqAccessFromKeycloak();
   }
 }

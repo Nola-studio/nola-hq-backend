@@ -375,4 +375,27 @@ export class KeycloakAdminService {
     );
     return false;
   }
+
+  /**
+   * Un-assigns a realm role from a user. Used to swap `hq:*` roles on an
+   * access-level change (assign the new one, remove the old) — Keycloak
+   * doesn't auto-exclusive these, so without this a demoted user would
+   * simply accumulate every role they ever held.
+   */
+  async removeRealmRole(realm: string, userId: string, roleName: string): Promise<boolean> {
+    const role = await this.adminGet<{ id: string; name: string }>(
+      realm,
+      `/roles/${encodeURIComponent(roleName)}`,
+    );
+    if (!role) return true; // nothing to remove
+    const res = await this.adminSend(realm, 'DELETE', `/users/${userId}/role-mappings/realm`, [
+      { id: role.id, name: role.name },
+    ]);
+    if (!res) return false;
+    if (res.ok) return true;
+    this.logger.warn(
+      `Keycloak removeRealmRole ${roleName}→${userId} failed (status=${res.status})`,
+    );
+    return false;
+  }
 }
