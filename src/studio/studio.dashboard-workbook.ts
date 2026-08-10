@@ -1,5 +1,6 @@
 import { annualizedAmount } from './studio.recurring';
 import { inPeriod, monthOf, monthNumbersInRange, monthsInRange, type PeriodRange } from './studio.dashboard-period';
+import { isDoneStatus } from '../work-items/work-item.entity';
 
 function isSameMonth(dateStr: string, todayYearMonth: string): boolean {
   return dateStr.slice(0, 7) === todayYearMonth;
@@ -197,7 +198,8 @@ function groupSumCents<T>(items: T[], keyFn: (item: T) => string, amountFn: (ite
 }
 
 const TASK_ACTIVITY_BUCKET: Record<string, 'completed' | 'inProgress' | 'pending'> = {
-  done: 'completed',
+  resolved: 'completed',
+  closed: 'completed',
   in_progress: 'inProgress',
 };
 
@@ -235,12 +237,12 @@ export function buildSectionA(
       projects: projectsInPeriod.length,
       cost,
       tasks: tasksInPeriod.length,
-      tasksDone: tasksInPeriod.filter((t) => t.status === 'done').length,
+      tasksDone: tasksInPeriod.filter((t) => isDoneStatus(t.status)).length,
       hoursSpent: sum(tasksInPeriod.map((t) => t.hoursSpent)),
       // Overdue is always "as of today", independent of the period filter —
       // same semantics as the kanban board's own `isLate`.
       overdueProjects: visibleProjects.filter((p) => p.dueDate && p.dueDate < today && p.healthStatus !== 'completed').length,
-      overdueTasks: visibleTasks.filter((t) => t.dueDate && t.dueDate < today && t.status !== 'done').length,
+      overdueTasks: visibleTasks.filter((t) => t.dueDate && t.dueDate < today && !isDoneStatus(t.status)).length,
       // As-of-today, like the overdue counts above — not period-filtered.
       requestsOpen: requests.filter((r) => OPEN_REQUEST_STATUSES.has(r.status)).length,
       initiatives: initiativesInPeriod.length,

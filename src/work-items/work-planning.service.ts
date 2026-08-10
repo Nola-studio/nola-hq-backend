@@ -4,7 +4,7 @@ import { Repository } from 'typeorm';
 import { RoadmapInitiative } from '../roadmap/roadmap-initiative.entity';
 import { ProjectRisk } from './project-risk.entity';
 import { WorkItemDependency } from './work-item-dependency.entity';
-import { WORK_ITEM_STATUSES, WorkItem } from './work-item.entity';
+import { WORK_ITEM_STATUSES, WorkItem, isDoneStatus as isDone } from './work-item.entity';
 import { WorkSprint } from './work-sprint.entity';
 import { WorkItemEvent } from './work-item-event.entity';
 import {
@@ -197,9 +197,9 @@ export class WorkPlanningService {
     const today = new Date().toISOString().slice(0, 10);
     const totalPoints = items.reduce((sum, item) => sum + item.estimatePoints, 0);
     const completedPoints = items
-      .filter((item) => item.status === 'done')
+      .filter((item) => isDone(item.status))
       .reduce((sum, item) => sum + item.estimatePoints, 0);
-    const done = byStatus.done ?? 0;
+    const done = (byStatus.resolved ?? 0) + (byStatus.closed ?? 0);
     return {
       project: { id: project.id, title: project.title, owner: project.owner, targetDate: project.targetDate },
       totals: {
@@ -210,8 +210,8 @@ export class WorkPlanningService {
         completedPoints,
         pointsCompletionPct: totalPoints ? Math.round((completedPoints / totalPoints) * 100) : 0,
         blocked: byStatus.blocked ?? 0,
-        overdue: items.filter((item) => item.status !== 'done' && item.dueDate && item.dueDate < today).length,
-        unassigned: items.filter((item) => item.status !== 'done' && !item.assignee).length,
+        overdue: items.filter((item) => !isDone(item.status) && item.dueDate && item.dueDate < today).length,
+        unassigned: items.filter((item) => !isDone(item.status) && !item.assignee).length,
         openRisks: risks.filter((risk) => risk.status === 'open').length,
         criticalRisks: risks.filter((risk) => risk.status === 'open' && risk.level === 'critical').length,
       },

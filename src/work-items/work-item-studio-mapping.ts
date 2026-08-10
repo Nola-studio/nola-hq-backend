@@ -1,41 +1,38 @@
 import type { WorkItemPriority, WorkItemStatus } from './work-item.entity';
 
 /**
- * Pure translation tables between Studio's retired task vocabulary and
- * `WorkItem`'s — no Nest/DB deps, same split as `work-items.board.ts`.
+ * Pure translation tables between Studio's task vocabulary and `WorkItem`'s
+ * — no Nest/DB deps, same split as `work-items.board.ts`.
  *
  * `work_items` is the single task backbone post-merge; these maps exist
  * only so anything still speaking Studio's shape (the `/studio/tasks*`
- * proxy controller, the Studio dashboard reading `work_items` but
- * rendering Studio's original vocabulary) can translate at the edge.
+ * proxy controller, the Studio dashboard reading `work_items`) can
+ * translate at the edge. Status is now an identity map: Studio's board
+ * columns (À faire · En cours · Bloqué · En revue · Résolu · Fermé) are the
+ * same six values as `WorkItemStatus` — the old `backlog`/`this_quarter`
+ * split and `in_review`/`done` naming were retired together.
  */
 
-export type StudioTaskStatus =
-  | 'backlog'
-  | 'this_quarter'
-  | 'in_progress'
-  | 'blocked'
-  | 'in_review'
-  | 'done';
+export type StudioTaskStatus = WorkItemStatus;
 
 export type StudioTaskPriority = 'none' | 'low' | 'medium' | 'high' | 'urgent';
 
 export const STUDIO_STATUS_TO_WORK_ITEM_STATUS: Record<StudioTaskStatus, WorkItemStatus> = {
-  backlog: 'backlog',
-  this_quarter: 'todo',
+  todo: 'todo',
   in_progress: 'in_progress',
   blocked: 'blocked',
-  in_review: 'review',
-  done: 'done',
+  review: 'review',
+  resolved: 'resolved',
+  closed: 'closed',
 };
 
 export const WORK_ITEM_STATUS_TO_STUDIO_STATUS: Record<WorkItemStatus, StudioTaskStatus> = {
-  backlog: 'backlog',
-  todo: 'this_quarter',
+  todo: 'todo',
   in_progress: 'in_progress',
-  review: 'in_review',
   blocked: 'blocked',
-  done: 'done',
+  review: 'review',
+  resolved: 'resolved',
+  closed: 'closed',
 };
 
 /** Studio's `none`/`low` both fold into WorkItem's lowest bucket, `P3`. */
