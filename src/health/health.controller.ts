@@ -2,6 +2,8 @@ import { Controller, Get, Param, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { HealthService } from './health.service';
 import { Public } from '../common/auth/public.decorator';
+import { HqRoles } from '../common/auth/hq-roles.decorator';
+import { HqRole } from '../common/auth/hq-role.enum';
 
 @ApiBearerAuth()
 @ApiTags('health')
@@ -16,11 +18,13 @@ export class HealthController {
   }
 
   @Get()
+  @HqRoles(HqRole.Viewer)
   findAll() {
     return this.svc.findAll();
   }
 
   @Get('overall')
+  @HqRoles(HqRole.Viewer)
   overall() {
     return this.svc.overall();
   }

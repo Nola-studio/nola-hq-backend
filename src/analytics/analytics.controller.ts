@@ -2,7 +2,12 @@ import { Controller, Get, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { AnalyticsService } from './analytics.service';
 import { DateRangeDto } from './dto/date-range.dto';
+import { HqRoles } from '../common/auth/hq-roles.decorator';
+import { HqRole } from '../common/auth/hq-role.enum';
 
+// Every route here surfaces cross-tenant MRR/NPS/tenant data, so unlike most
+// GET routes in this codebase these are gated (see hq-roles.decorator.ts).
+@HqRoles(HqRole.Viewer)
 @ApiBearerAuth()
 @ApiTags('analytics')
 @Controller()
