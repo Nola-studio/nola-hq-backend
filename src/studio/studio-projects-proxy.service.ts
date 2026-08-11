@@ -1,6 +1,6 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsWhere, Not, Repository } from 'typeorm';
+import { FindOptionsWhere, In, Not, Repository } from 'typeorm';
 import {
   RoadmapInitiative,
   type RoadmapInitiativePriority,
@@ -8,6 +8,7 @@ import {
 } from '../roadmap/roadmap-initiative.entity';
 import { RoadmapService } from '../roadmap/roadmap.service';
 import { TeamMember } from '../team/team-member.entity';
+import { StudioNotifyService } from './studio-notify.service';
 import { WorkItem, type WorkItemStatus } from '../work-items/work-item.entity';
 import { WorkItemsService } from '../work-items/work-items.service';
 import {
@@ -63,6 +64,7 @@ export class StudioProjectsProxyService {
     private readonly team: Repository<TeamMember>,
     private readonly roadmap: RoadmapService,
     private readonly workItems: WorkItemsService,
+    private readonly notify: StudioNotifyService,
   ) {}
 
   // ── projects ─────────────────────────────────────────────────────
@@ -129,7 +131,9 @@ export class StudioProjectsProxyService {
     const project = await this.findInitiative(id, 'project');
     if (project.archived) return this.toStudioProject(project);
 
-    const openCount = await this.tasks.count({ where: { projectId: id, status: Not('done') } });
+    const openCount = await this.tasks.count({
+      where: { projectId: id, status: Not(In(['resolved', 'closed'])) },
+    });
     if (openCount > 0) {
       throw new ConflictException(
         `Impossible d'archiver « ${project.keyPrefix ?? project.title} » : ${openCount} tâche(s) encore ouverte(s). Terminez-les ou déplacez-les d'abord.`,
@@ -193,7 +197,7 @@ export class StudioProjectsProxyService {
     }
     if (filter.late) {
       qb.andWhere('w.dueDate < :today', { today: new Date().toISOString().slice(0, 10) });
-      qb.andWhere('w.status != :done', { done: 'done' });
+      qb.andWhere('w.status NOT IN (:...doneStatuses)', { doneStatuses: ['resolved', 'closed'] });
     }
     qb.orderBy('w.status', 'ASC').addOrderBy('w.position', 'ASC').addOrderBy('w.createdAt', 'ASC');
 
@@ -226,12 +230,36 @@ export class StudioProjectsProxyService {
       },
       createdByEmail,
     );
+    const notifyEmail = assignee ? await this.notifyEmailFor(assignee) : null;
+    void this.notify.taskCreated({
+      identifier: created.reference ?? String(created.id),
+      title: created.title,
+      assigneeEmail: notifyEmail,
+      dueDate: created.dueDate,
+    });
+    if (notifyEmail) {
+      void this.notify.taskAssigned({
+        identifier: created.reference ?? String(created.id),
+        title: created.title,
+        assigneeEmail: notifyEmail,
+        dueDate: created.dueDate,
+      });
+    }
     const emailById = await this.emailById();
     return this.toStudioTask(created, emailById);
   }
 
+  /** Where ticket notifications actually go for a `team_members.id` — falls back to the login `email`. */
+  private async notifyEmailFor(memberId: string): Promise<string | null> {
+    const member = await this.team.findOne({ where: { id: memberId } });
+    return member ? member.notifyEmail || member.email : null;
+  }
+
   async updateTask(id: string, dto: UpdateTaskDto, actor: string) {
     const workItemId = this.parseId(id);
+    const previous = dto.assigneeEmail !== undefined ? await this.findWorkItem(id) : null;
+    const previousAssigneeEmail =
+      previous?.assignee ? (await this.emailById()).get(previous.assignee) ?? null : null;
     const assignee =
       dto.assigneeEmail === undefined
         ? undefined
@@ -254,6 +282,17 @@ export class StudioProjectsProxyService {
       }),
       actor,
     );
+    if (dto.assigneeEmail && dto.assigneeEmail !== previousAssigneeEmail && assignee) {
+      const notifyEmail = await this.notifyEmailFor(assignee);
+      if (notifyEmail) {
+        void this.notify.taskAssigned({
+          identifier: updated.reference ?? String(updated.id),
+          title: updated.title,
+          assigneeEmail: notifyEmail,
+          dueDate: updated.dueDate,
+        });
+      }
+    }
     const emailById = await this.emailById();
     return this.toStudioTask(updated, emailById);
   }
@@ -268,6 +307,22 @@ export class StudioProjectsProxyService {
 
   async removeTask(id: string) {
     await this.tasks.delete(this.parseId(id));
+  }
+
+  listAttachments(id: string) {
+    return this.workItems.listAttachments(this.parseId(id));
+  }
+
+  addAttachment(id: string, file: { originalname: string; mimetype: string; size: number; buffer: Buffer }, actor: string) {
+    return this.workItems.addAttachment(this.parseId(id), file, actor);
+  }
+
+  getAttachmentFile(id: string, attachmentId: string) {
+    return this.workItems.getAttachmentFile(this.parseId(id), attachmentId);
+  }
+
+  removeAttachment(id: string, attachmentId: string, actor: string) {
+    return this.workItems.removeAttachment(this.parseId(id), attachmentId, actor);
   }
 
   private async findWorkItem(id: string): Promise<WorkItem> {
@@ -315,6 +370,7 @@ export class StudioProjectsProxyService {
       createdByEmail: item.reporter,
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
+      resolvedAt: item.resolvedAt,
       completedAt: item.closedAt,
       position: item.position,
       hoursSpent: item.hoursSpent,

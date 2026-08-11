@@ -1,11 +1,20 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { LessThanOrEqual, Repository } from 'typeorm';
 import { PaginationDto, type PaginatedResult } from '../common/dto/pagination.dto';
 import { RoadmapInitiative } from '../roadmap/roadmap-initiative.entity';
 import { slugifyProjectName, taskReference } from '../roadmap/roadmap-identifier';
 import { TeamMember } from '../team/team-member.entity';
 import { PushService } from '../push/push.service';
+import { WorkItemAttachment } from './work-item-attachment.entity';
+import {
+  ALLOWED_ATTACHMENT_MIME_TYPES,
+  MAX_ATTACHMENTS_PER_TICKET,
+  MAX_ATTACHMENT_BYTES,
+  deleteAttachmentFile,
+  readAttachmentFile,
+  saveAttachmentFile,
+} from './work-item-attachment-storage';
 import { WorkItemComment } from './work-item-comment.entity';
 import { WorkItemEvent, type WorkItemEventAction } from './work-item-event.entity';
 import { WorkItemSubtask } from './work-item-subtask.entity';
@@ -26,22 +35,25 @@ import {
 } from './dto/work-item.dto';
 
 const STATUS_LABELS: Record<WorkItemStatus, string> = {
-  backlog: 'Backlog',
   todo: 'À faire',
   in_progress: 'En cours',
-  review: 'En revue',
   blocked: 'Bloqué',
-  done: 'Terminé',
+  review: 'En revue',
+  resolved: 'Résolu',
+  closed: 'Fermé',
 };
 
 const STATUS_TONES: Record<WorkItemStatus, string> = {
-  backlog: '#94A3B8',
   todo: '#64748B',
   in_progress: '#4F46E5',
-  review: '#D97706',
   blocked: '#DC2626',
-  done: '#16A34A',
+  review: '#D97706',
+  resolved: '#16A34A',
+  closed: '#94A3B8',
 };
+
+/** How long a resolved ticket stays reopenable before the daily job closes it. */
+const REOPEN_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
 
 @Injectable()
 export class WorkItemsService {
@@ -56,6 +68,8 @@ export class WorkItemsService {
     private readonly subtasks: Repository<WorkItemSubtask>,
     @InjectRepository(WorkItemEvent)
     private readonly events: Repository<WorkItemEvent>,
+    @InjectRepository(WorkItemAttachment)
+    private readonly attachments: Repository<WorkItemAttachment>,
     @InjectRepository(TeamMember)
     private readonly team: Repository<TeamMember>,
     private readonly push: PushService,
@@ -149,7 +163,7 @@ export class WorkItemsService {
   async create(dto: CreateWorkItemDto, reporter: string) {
     const project = await this.findProject(dto.projectId);
     if (dto.sprintId) await this.planning.assertSprint(dto.sprintId, project.id);
-    const position = await this.repo.count({ where: { status: dto.status ?? 'backlog' } });
+    const position = await this.repo.count({ where: { status: dto.status ?? 'todo' } });
     const now = new Date();
     const seq = await this.nextTaskSeq(project.id);
     const item = this.repo.create({
@@ -158,7 +172,7 @@ export class WorkItemsService {
       title: dto.title.trim(),
       description: dto.description?.trim() || null,
       type: dto.type ?? 'task',
-      status: dto.status ?? 'backlog',
+      status: dto.status ?? 'todo',
       priority: dto.priority ?? 'P2',
       reporter,
       assignee: dto.assignee || null,
@@ -173,7 +187,8 @@ export class WorkItemsService {
       position,
       createdAt: now,
       updatedAt: now,
-      closedAt: dto.status === 'done' ? now : null,
+      resolvedAt: dto.status === 'resolved' ? now : null,
+      closedAt: dto.status === 'closed' ? now : null,
     });
     const saved = await this.repo.save(item);
     await this.record(saved.id, reporter, 'created', {
@@ -188,6 +203,7 @@ export class WorkItemsService {
 
   async update(id: number, dto: UpdateWorkItemDto, actor: string) {
     const item = await this.findOne(id);
+    this.assertMutable(item);
     if (dto.projectId && dto.projectId !== item.projectId) {
       await this.findProject(dto.projectId);
     }
@@ -200,7 +216,9 @@ export class WorkItemsService {
       if (current[key] !== value) changes[key] = { from: current[key], to: value };
     }
     const previousAssignee = item.assignee;
+    const previousStatus = item.status;
     Object.assign(item, dto);
+    this.applyStatusTimestamps(item, previousStatus, new Date());
     item.updatedAt = new Date();
     const saved = await this.repo.save(item);
     if (Object.keys(changes).length > 0) await this.record(id, actor, 'updated', { changes });
@@ -212,6 +230,7 @@ export class WorkItemsService {
 
   async move(id: number, status: WorkItemStatus, position: number | undefined, actor: string) {
     const item = await this.findOne(id);
+    this.assertMutable(item);
     const from = item.status;
     const all = await this.repo.find();
     const targetPosition = position ?? all.filter((i) => i.status === status && i.id !== id).length;
@@ -221,11 +240,10 @@ export class WorkItemsService {
     const now = new Date();
     const rows = placements.map(({ id: placedId, status: placedStatus, position: placedPosition }) => {
       const row = placedId === id ? item : all.find((i) => i.id === placedId)!;
+      const previousStatus = row.status;
       row.status = placedStatus;
       row.position = placedPosition;
-      if (placedId === id) {
-        row.closedAt = placedStatus === 'done' ? row.closedAt ?? now : null;
-      }
+      if (placedId === id) this.applyStatusTimestamps(row, previousStatus, now);
       row.updatedAt = now;
       return row;
     });
@@ -234,8 +252,48 @@ export class WorkItemsService {
     return saved.find((row) => row.id === id)!;
   }
 
+  /**
+   * Closes every ticket that has sat in `resolved` past the 3-day reopen
+   * window — called daily by `StudioResolvedCloserScheduler`, same shape as
+   * `StudioDueSoonScheduler`'s own `run()`.
+   */
+  async closeExpiredResolved(): Promise<WorkItem[]> {
+    const cutoff = new Date(Date.now() - REOPEN_WINDOW_MS);
+    const expired = await this.repo.find({ where: { status: 'resolved', resolvedAt: LessThanOrEqual(cutoff) } });
+    if (expired.length === 0) return [];
+    const now = new Date();
+    for (const item of expired) {
+      item.status = 'closed';
+      item.closedAt = now;
+      item.updatedAt = now;
+    }
+    const saved = await this.repo.save(expired);
+    await Promise.all(
+      saved.map((item) => this.record(item.id, 'system', 'closed', { reason: 'auto_close_after_3_days' })),
+    );
+    return saved;
+  }
+
+  /** Throws if `item` is `closed` — closed tickets are read-only, every mutation path included. */
+  private assertMutable(item: WorkItem) {
+    if (item.status === 'closed') {
+      throw new ForbiddenException(
+        `${item.reference ?? `#${item.id}`} est fermé et ne peut plus être modifié.`,
+      );
+    }
+  }
+
+  /** Stamps/clears `resolvedAt`/`closedAt` on a status transition. No-op if `item.status` didn't change. */
+  private applyStatusTimestamps(item: WorkItem, previousStatus: WorkItemStatus, now: Date) {
+    if (item.status === previousStatus) return;
+    if (item.status === 'resolved') item.resolvedAt = now;
+    else if (previousStatus === 'resolved') item.resolvedAt = null;
+    if (item.status === 'closed') item.closedAt = now;
+  }
+
   async addComment(id: number, dto: AddWorkItemCommentDto, actor: string) {
     const item = await this.findOne(id);
+    this.assertMutable(item);
     const comment = await this.comments.save(this.comments.create({
       workItemId: id,
       author: actor,
@@ -248,7 +306,8 @@ export class WorkItemsService {
   }
 
   async addSubtask(id: number, dto: AddWorkItemSubtaskDto, actor: string) {
-    await this.findOne(id);
+    const item = await this.findOne(id);
+    this.assertMutable(item);
     const position = await this.subtasks.count({ where: { workItemId: id } });
     const now = new Date();
     const subtask = await this.subtasks.save(this.subtasks.create({
@@ -267,6 +326,7 @@ export class WorkItemsService {
   async updateSubtask(id: string, dto: UpdateWorkItemSubtaskDto, actor: string) {
     const subtask = await this.subtasks.findOne({ where: { id } });
     if (!subtask) throw new NotFoundException(`Sous-tâche ${id} introuvable`);
+    this.assertMutable(await this.findOne(subtask.workItemId));
     Object.assign(subtask, dto);
     subtask.updatedAt = new Date();
     const saved = await this.subtasks.save(subtask);
@@ -276,6 +336,69 @@ export class WorkItemsService {
       done: saved.done,
     });
     return saved;
+  }
+
+  async listAttachments(id: number) {
+    await this.findOne(id);
+    return this.attachments.find({ where: { workItemId: id }, order: { createdAt: 'ASC' } });
+  }
+
+  async addAttachment(
+    id: number,
+    file: { originalname: string; mimetype: string; size: number; buffer: Buffer },
+    actor: string,
+  ) {
+    const item = await this.findOne(id);
+    this.assertMutable(item);
+    if (!ALLOWED_ATTACHMENT_MIME_TYPES.has(file.mimetype)) {
+      throw new BadRequestException(`Type de fichier non autorisé : ${file.mimetype}`);
+    }
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      throw new BadRequestException(`Fichier trop volumineux (max ${MAX_ATTACHMENT_BYTES / 1_000_000} Mo)`);
+    }
+    const existing = await this.attachments.count({ where: { workItemId: id } });
+    if (existing >= MAX_ATTACHMENTS_PER_TICKET) {
+      throw new BadRequestException(`Maximum ${MAX_ATTACHMENTS_PER_TICKET} pièces jointes par ticket`);
+    }
+    const saved = await this.attachments.save(
+      this.attachments.create({
+        workItemId: id,
+        originalName: file.originalname.slice(0, 255),
+        mimeType: file.mimetype,
+        sizeBytes: file.size,
+        uploadedBy: actor,
+        createdAt: new Date(),
+      }),
+    );
+    try {
+      await saveAttachmentFile(saved.id, file.buffer);
+    } catch (err) {
+      await this.attachments.remove(saved);
+      throw err;
+    }
+    await this.record(id, actor, 'attachment_added', { attachmentId: saved.id, originalName: saved.originalName });
+    return saved;
+  }
+
+  async getAttachmentFile(id: number, attachmentId: string) {
+    const attachment = await this.attachments.findOne({ where: { id: attachmentId } });
+    if (!attachment || attachment.workItemId !== id) {
+      throw new NotFoundException(`Pièce jointe ${attachmentId} introuvable`);
+    }
+    const buffer = await readAttachmentFile(attachment.id);
+    return { attachment, buffer };
+  }
+
+  async removeAttachment(id: number, attachmentId: string, actor: string) {
+    const item = await this.findOne(id);
+    this.assertMutable(item);
+    const attachment = await this.attachments.findOne({ where: { id: attachmentId } });
+    if (!attachment || attachment.workItemId !== id) {
+      throw new NotFoundException(`Pièce jointe ${attachmentId} introuvable`);
+    }
+    await this.attachments.remove(attachment);
+    await deleteAttachmentFile(attachment.id);
+    await this.record(id, actor, 'attachment_removed', { attachmentId, originalName: attachment.originalName });
   }
 
   private record(

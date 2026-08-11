@@ -7,7 +7,10 @@ export type WorkItemEventAction =
   | 'moved'
   | 'commented'
   | 'subtask_added'
-  | 'subtask_updated';
+  | 'subtask_updated'
+  | 'closed'
+  | 'attachment_added'
+  | 'attachment_removed';
 
 @Entity('work_item_events')
 export class WorkItemEvent {

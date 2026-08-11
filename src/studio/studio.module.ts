@@ -24,6 +24,7 @@ import { StudioMeetingsService } from './studio-meetings.service';
 import { StudioMeetingsController } from './studio-meetings.controller';
 import { StudioNotifyService } from './studio-notify.service';
 import { StudioDueSoonScheduler } from './studio-due-soon.scheduler';
+import { StudioResolvedCloserScheduler } from './studio-resolved-closer.scheduler';
 import { StudioRequest } from './studio-request.entity';
 import { StudioRequestsService } from './studio-requests.service';
 import { StudioRequestsController } from './studio-requests.controller';
@@ -62,6 +63,7 @@ import { StudioRequestsController } from './studio-requests.controller';
     StudioMeetingsService,
     StudioNotifyService,
     StudioDueSoonScheduler,
+    StudioResolvedCloserScheduler,
     StudioRequestsService,
   ],
   exports: [

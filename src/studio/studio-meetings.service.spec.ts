@@ -63,6 +63,6 @@ describe('StudioMeetingsService', () => {
 
     const result = await svc.findOne('meet-1');
 
-    expect(result.tasks).toEqual([{ id: '1', identifier: 'YEK-1', status: 'this_quarter' }]);
+    expect(result.tasks).toEqual([{ id: '1', identifier: 'YEK-1', status: 'todo' }]);
   });
 });

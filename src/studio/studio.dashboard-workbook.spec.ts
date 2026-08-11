@@ -29,7 +29,7 @@ function project(over: Partial<DashboardProject> = {}): DashboardProject {
 
 function task(over: Partial<DashboardTask> = {}): DashboardTask {
   return {
-    status: 'backlog',
+    status: 'todo',
     priority: 'none',
     assigneeEmail: null,
     dueDate: null,
@@ -104,9 +104,9 @@ describe('buildSectionA', () => {
     expect(buildSectionA([], [], tasks, [], RANGE, TODAY).stats.hoursSpent).toBe(6.5);
   });
 
-  test('taskActivityByMonth buckets done/in_progress/everything-else', () => {
+  test('taskActivityByMonth buckets resolved/in_progress/everything-else', () => {
     const tasks = [
-      task({ dueDate: '2026-03-15', status: 'done' }),
+      task({ dueDate: '2026-03-15', status: 'resolved' }),
       task({ dueDate: '2026-03-20', status: 'in_progress' }),
       task({ dueDate: '2026-03-25', status: 'blocked' }),
     ];

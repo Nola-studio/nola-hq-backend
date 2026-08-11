@@ -30,31 +30,31 @@ describe('planMove', () => {
 
   test('across columns: inserts in the target and closes the gap in the source', () => {
     const all = [
-      card(1, 'backlog', 0),
-      card(2, 'backlog', 1),
-      card(3, 'backlog', 2),
+      card(1, 'review', 0),
+      card(2, 'review', 1),
+      card(3, 'review', 2),
       card(4, 'todo', 0),
       card(5, 'todo', 1),
     ];
-    // 2 leaves the middle of `backlog` for the top of `todo`.
+    // 2 leaves the middle of `review` for the top of `todo`.
     expect(sorted(planMove(all, 2, 'todo', 0))).toEqual([
       { id: 2, status: 'todo', position: 0 },
-      { id: 3, status: 'backlog', position: 1 }, // source re-densified (was 2)
+      { id: 3, status: 'review', position: 1 }, // source re-densified (was 2)
       { id: 4, status: 'todo', position: 1 },
       { id: 5, status: 'todo', position: 2 },
     ]);
   });
 
   test('across columns into an empty column', () => {
-    const all = [card(1, 'backlog', 0), card(2, 'backlog', 1)];
-    expect(sorted(planMove(all, 1, 'done', 0))).toEqual([
-      { id: 1, status: 'done', position: 0 },
-      { id: 2, status: 'backlog', position: 0 },
+    const all = [card(1, 'review', 0), card(2, 'review', 1)];
+    expect(sorted(planMove(all, 1, 'resolved', 0))).toEqual([
+      { id: 1, status: 'resolved', position: 0 },
+      { id: 2, status: 'review', position: 0 },
     ]);
   });
 
   test('boundary: a position past the end appends instead of failing', () => {
-    const all = [card(1, 'todo', 0), card(2, 'todo', 1), card(9, 'backlog', 0)];
+    const all = [card(1, 'todo', 0), card(2, 'todo', 1), card(9, 'review', 0)];
     expect(sorted(planMove(all, 9, 'todo', 99))).toEqual([
       { id: 9, status: 'todo', position: 2 },
     ]);
@@ -83,6 +83,6 @@ describe('planMove', () => {
   });
 
   test('an unknown id is a no-op', () => {
-    expect(planMove([card(1, 'backlog', 0)], 999, 'todo', 0)).toEqual([]);
+    expect(planMove([card(1, 'review', 0)], 999, 'todo', 0)).toEqual([]);
   });
 });

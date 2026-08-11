@@ -28,6 +28,7 @@ import { Tenant } from './tenants/tenant.entity';
 import { TenantCrm } from './tenants/tenant-crm.entity';
 import { Ticket } from './tickets/ticket.entity';
 import { WorkItem } from './work-items/work-item.entity';
+import { WorkItemAttachment } from './work-items/work-item-attachment.entity';
 import { WorkItemComment } from './work-items/work-item-comment.entity';
 import { WorkItemEvent } from './work-items/work-item-event.entity';
 import { WorkItemSubtask } from './work-items/work-item-subtask.entity';

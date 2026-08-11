@@ -9,7 +9,7 @@ import { BusinessInvoice, type BusinessInvoiceStatus } from './business-invoice.
 import { BusinessOpportunity } from './business-opportunity.entity';
 import { ProjectBudget } from './project-budget.entity';
 import { ProjectTimeEntry } from './project-time-entry.entity';
-import { WorkItem } from '../work-items/work-item.entity';
+import { WorkItem, isDoneStatus } from '../work-items/work-item.entity';
 import { ProjectRisk } from '../work-items/project-risk.entity';
 import { BusinessDocument } from './business-document.entity';
 import { BusinessReminder } from './business-reminder.entity';
@@ -533,10 +533,10 @@ export class BusinessService {
       const projectRisks = risks.filter((risk) => risk.projectId === project.id && risk.status === 'open');
       const projectInvoices = invoices.filter((invoice) => invoice.projectId === project.id);
       const projectTime = timeEntries.filter((entry) => entry.projectId === project.id);
-      const done = projectItems.filter((item) => item.status === 'done').length;
+      const done = projectItems.filter((item) => isDoneStatus(item.status)).length;
       const blocked = projectItems.filter((item) => item.status === 'blocked').length;
       const overdueTickets = projectItems.filter(
-        (item) => item.status !== 'done' && item.dueDate && item.dueDate < today,
+        (item) => !isDoneStatus(item.status) && item.dueDate && item.dueDate < today,
       ).length;
       const overdueInvoices = projectInvoices.filter(
         (invoice) => !['paid', 'cancelled', 'draft'].includes(invoice.status) && invoice.dueOn < today,

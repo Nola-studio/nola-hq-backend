@@ -108,7 +108,25 @@ export class AuthService {
     });
 
     this.logger.log(`Login OK: ${claims.email ?? claims.sub} (${claims.sub})`);
+    void this.touchLastLogin(claims.email);
     return { sessionId, user: claims, expiresIn: ttl };
+  }
+
+  /**
+   * Best-effort, matching `profile()`'s "team_members is optional" pattern:
+   * a Keycloak-authenticated user with no local row still logs in fine —
+   * there's just nothing to stamp. Not in the auth guard: that fires on
+   * every request, and this repo's session check does zero DB work today,
+   * so writing here (once per login) instead of there avoids turning every
+   * authenticated request into a write.
+   */
+  private async touchLastLogin(email?: string): Promise<void> {
+    if (!email) return;
+    try {
+      await this.members.update({ email }, { lastLoginAt: new Date() });
+    } catch (err) {
+      this.logger.warn(`touchLastLogin failed for ${email}: ${err instanceof Error ? err.message : err}`);
+    }
   }
 
   resolveSession(sessionId: string): NolaJwtPayload {
@@ -161,6 +179,8 @@ export class AuthService {
         country: m.country,
         perms: m.perms,
         online: m.online,
+        hqAccess: m.hqAccess ?? null,
+        lastLoginAt: m.lastLoginAt ?? null,
       };
     }
     return {
