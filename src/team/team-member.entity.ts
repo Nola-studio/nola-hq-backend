@@ -47,13 +47,13 @@ export class TeamMember {
    * Editable by an Owner — where ticket notifications are actually sent.
    * Falls back to `email` (the Keycloak login address) when null.
    */
-  @Column({ name: 'notify_email', nullable: true })
+  @Column({ type: 'varchar', name: 'notify_email', nullable: true })
   notifyEmail?: string | null;
 
   /** Best-effort, written on login — replaces the vestigial `last` string column. */
   @Column({ name: 'last_login_at', type: 'timestamp', nullable: true })
   lastLoginAt?: Date | null;
 
-  @Column({ name: 'password_hash', nullable: true })
+  @Column({ type: 'varchar', name: 'password_hash', nullable: true })
   passwordHash?: string;
 }
