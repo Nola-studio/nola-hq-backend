@@ -7,16 +7,14 @@ import type { Ticket } from '../tickets/ticket.entity';
 import type { TenantsService } from '../tenants/tenants.service';
 
 /**
- * captureDaily() has two genuinely distinct failure/edge paths (confirmed by
- * reading the source, not assumed):
+ * captureDaily() has two genuinely distinct skip paths:
  *   (a) tenants.list()/tickets.count() throws → caught, logged, repo.upsert
  *       is never called — no rows written for that day.
  *   (b) both calls succeed but resolve to an empty tenant set → computeMetrics
- *       returns an all-zero metrics object, and captureDaily proceeds to
- *       upsert one zero-valued row per METRIC_KEYS. There is no guard that
- *       skips the write for an empty-but-successful payload — only a thrown
- *       error skips the write. This test locks in that distinction: (b) is
- *       NOT a no-op, unlike (a).
+ *       returns `tenants: 0`, and captureDaily skips the write the same way
+ *       (log + return) rather than overwriting history with zeros — a
+ *       resolved-but-empty fetch must not look identical to a real all-zero
+ *       day once it reaches the snapshot table.
  */
 
 function makeService(opts: {
@@ -45,20 +43,14 @@ describe('SnapshotsService.captureDaily', () => {
     expect(upsert).not.toHaveBeenCalled();
   });
 
-  test('(b) upstream succeeds with an empty tenant set: still writes one zero-valued row per metric (not skipped)', async () => {
+  test('(b) upstream succeeds with an empty tenant set: skipped, nothing written', async () => {
     const { service, upsert } = makeService({
       tenantsList: async () => ({ items: [] }),
       ticketsCount: async () => 0,
     });
 
-    await service.captureDaily();
-
-    expect(upsert).toHaveBeenCalledTimes(METRIC_KEYS.length);
-    for (const [row] of upsert.mock.calls) {
-      const r = row as { metricKey: string; value: number };
-      expect(METRIC_KEYS).toContain(r.metricKey);
-      expect(r.value).toBe(0);
-    }
+    await expect(service.captureDaily()).resolves.toBeUndefined();
+    expect(upsert).not.toHaveBeenCalled();
   });
 
   test('successful non-empty payload writes real computed values', async () => {

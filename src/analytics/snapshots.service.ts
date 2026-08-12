@@ -78,6 +78,15 @@ export class SnapshotsService implements OnApplicationBootstrap, OnModuleDestroy
   async captureDaily(): Promise<void> {
     try {
       const metrics = await this.currentMetrics();
+      // A resolved-but-empty tenant fetch is indistinguishable from a real
+      // all-zero day once it reaches `metrics` — skip it the same way a
+      // thrown error is skipped, rather than overwriting history with zeros.
+      if (metrics.tenants === 0) {
+        this.logger.warn(
+          'Daily snapshot capture skipped: resolved zero tenants (fetch succeeded but returned an empty set)',
+        );
+        return;
+      }
       const date = dayKey(new Date());
       for (const key of METRIC_KEYS) {
         await this.repo.upsert(
