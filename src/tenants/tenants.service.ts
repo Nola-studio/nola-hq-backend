@@ -161,6 +161,14 @@ export class TenantsService {
       return view;
     });
 
+    // Resolve real user counts before sort/pagination — `sort=users` must
+    // order by the real value, not the placeholder 0 `merge()` returns.
+    await Promise.all(
+      views.map(async (v) => {
+        v.users = await this.countUsersForOrg(v.organizationId);
+      }),
+    );
+
     // Country filter applies post-merge (canonical doesn't store it).
     const filtered = query.country
       ? views.filter((v) => v.country === query.country)
@@ -182,7 +190,20 @@ export class TenantsService {
   async findOne(id: string): Promise<TenantView> {
     const t = await this.findBillingTenantByExternalId(id);
     const crm = await this.crm.findOne({ where: { tenantId: id } });
-    return this.merge(t, crm ?? null);
+    const view = this.merge(t, crm ?? null);
+    const [arDaysByTenant, users] = await Promise.all([
+      this.fetchOutstandingArDays().catch((err) => {
+        this.logger.warn(
+          `Failed to fetch outstanding invoices for AR days — reporting ar_days as unknown: ${err.message}`,
+        );
+        return null;
+      }),
+      this.countUsersForOrg(view.organizationId),
+    ]);
+    view.ar_days =
+      arDaysByTenant === null ? null : arDaysByTenant.get(t.externalId) ?? 0;
+    view.users = users;
+    return view;
   }
 
   async detail(id: string) {
@@ -634,6 +655,27 @@ export class TenantsService {
     return arByTenant;
   }
 
+  /**
+   * Real user count for a tenant, via nola-iam's org memberships (the same
+   * source `.memberships()` uses). A tenant with no `organizationId` (legacy
+   * / pre-Pattern-D) or an unreachable IAM reports 0 rather than failing the
+   * whole tenant read.
+   */
+  private async countUsersForOrg(organizationId: string | null): Promise<number> {
+    if (!organizationId) return 0;
+    try {
+      const memberships = await this.iam.listMembershipsForOrg(organizationId, {
+        includeInactive: false,
+      });
+      return memberships.length;
+    } catch (err) {
+      this.logger.warn(
+        `Failed to count users for org=${organizationId} — reporting users=0: ${err instanceof Error ? err.message : err}`,
+      );
+      return 0;
+    }
+  }
+
   private async findBillingTenantByExternalId(
     externalId: string,
   ): Promise<BillingTenant> {
@@ -665,11 +707,11 @@ export class TenantsService {
       mrr_cdf: mrr,
       status: mapLifecycleToStatus(t.lifecycleState),
       since: t.createdAt?.slice(0, 10) ?? '',
-      users: 0, // TODO Phase 2b: count realm users via nola-auth /users command
+      users: 0, // overridden by caller via countUsersForOrg() once organizationId is known
       owner: crm?.owner ?? '',
       whatsapp: crm?.whatsapp ?? '',
       mobile_money: crm?.mobileMoney ?? '',
-      ar_days: 0, // TODO Phase 2b: compute from outstanding invoices
+      ar_days: 0, // overridden by caller via fetchOutstandingArDays()
       nps: crm?.nps ?? null,
       organizationId: t.organizationId ?? null,
     };
