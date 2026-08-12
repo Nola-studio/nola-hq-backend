@@ -8,6 +8,7 @@ import {
 } from './dto/create-ticket.dto';
 import { PaginationDto, type PaginatedResult } from '../common/dto/pagination.dto';
 import { PushService } from '../push/push.service';
+import { TicketsNotifyService } from './tickets-notify.service';
 
 export interface TicketsListQuery extends PaginationDto {
   tenant?: string;
@@ -21,6 +22,7 @@ export class TicketsService {
   constructor(
     @InjectRepository(Ticket) private readonly repo: Repository<Ticket>,
     private readonly push: PushService,
+    private readonly notify: TicketsNotifyService,
   ) {}
 
   async list(query: TicketsListQuery): Promise<PaginatedResult<Ticket>> {
@@ -76,12 +78,18 @@ export class TicketsService {
     });
     const saved = await this.repo.save(ticket);
     // Fire-and-forget : une notif ratée ne doit jamais faire échouer la
-    // création du ticket (broadcast() avale et logge ses erreurs).
+    // création du ticket (broadcast()/publish() avalent et loggent leurs erreurs).
     void this.push.broadcast({
       title: `Nouveau ticket ${saved.priority} · ${saved.tenant}`,
       body: saved.subject,
       url: '/tickets',
       tag: `ticket-${saved.id}`,
+    });
+    void this.notify.ticketCreated({
+      id: saved.id,
+      subject: saved.subject,
+      tenant: saved.tenant,
+      priority: saved.priority,
     });
     return saved;
   }
@@ -108,7 +116,15 @@ export class TicketsService {
     ticket.assignee = assignee;
     ticket.assigned = assignee;
     ticket.updatedAt = new Date();
-    return this.repo.save(ticket);
+    const saved = await this.repo.save(ticket);
+    // Fire-and-forget, same posture as create() above.
+    void this.notify.ticketAssigned({
+      id: saved.id,
+      subject: saved.subject,
+      tenant: saved.tenant,
+      assigneeId: assignee,
+    });
+    return saved;
   }
 
   async summary() {

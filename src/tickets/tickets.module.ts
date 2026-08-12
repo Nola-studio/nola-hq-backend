@@ -4,13 +4,15 @@ import { NolaSdkModule } from '@nola-hq/nola-sdk';
 import { Ticket } from './ticket.entity';
 import { TicketsController } from './tickets.controller';
 import { TicketsService } from './tickets.service';
+import { TicketsNotifyService } from './tickets-notify.service';
 import { SupportIngestListener } from './support-ingest.listener';
 import { PushModule } from '../push/push.module';
+import { TeamMember } from '../team/team-member.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Ticket]), NolaSdkModule, PushModule],
+  imports: [TypeOrmModule.forFeature([Ticket, TeamMember]), NolaSdkModule, PushModule],
   controllers: [TicketsController],
-  providers: [TicketsService, SupportIngestListener],
+  providers: [TicketsService, TicketsNotifyService, SupportIngestListener],
   exports: [TicketsService],
 })
 export class TicketsModule {}
