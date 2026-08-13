@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import PDFDocument = require('pdfkit');
 import type { BusinessInvoice } from './business-invoice.entity';
 import type { BusinessQuote } from './business-quote.entity';
+import { LEGAL_ENTITY } from './legal-entity.config';
 
 const GREEN = '#1F4D3A';
 const OCRE = '#D4A053';
@@ -27,9 +28,9 @@ export class BusinessPdfService {
     return this.build((doc) => {
       this.header(doc, 'FACTURE', invoice.number, invoice.issuedOn);
       this.parties(doc, invoice.client?.name ?? 'Client', invoice.client?.email, invoice.client?.phone);
-      doc.fillColor(INK).font('Helvetica-Bold').fontSize(15).text(invoice.description || 'Prestations Nola Studio', 50, 225);
-      doc.fillColor(MUTE).font('Helvetica').fontSize(9).text(`Projet : ${invoice.project?.title ?? 'Non renseigne'}`, 50, 248);
-      doc.text(`Echeance : ${this.date(invoice.dueOn)}`, 50, 263);
+      doc.fillColor(INK).font('Helvetica-Bold').fontSize(15).text(invoice.description || `Prestations ${LEGAL_ENTITY.name}`, 50, 225);
+      doc.fillColor(MUTE).font('Helvetica').fontSize(9).text(`Projet : ${invoice.project?.title ?? 'Non renseigné'}`, 50, 248);
+      doc.text(`Échéance : ${this.date(invoice.dueOn)}`, 50, 263);
       const y = 305;
       doc.fillColor(GREEN).rect(50, y, 495, 28).fill();
       doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(9).text('DESCRIPTION', 62, y + 10);
@@ -46,7 +47,7 @@ export class BusinessPdfService {
 
   private build(draw: (doc: PDFKit.PDFDocument) => void): Promise<Buffer> {
     return new Promise((resolve, reject) => {
-      const doc = new PDFDocument({ size: 'A4', margin: 50, info: { Author: 'Nola Studio' } });
+      const doc = new PDFDocument({ size: 'A4', margin: 50, info: { Author: LEGAL_ENTITY.name } });
       const chunks: Buffer[] = [];
       doc.on('data', (chunk: Buffer) => chunks.push(chunk));
       doc.on('end', () => resolve(Buffer.concat(chunks)));
@@ -58,16 +59,17 @@ export class BusinessPdfService {
 
   private header(doc: PDFKit.PDFDocument, kind: string, number: string, date: string) {
     doc.fillColor(GREEN).rect(0, 0, 595.28, 150).fill();
-    doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(25).text('NOLA', 50, 42, { continued: true });
-    doc.fillColor(OCRE).text(' STUDIO');
-    doc.fillColor('#FFFFFF').font('Helvetica').fontSize(9).text('Solutions numériques et accompagnement business', 50, 76);
+    const [firstWord, ...restWords] = LEGAL_ENTITY.name.toUpperCase().split(' ');
+    doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(25).text(firstWord, 50, 42, { continued: true });
+    doc.fillColor(OCRE).text(restWords.length ? ` ${restWords.join(' ')}` : '');
+    doc.fillColor('#FFFFFF').font('Helvetica').fontSize(9).text(LEGAL_ENTITY.tagline, 50, 76);
     doc.font('Helvetica-Bold').fontSize(22).text(kind, 390, 39, { width: 155, align: 'right' });
     doc.font('Helvetica').fontSize(9).text(number, 390, 71, { width: 155, align: 'right' });
     doc.text(this.date(date), 390, 87, { width: 155, align: 'right' });
   }
 
   private parties(doc: PDFKit.PDFDocument, name: string, email?: string | null, phone?: string | null) {
-    doc.fillColor(MUTE).font('Helvetica-Bold').fontSize(8).text('ADRESSE A', 50, 172);
+    doc.fillColor(MUTE).font('Helvetica-Bold').fontSize(8).text('ADRESSÉE À', 50, 172);
     doc.fillColor(INK).fontSize(11).text(name, 50, 187);
     doc.fillColor(MUTE).font('Helvetica').fontSize(9).text([email, phone].filter(Boolean).join('  |  ') || 'Coordonnées non renseignées', 50, 204);
   }
@@ -122,7 +124,7 @@ export class BusinessPdfService {
   private footer(doc: PDFKit.PDFDocument, reference: string) {
     const bottom = doc.page.height - 62;
     doc.strokeColor(LINE).moveTo(50, bottom - 12).lineTo(545, bottom - 12).stroke();
-    doc.fillColor(MUTE).font('Helvetica').fontSize(7).text('Nola Studio  |  Merci pour votre confiance', 50, bottom, { width: 350, lineBreak: false });
+    doc.fillColor(MUTE).font('Helvetica').fontSize(7).text(LEGAL_ENTITY.footerLine, 50, bottom, { width: 350, lineBreak: false });
     doc.text(reference, 400, bottom, { width: 145, align: 'right', lineBreak: false });
   }
 
