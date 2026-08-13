@@ -84,7 +84,12 @@ export interface TenantView {
   mrr_cdf: number;
   status: TenantStatus;
   since: string;
-  users: number;
+  /**
+   * Real member count for this tenant's org, via nola-iam. `null` = unknown
+   * (the IAM fetch failed) — distinct from `0` (known to have no members).
+   * Never report unknown as 0, same convention as `ar_days`.
+   */
+  users: number | null;
   owner: string;
   whatsapp: string;
   mobile_money: string;
@@ -658,10 +663,13 @@ export class TenantsService {
   /**
    * Real user count for a tenant, via nola-iam's org memberships (the same
    * source `.memberships()` uses). A tenant with no `organizationId` (legacy
-   * / pre-Pattern-D) or an unreachable IAM reports 0 rather than failing the
-   * whole tenant read.
+   * / pre-Pattern-D) genuinely has no linked org to count members for, so it
+   * reports 0. An unreachable IAM is a different case — its failure must NOT
+   * be silently reported as users=0 (that makes a tenant look empty when the
+   * real count is simply unknown) — on failure we surface `null` instead,
+   * same convention as `ar_days`.
    */
-  private async countUsersForOrg(organizationId: string | null): Promise<number> {
+  private async countUsersForOrg(organizationId: string | null): Promise<number | null> {
     if (!organizationId) return 0;
     try {
       const memberships = await this.iam.listMembershipsForOrg(organizationId, {
@@ -670,9 +678,9 @@ export class TenantsService {
       return memberships.length;
     } catch (err) {
       this.logger.warn(
-        `Failed to count users for org=${organizationId} — reporting users=0: ${err instanceof Error ? err.message : err}`,
+        `Failed to count users for org=${organizationId} — reporting users as unknown: ${err instanceof Error ? err.message : err}`,
       );
-      return 0;
+      return null;
     }
   }
 

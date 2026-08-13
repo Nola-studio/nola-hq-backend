@@ -85,12 +85,12 @@ describe('TenantsService.findOne — merge() regression guard', () => {
     expect(iam.listMembershipsForOrg).toHaveBeenCalledWith('org-1', { includeInactive: false });
   });
 
-  test('users falls back to 0 (not a crash) when IAM is unreachable', async () => {
+  test('users reports null (unknown), not 0, when IAM is unreachable', async () => {
     const { service } = makeService({ membershipsError: new Error('iam down') });
 
     const view = await service.findOne('ext-1');
 
-    expect(view.users).toBe(0);
+    expect(view.users).toBeNull();
   });
 
   test('ar_days reflects the real outstanding-invoice computation, not the old hardcoded 0', async () => {
