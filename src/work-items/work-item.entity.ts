@@ -131,7 +131,7 @@ export class WorkItem {
   @Column({ name: 'resolved_at', type: 'timestamp', nullable: true })
   resolvedAt!: Date | null;
 
-  /** Stamped when status enters `closed` (auto, 3 days after `resolvedAt`, or a manual move). */
+  /** Stamped when status enters `closed` (auto, `REOPEN_WINDOW_MS` after `resolvedAt`, or a manual move). */
   @Column({ name: 'closed_at', type: 'timestamp', nullable: true })
   closedAt!: Date | null;
 }

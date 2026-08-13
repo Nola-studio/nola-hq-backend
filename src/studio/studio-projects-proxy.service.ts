@@ -27,8 +27,14 @@ import { SearchTasksDto } from './dto/search-tasks.dto';
 import { ListStudioProjectsDto } from './dto/list-studio-projects.dto';
 import type { ListWorkItemsDto } from '../work-items/dto/work-item.dto';
 
-/** How far back the live board looks for `closed` cards — older ones stay in the archive only (`searchTasks`). */
-const BOARD_CLOSED_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+/**
+ * How far back the live board looks for `closed` cards — older ones stay in
+ * the archive only (`searchTasks`). Intentionally kept equal to
+ * `REOPEN_WINDOW_MS` (`work-items.service.ts`) — an item's reopen countdown
+ * and its live-board visibility are meant to end together. If you change
+ * one, reconsider the other.
+ */
+const BOARD_CLOSED_WINDOW_MS = 2 * 24 * 60 * 60 * 1000;
 
 /** Studio's `high|medium|low` project priority → `RoadmapInitiative`'s `P0-P3`. */
 const PROJECT_PRIORITY_TO_ROADMAP: Record<StudioProjectPriority, RoadmapInitiativePriority> = {

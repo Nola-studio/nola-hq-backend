@@ -52,8 +52,14 @@ const STATUS_TONES: Record<WorkItemStatus, string> = {
   closed: '#94A3B8',
 };
 
-/** How long a resolved ticket stays reopenable before the daily job closes it. */
-const REOPEN_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
+/**
+ * How long a resolved ticket stays reopenable before the daily job closes
+ * it. Intentionally kept equal to `BOARD_CLOSED_WINDOW_MS`
+ * (`studio-projects-proxy.service.ts`) — an item's reopen countdown and its
+ * live-board visibility are meant to end together. If you change one,
+ * reconsider the other.
+ */
+const REOPEN_WINDOW_MS = 2 * 24 * 60 * 60 * 1000;
 
 @Injectable()
 export class WorkItemsService {
@@ -253,8 +259,8 @@ export class WorkItemsService {
   }
 
   /**
-   * Closes every ticket that has sat in `resolved` past the 3-day reopen
-   * window — called daily by `StudioResolvedCloserScheduler`, same shape as
+   * Closes every ticket that has sat in `resolved` past `REOPEN_WINDOW_MS`
+   * — called daily by `StudioResolvedCloserScheduler`, same shape as
    * `StudioDueSoonScheduler`'s own `run()`.
    */
   async closeExpiredResolved(): Promise<WorkItem[]> {
@@ -269,7 +275,7 @@ export class WorkItemsService {
     }
     const saved = await this.repo.save(expired);
     await Promise.all(
-      saved.map((item) => this.record(item.id, 'system', 'closed', { reason: 'auto_close_after_3_days' })),
+      saved.map((item) => this.record(item.id, 'system', 'closed', { reason: 'auto_close_after_reopen_window' })),
     );
     return saved;
   }
