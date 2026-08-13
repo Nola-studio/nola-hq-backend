@@ -129,11 +129,19 @@ export class AnalyticsService {
       (activityWhere as Record<string, unknown>).createdAt = createdFilter;
     }
 
+    // Fields whose fetch failed this call — the summary still returns a
+    // number for each (never undefined, the KPI cards expect one), but a
+    // failure must NOT be silently reported as if it were the real 0: the
+    // UI reads this to warn instead of showing e.g. "0 en retard" as if
+    // billing had confirmed nothing is overdue.
+    const summaryDegraded: string[] = [];
+
     const [tenantPage, invoiceSummary, activity, momoRows, ticketRows, kpis] =
       await Promise.all([
         this.tenants.list({ page: 1, limit: 1000 } as never),
         this.invoices.summary().catch((err: Error) => {
           this.logger.warn(`invoice summary failed: ${err?.message ?? err}`);
+          summaryDegraded.push('overdue_cdf');
           return {
             total: 0,
             paid_cdf: 0,
@@ -183,6 +191,10 @@ export class AnalyticsService {
         nps_avg: npsAvg,
         open_tickets: openTickets,
       },
+      // Names of `summary` fields whose source fetch failed this call — the
+      // value above is a zero placeholder, not a confirmed real 0. Empty
+      // when everything fetched cleanly.
+      summary_degraded: summaryDegraded,
       // Echo the applied window + which figures honour it, so the UI doesn't
       // render a "filtered" badge over numbers that are actually live.
       window: hasRange(range)
