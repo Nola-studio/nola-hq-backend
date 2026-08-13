@@ -83,4 +83,16 @@ export class TeamController {
   backfillHqAccess() {
     return this.svc.backfillHqAccessFromKeycloak();
   }
+
+  /**
+   * Creates a `team_members` row for any Keycloak user holding an `hq:*`
+   * realm role (real, enforced access) that has no row here at all — the
+   * gap `backfill-hq-access` doesn't cover, since that one only repairs
+   * existing rows. Manual repair action, never run automatically.
+   */
+  @Post('backfill-missing-members')
+  @HqRoles(HqRole.Owner)
+  backfillMissingMembers() {
+    return this.svc.backfillMissingMembers();
+  }
 }
