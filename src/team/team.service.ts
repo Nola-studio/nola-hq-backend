@@ -285,7 +285,11 @@ export class TeamService {
         avatar: deriveInitials(data.name),
         hue: Math.floor(Math.random() * 360),
         online: false,
-        country: data.country ?? 'CD',
+        // Stores what it's given — never guesses. An unset country lands as
+        // '' (same "unattributed, not invented" convention as
+        // tenants.service.ts's country resolution), surfaced as such in the
+        // UI rather than silently defaulted to a specific country.
+        country: data.country ?? '',
         perms: data.perms ?? [],
         hqAccess: data.hqAccess ?? 'viewer',
         notifyEmail: null,
