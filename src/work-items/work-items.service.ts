@@ -441,7 +441,15 @@ export class WorkItemsService implements OnModuleInit {
     await this.attachments.remove(attachment);
     // `.remove()` clears the primary key off `attachment` — capture `attachmentId` (the
     // param, never mutated) rather than `attachment.id`, which is `undefined` by this point.
-    await deleteAttachmentFile(attachmentId);
+    try {
+      await deleteAttachmentFile(attachmentId);
+    } catch (err) {
+      // The DB row is already gone at this point — a failed file delete shouldn't cost
+      // the audit entry below. Worst case is an orphaned file, which is recoverable.
+      this.logger.error(
+        `Échec de la suppression du fichier pour la pièce jointe ${attachmentId} (ticket ${id}): ${err instanceof Error ? err.message : err}`,
+      );
+    }
     await this.record(id, actor, 'attachment_removed', { attachmentId, originalName });
   }
 
