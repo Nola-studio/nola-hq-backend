@@ -315,6 +315,11 @@ export class WorkItemsService implements OnModuleInit {
     if (item.status === 'closed') item.closedAt = now;
   }
 
+  async listComments(id: number) {
+    await this.findOne(id);
+    return this.comments.find({ where: { workItemId: id }, order: { createdAt: 'ASC' } });
+  }
+
   async addComment(id: number, dto: AddWorkItemCommentDto, actor: string) {
     const item = await this.findOne(id);
     this.assertMutable(item);
@@ -397,9 +402,12 @@ export class WorkItemsService implements OnModuleInit {
     try {
       await saveAttachmentFile(saved.id, file.buffer);
     } catch (err) {
+      const attachmentId = saved.id;
       await this.attachments.remove(saved);
+      // Capture the id before .remove() — it clears the entity's primary key, same as
+      // the removeAttachment fix (see git history for that one's full explanation).
       this.logger.error(
-        `Échec de l'écriture de la pièce jointe ${saved.id} pour le ticket ${id}: ${err instanceof Error ? err.message : err}`,
+        `Échec de l'écriture de la pièce jointe ${attachmentId} pour le ticket ${id}: ${err instanceof Error ? err.message : err}`,
       );
       throw new InternalServerErrorException(
         "Échec de l'enregistrement de la pièce jointe — réessayez ou contactez le support si le problème persiste.",
@@ -432,9 +440,20 @@ export class WorkItemsService implements OnModuleInit {
     if (!attachment || attachment.workItemId !== id) {
       throw new NotFoundException(`Pièce jointe ${attachmentId} introuvable`);
     }
+    const originalName = attachment.originalName;
     await this.attachments.remove(attachment);
-    await deleteAttachmentFile(attachment.id);
-    await this.record(id, actor, 'attachment_removed', { attachmentId, originalName: attachment.originalName });
+    // `.remove()` clears the primary key off `attachment` — capture `attachmentId` (the
+    // param, never mutated) rather than `attachment.id`, which is `undefined` by this point.
+    try {
+      await deleteAttachmentFile(attachmentId);
+    } catch (err) {
+      // The DB row is already gone at this point — a failed file delete shouldn't cost
+      // the audit entry below. Worst case is an orphaned file, which is recoverable.
+      this.logger.error(
+        `Échec de la suppression du fichier pour la pièce jointe ${attachmentId} (ticket ${id}): ${err instanceof Error ? err.message : err}`,
+      );
+    }
+    await this.record(id, actor, 'attachment_removed', { attachmentId, originalName });
   }
 
   private record(

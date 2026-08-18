@@ -16,6 +16,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { MAX_ATTACHMENT_BYTES } from '../work-items/work-item-attachment-storage';
+import { AddWorkItemCommentDto } from '../work-items/dto/work-item.dto';
 import { StudioProjectsProxyService } from './studio-projects-proxy.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
@@ -142,6 +143,22 @@ export class StudioProjectsProxyController {
   @HqRoles(HqRole.Operator)
   async removeTask(@Param('id') id: string) {
     await this.svc.removeTask(id);
+  }
+
+  @Get('tasks/:id/comments')
+  @HqRoles(HqRole.Viewer)
+  listComments(@Param('id') id: string) {
+    return this.svc.listComments(id);
+  }
+
+  @Post('tasks/:id/comments')
+  @HqRoles(HqRole.Operator)
+  addComment(
+    @Param('id') id: string,
+    @Body() dto: AddWorkItemCommentDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.svc.addComment(id, dto, user.email);
   }
 
   @Get('tasks/:id/attachments')

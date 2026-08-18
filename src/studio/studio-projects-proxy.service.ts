@@ -25,7 +25,7 @@ import { MoveTaskDto } from './dto/move-task.dto';
 import { ListTasksDto } from './dto/list-tasks.dto';
 import { SearchTasksDto } from './dto/search-tasks.dto';
 import { ListStudioProjectsDto } from './dto/list-studio-projects.dto';
-import type { ListWorkItemsDto } from '../work-items/dto/work-item.dto';
+import type { AddWorkItemCommentDto, ListWorkItemsDto } from '../work-items/dto/work-item.dto';
 
 /**
  * How far back the live board looks for `closed` cards — older ones stay in
@@ -352,6 +352,14 @@ export class StudioProjectsProxyService {
 
   async removeTask(id: string) {
     await this.tasks.delete(this.parseId(id));
+  }
+
+  listComments(id: string) {
+    return this.workItems.listComments(this.parseId(id));
+  }
+
+  addComment(id: string, dto: AddWorkItemCommentDto, actor: string) {
+    return this.workItems.addComment(this.parseId(id), dto, actor);
   }
 
   listAttachments(id: string) {
