@@ -315,6 +315,11 @@ export class WorkItemsService implements OnModuleInit {
     if (item.status === 'closed') item.closedAt = now;
   }
 
+  async listComments(id: number) {
+    await this.findOne(id);
+    return this.comments.find({ where: { workItemId: id }, order: { createdAt: 'ASC' } });
+  }
+
   async addComment(id: number, dto: AddWorkItemCommentDto, actor: string) {
     const item = await this.findOne(id);
     this.assertMutable(item);
