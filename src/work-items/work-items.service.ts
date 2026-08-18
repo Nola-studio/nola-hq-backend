@@ -402,9 +402,12 @@ export class WorkItemsService implements OnModuleInit {
     try {
       await saveAttachmentFile(saved.id, file.buffer);
     } catch (err) {
+      const attachmentId = saved.id;
       await this.attachments.remove(saved);
+      // Capture the id before .remove() — it clears the entity's primary key, same as
+      // the removeAttachment fix (see git history for that one's full explanation).
       this.logger.error(
-        `Échec de l'écriture de la pièce jointe ${saved.id} pour le ticket ${id}: ${err instanceof Error ? err.message : err}`,
+        `Échec de l'écriture de la pièce jointe ${attachmentId} pour le ticket ${id}: ${err instanceof Error ? err.message : err}`,
       );
       throw new InternalServerErrorException(
         "Échec de l'enregistrement de la pièce jointe — réessayez ou contactez le support si le problème persiste.",
