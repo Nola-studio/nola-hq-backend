@@ -10,7 +10,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
 import { TeamMember, type TeamHqAccessLevel } from './team-member.entity';
-import { KeycloakAdminService } from '../directory/keycloak-admin.service';
+import { KeycloakAdminService, type KcUser } from '../directory/keycloak-admin.service';
 import { generateTempPassword } from './temp-password.util';
 import type { HqAccessLevel } from './dto/invite-team-member.dto';
 
@@ -189,6 +189,78 @@ export class TeamService {
   }
 
   /**
+   * Owner-only, idempotent, manual (never run on boot): `backfillHqAccessFromKeycloak`
+   * only repairs members that already have a `team_members` row. This covers the
+   * other gap — a Keycloak user holding an `hq:*` realm role (real, enforced
+   * access via `HqRolesGuard`) with no `team_members` row at all, e.g. an
+   * account provisioned directly in Keycloak outside the `/team` invite flow.
+   * Such a user is fully authorized but invisible on the Team page, since
+   * `findAll()` only reads this table.
+   *
+   * For each `hq:*` role, strongest first, lists every Keycloak user holding
+   * it directly (`usersWithRealmRole` — composites not expanded, matching
+   * `userRealmRoles`'s own scope) and creates a row for any not already
+   * present here, populated from their Keycloak claims. A user with no email
+   * on their Keycloak account can't get a row (email is unique/required) and
+   * is reported `skipped`, never guessed. Country is left unattributed
+   * (`''`, same convention as `tenants.service.ts`) since Keycloak doesn't
+   * carry it — never defaulted to a specific country.
+   */
+  async backfillMissingMembers() {
+    if (!this.kc.isConfigured()) {
+      throw new BadRequestException('Keycloak admin non configuré — rien à synchroniser.');
+    }
+    const realm = this.hqRealm();
+    const existingEmails = new Set(
+      (await this.repo.find()).map((m) => m.email.toLowerCase()),
+    );
+
+    const byEmail = new Map<string, { user: KcUser; level: TeamHqAccessLevel }>();
+    for (const level of ['owner', 'operator', 'viewer'] as const) {
+      const users = await this.kc.usersWithRealmRole(realm, HQ_ACCESS_TO_REALM_ROLE[level]);
+      for (const user of users) {
+        const email = user.email?.toLowerCase();
+        if (!email || byEmail.has(email)) continue; // strongest role already recorded
+        byEmail.set(email, { user, level });
+      }
+    }
+
+    const created: string[] = [];
+    const skipped: string[] = [];
+    for (const [email, { user, level }] of byEmail) {
+      if (existingEmails.has(email)) continue; // already has a team_members row
+      if (!user.email) {
+        skipped.push(`kc user ${user.id} holds ${HQ_ACCESS_TO_REALM_ROLE[level]} but has no email`);
+        continue;
+      }
+      const name = [user.firstName, user.lastName].filter(Boolean).join(' ').trim() || user.email;
+      const saved = await this.repo.save(
+        this.repo.create({
+          id: deriveId(user.email),
+          name,
+          email: user.email,
+          role: '',
+          tag: '',
+          avatar: deriveInitials(name),
+          hue: Math.floor(Math.random() * 360),
+          online: false,
+          country: '',
+          perms: [],
+          hqAccess: level,
+          notifyEmail: null,
+          lastLoginAt: null,
+          passwordHash: undefined,
+        }),
+      );
+      this.logger.log(
+        `backfillMissingMembers: created team_members row for ${saved.email} (hqAccess=${level}, source=Keycloak realm role)`,
+      );
+      created.push(saved.email);
+    }
+    return { created, skipped };
+  }
+
+  /**
    * Invite un nouveau membre HQ. Crée la row `team_members` (profil affichable)
    * PUIS provisionne automatiquement le compte Keycloak (realm `nola-hq`) :
    * création du compte, mot de passe temporaire (à changer à la 1ʳᵉ connexion)
@@ -203,23 +275,21 @@ export class TeamService {
         `Un membre avec l'email ${data.email} existe déjà`,
       );
     }
-    const id = data.email.split('@')[0]?.replace(/[^a-z0-9]+/gi, '') || `m${Date.now()}`;
-    const initials = data.name
-      .split(/\s+/)
-      .map((w) => w[0]?.toUpperCase() ?? '')
-      .join('')
-      .slice(0, 2);
     const saved = await this.repo.save(
       this.repo.create({
-        id,
+        id: deriveId(data.email),
         name: data.name,
         email: data.email,
         role: data.role,
         tag: data.tag ?? '',
-        avatar: initials || 'NA',
+        avatar: deriveInitials(data.name),
         hue: Math.floor(Math.random() * 360),
         online: false,
-        country: data.country ?? 'CD',
+        // Stores what it's given — never guesses. An unset country lands as
+        // '' (same "unattributed, not invented" convention as
+        // tenants.service.ts's country resolution), surfaced as such in the
+        // UI rather than silently defaulted to a specific country.
+        country: data.country ?? '',
         perms: data.perms ?? [],
         hqAccess: data.hqAccess ?? 'viewer',
         notifyEmail: null,
@@ -334,4 +404,19 @@ function stripPassword(m: TeamMember): Omit<TeamMember, 'passwordHash'> {
   const { passwordHash, ...rest } = m;
   void passwordHash;
   return rest;
+}
+
+/** Shared by `invite()` and `backfillMissingMembers()` — the row's primary key, derived from the email's local part. */
+function deriveId(email: string): string {
+  return email.split('@')[0]?.replace(/[^a-z0-9]+/gi, '') || `m${Date.now()}`;
+}
+
+/** Shared by `invite()` and `backfillMissingMembers()` — up to two initials for the avatar. */
+function deriveInitials(name: string): string {
+  const initials = name
+    .split(/\s+/)
+    .map((w) => w[0]?.toUpperCase() ?? '')
+    .join('')
+    .slice(0, 2);
+  return initials || 'NA';
 }

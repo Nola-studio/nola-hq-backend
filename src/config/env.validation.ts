@@ -13,10 +13,12 @@ export class EnvironmentVariables {
 
   @IsOptional() @IsString() DATABASE_URL?: string;
   @IsOptional() @IsString() DB_PATH?: string;
+  @IsOptional() @IsString() ATTACHMENTS_DIR?: string;
   @IsOptional() @IsString() NATS_URL?: string;
   @IsOptional() @IsString() NATS_USER?: string;
   @IsOptional() @IsString() NATS_PASS?: string;
   @IsOptional() @IsString() CORS_ORIGINS?: string;
+  @IsOptional() @IsString() SESSION_COOKIE_SECURE?: string;
   @IsOptional() @IsString() NODE_ENV?: string;
   @IsOptional() @IsString() PORT?: string;
   // Web Push (PWA) — optionnels : sans clés VAPID le push est simplement
@@ -55,6 +57,12 @@ export function validate(config: Record<string, unknown>) {
     }
     if (validated.SESSION_ENCRYPTION_KEY === PLACEHOLDER_SESSION_KEY) {
       problems.push('SESSION_ENCRYPTION_KEY is the all-zero dev placeholder — generate a real key (`openssl rand -base64 32`).');
+    }
+    if (validated.SESSION_COOKIE_SECURE !== 'true') {
+      problems.push('SESSION_COOKIE_SECURE must be "true" in production — the session cookie must not ship without Secure.');
+    }
+    if (!validated.ATTACHMENTS_DIR?.trim()) {
+      problems.push('ATTACHMENTS_DIR is required in production — the relative-path fallback lands on ephemeral container disk and loses attachments on every redeploy.');
     }
     if (problems.length) {
       throw new Error(

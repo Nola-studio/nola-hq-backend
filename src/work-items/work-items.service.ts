@@ -1,4 +1,13 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  GoneException,
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+  NotFoundException,
+  OnModuleInit,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { LessThanOrEqual, Repository } from 'typeorm';
 import { PaginationDto, type PaginatedResult } from '../common/dto/pagination.dto';
@@ -11,6 +20,7 @@ import {
   ALLOWED_ATTACHMENT_MIME_TYPES,
   MAX_ATTACHMENTS_PER_TICKET,
   MAX_ATTACHMENT_BYTES,
+  assertAttachmentsDirWritable,
   deleteAttachmentFile,
   readAttachmentFile,
   saveAttachmentFile,
@@ -52,11 +62,19 @@ const STATUS_TONES: Record<WorkItemStatus, string> = {
   closed: '#94A3B8',
 };
 
-/** How long a resolved ticket stays reopenable before the daily job closes it. */
-const REOPEN_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
+/**
+ * How long a resolved ticket stays reopenable before the daily job closes
+ * it. Intentionally kept equal to `BOARD_CLOSED_WINDOW_MS`
+ * (`studio-projects-proxy.service.ts`) — an item's reopen countdown and its
+ * live-board visibility are meant to end together. If you change one,
+ * reconsider the other.
+ */
+const REOPEN_WINDOW_MS = 2 * 24 * 60 * 60 * 1000;
 
 @Injectable()
-export class WorkItemsService {
+export class WorkItemsService implements OnModuleInit {
+  private readonly logger = new Logger(WorkItemsService.name);
+
   constructor(
     @InjectRepository(WorkItem)
     private readonly repo: Repository<WorkItem>,
@@ -75,6 +93,12 @@ export class WorkItemsService {
     private readonly push: PushService,
     private readonly planning: WorkPlanningService,
   ) {}
+
+  /** Fails boot rather than letting a bad `ATTACHMENTS_DIR` surface as a 500 on someone's first upload. */
+  async onModuleInit(): Promise<void> {
+    await assertAttachmentsDirWritable();
+    this.logger.log('Attachments directory is writable.');
+  }
 
   async list(query: ListWorkItemsDto): Promise<PaginatedResult<WorkItem>> {
     const page = query.page ?? 1;
@@ -253,8 +277,8 @@ export class WorkItemsService {
   }
 
   /**
-   * Closes every ticket that has sat in `resolved` past the 3-day reopen
-   * window — called daily by `StudioResolvedCloserScheduler`, same shape as
+   * Closes every ticket that has sat in `resolved` past `REOPEN_WINDOW_MS`
+   * — called daily by `StudioResolvedCloserScheduler`, same shape as
    * `StudioDueSoonScheduler`'s own `run()`.
    */
   async closeExpiredResolved(): Promise<WorkItem[]> {
@@ -269,7 +293,7 @@ export class WorkItemsService {
     }
     const saved = await this.repo.save(expired);
     await Promise.all(
-      saved.map((item) => this.record(item.id, 'system', 'closed', { reason: 'auto_close_after_3_days' })),
+      saved.map((item) => this.record(item.id, 'system', 'closed', { reason: 'auto_close_after_reopen_window' })),
     );
     return saved;
   }
@@ -374,7 +398,12 @@ export class WorkItemsService {
       await saveAttachmentFile(saved.id, file.buffer);
     } catch (err) {
       await this.attachments.remove(saved);
-      throw err;
+      this.logger.error(
+        `Échec de l'écriture de la pièce jointe ${saved.id} pour le ticket ${id}: ${err instanceof Error ? err.message : err}`,
+      );
+      throw new InternalServerErrorException(
+        "Échec de l'enregistrement de la pièce jointe — réessayez ou contactez le support si le problème persiste.",
+      );
     }
     await this.record(id, actor, 'attachment_added', { attachmentId: saved.id, originalName: saved.originalName });
     return saved;
@@ -385,8 +414,15 @@ export class WorkItemsService {
     if (!attachment || attachment.workItemId !== id) {
       throw new NotFoundException(`Pièce jointe ${attachmentId} introuvable`);
     }
-    const buffer = await readAttachmentFile(attachment.id);
-    return { attachment, buffer };
+    try {
+      const buffer = await readAttachmentFile(attachment.id);
+      return { attachment, buffer };
+    } catch (err) {
+      this.logger.error(
+        `Fichier manquant pour la pièce jointe ${attachment.id} (ticket ${id}): ${err instanceof Error ? err.message : err}`,
+      );
+      throw new GoneException('fichier indisponible');
+    }
   }
 
   async removeAttachment(id: number, attachmentId: string, actor: string) {

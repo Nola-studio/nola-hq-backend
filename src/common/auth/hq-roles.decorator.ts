@@ -11,8 +11,12 @@ export const HQ_ROLES_KEY = 'hqRoles';
  *   @HqRoles(HqRole.Operator)   ← operators + owners pass
  *   @HqRoles(HqRole.Owner)      ← only owners pass
  *
- * Reads (GET) generally stay open to any authenticated user. Apply
- * this decorator on mutating routes (PATCH/POST/DELETE) and on any
- * read that exposes secrets (impersonation tokens, raw audit logs, …).
+ * Most reads (GET) stay open to any authenticated user — apply this
+ * decorator on mutating routes (PATCH/POST/DELETE) by default. Two
+ * exceptions require it on GETs too: routes that expose secrets
+ * (impersonation tokens, raw audit logs, …), and routes that expose
+ * cross-tenant aggregates (MRR, invoice totals, tenant rosters — see
+ * AnalyticsController, and the gated routes in AppsController,
+ * HealthController, InvoicesController, SubscriptionsController).
  */
 export const HqRoles = (...roles: HqRole[]) => SetMetadata(HQ_ROLES_KEY, roles);

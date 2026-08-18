@@ -21,6 +21,7 @@ import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { MoveTaskDto } from './dto/move-task.dto';
 import { ListTasksDto } from './dto/list-tasks.dto';
+import { SearchTasksDto } from './dto/search-tasks.dto';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { ListStudioProjectsDto } from './dto/list-studio-projects.dto';
@@ -97,6 +98,18 @@ export class StudioProjectsProxyController {
   @ApiQuery({ name: 'late', required: false, type: Boolean })
   listTasks(@Query() query: ListTasksDto) {
     return this.svc.findAllTasks(query);
+  }
+
+  @Get('tasks/search')
+  @HqRoles(HqRole.Viewer)
+  @ApiOperation({ summary: 'Archive/search across every task regardless of age or board column — paginated' })
+  @ApiQuery({ name: 'q', required: false, type: String })
+  @ApiQuery({ name: 'status', required: false, type: String })
+  @ApiQuery({ name: 'project', required: false, type: String })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  searchTasks(@Query() query: SearchTasksDto) {
+    return this.svc.searchTasks(query);
   }
 
   @Get('tasks/:id')

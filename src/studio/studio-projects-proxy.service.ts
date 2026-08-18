@@ -23,7 +23,18 @@ import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { MoveTaskDto } from './dto/move-task.dto';
 import { ListTasksDto } from './dto/list-tasks.dto';
+import { SearchTasksDto } from './dto/search-tasks.dto';
 import { ListStudioProjectsDto } from './dto/list-studio-projects.dto';
+import type { ListWorkItemsDto } from '../work-items/dto/work-item.dto';
+
+/**
+ * How far back the live board looks for `closed` cards — older ones stay in
+ * the archive only (`searchTasks`). Intentionally kept equal to
+ * `REOPEN_WINDOW_MS` (`work-items.service.ts`) — an item's reopen countdown
+ * and its live-board visibility are meant to end together. If you change
+ * one, reconsider the other.
+ */
+const BOARD_CLOSED_WINDOW_MS = 2 * 24 * 60 * 60 * 1000;
 
 /** Studio's `high|medium|low` project priority → `RoadmapInitiative`'s `P0-P3`. */
 const PROJECT_PRIORITY_TO_ROADMAP: Record<StudioProjectPriority, RoadmapInitiativePriority> = {
@@ -199,11 +210,45 @@ export class StudioProjectsProxyService {
       qb.andWhere('w.dueDate < :today', { today: new Date().toISOString().slice(0, 10) });
       qb.andWhere('w.status NOT IN (:...doneStatuses)', { doneStatuses: ['resolved', 'closed'] });
     }
+    // This is the live board's fetch — dnd-kit's collision detection runs
+    // over every draggable/droppable on the board on each drag, so an
+    // ever-growing `closed` column degrades drag performance board-wide,
+    // not just in that column. Cap it to a recent window; anything older is
+    // still reachable via `searchTasks()`, just not part of the live board.
+    qb.andWhere('(w.status != :closedStatus OR w.closedAt >= :closedCutoff)', {
+      closedStatus: 'closed',
+      closedCutoff: new Date(Date.now() - BOARD_CLOSED_WINDOW_MS),
+    });
     qb.orderBy('w.status', 'ASC').addOrderBy('w.position', 'ASC').addOrderBy('w.createdAt', 'ASC');
 
     const rows = await qb.getMany();
     const emailById = await this.emailById();
     return rows.map((r) => this.toStudioTask(r, emailById));
+  }
+
+  /**
+   * Archive/search view — every task regardless of age or how long it's
+   * been closed, paginated. `findAllTasks()` (the live board) only shows
+   * `closed` cards from the last `BOARD_CLOSED_WINDOW_MS`; this is where an
+   * older one can still be found and opened. Delegates to
+   * `WorkItemsService.list()`, which was already paginated/searchable but
+   * unused by the board.
+   */
+  async searchTasks(query: SearchTasksDto) {
+    const result = await this.workItems.list({
+      page: query.page,
+      limit: query.limit,
+      q: query.q,
+      projectId: query.project,
+      status: query.status ? STUDIO_STATUS_TO_WORK_ITEM_STATUS[query.status] : undefined,
+    } as ListWorkItemsDto);
+    const emailById = await this.emailById();
+    return {
+      items: result.items.map((r) => this.toStudioTask(r, emailById)),
+      total: result.total,
+      page: result.page,
+      limit: result.limit,
+    };
   }
 
   async findOneTask(id: string) {

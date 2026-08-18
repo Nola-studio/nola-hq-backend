@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Ticket, TicketStatus } from './ticket.entity';
@@ -106,6 +106,14 @@ export class TicketsService {
 
   async setStatus(id: number, status: TicketStatus) {
     const ticket = await this.findOne(id);
+    // No Owner/admin override — a closed ticket is not reopenable by
+    // anyone, matching WorkItem.assertMutable()'s posture. Narrower than
+    // WorkItem's guard: this only blocks further *status* changes, not
+    // every mutation (replies/assignment on a closed ticket still go
+    // through unguarded).
+    if (ticket.status === 'closed') {
+      throw new ForbiddenException(`Ticket #${ticket.id} est fermé et ne peut plus changer de statut.`);
+    }
     ticket.status = status;
     ticket.updatedAt = new Date();
     return this.repo.save(ticket);

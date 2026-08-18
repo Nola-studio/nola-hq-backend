@@ -27,6 +27,7 @@ export class SubscriptionsController {
    * operator wants every active sub regardless of tenant.
    */
   @Get()
+  @HqRoles(HqRole.Viewer)
   @ApiQuery({ name: 'app', required: false, type: String })
   @ApiQuery({ name: 'status', required: false, type: String })
   @ApiQuery({ name: 'tenantId', required: false, type: String })

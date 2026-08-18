@@ -1,6 +1,8 @@
 import { BadRequestException, Controller, Get, Param, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { AppKind, AppsService } from './apps.service';
+import { HqRoles } from '../common/auth/hq-roles.decorator';
+import { HqRole } from '../common/auth/hq-role.enum';
 
 @ApiBearerAuth()
 @ApiTags('apps')
@@ -14,6 +16,7 @@ export class AppsController {
    * vs HQ Operations).
    */
   @Get()
+  @HqRoles(HqRole.Viewer)
   @ApiQuery({ name: 'kind', required: false, enum: ['app', 'service'] })
   list(@Query('kind') kind?: string) {
     if (kind && kind !== 'app' && kind !== 'service') {
