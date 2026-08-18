@@ -80,6 +80,7 @@ export const entities = [
   TenantCrm,
   Ticket,
   WorkItem,
+  WorkItemAttachment,
   WorkItemComment,
   WorkItemEvent,
   WorkItemSubtask,
