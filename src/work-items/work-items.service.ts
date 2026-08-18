@@ -437,9 +437,12 @@ export class WorkItemsService implements OnModuleInit {
     if (!attachment || attachment.workItemId !== id) {
       throw new NotFoundException(`Pièce jointe ${attachmentId} introuvable`);
     }
+    const originalName = attachment.originalName;
     await this.attachments.remove(attachment);
-    await deleteAttachmentFile(attachment.id);
-    await this.record(id, actor, 'attachment_removed', { attachmentId, originalName: attachment.originalName });
+    // `.remove()` clears the primary key off `attachment` — capture `attachmentId` (the
+    // param, never mutated) rather than `attachment.id`, which is `undefined` by this point.
+    await deleteAttachmentFile(attachmentId);
+    await this.record(id, actor, 'attachment_removed', { attachmentId, originalName });
   }
 
   private record(
