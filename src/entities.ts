@@ -50,6 +50,17 @@ import { ProjectTimeEntry } from './business/project-time-entry.entity';
 // Le registry des apps n'a PAS de table — c'est une projection in-memory
 // reconstruite à partir du JetStream NOLA_REGISTRY (cf. AppsService).
 // Aligné sur nola-studio/server.
+//
+// Every entity used in ANY module's `TypeOrmModule.forFeature([...])` MUST
+// also be listed here. `entities.ts` is what actually gets passed to
+// `TypeOrmModule.forRootAsync` in app.module.ts (both the Postgres prod
+// connection and the SQLite dev one) — that's what registers an entity's
+// metadata with the connection. `forFeature()` alone only requests a
+// repository provider for an entity the connection is assumed to already
+// know about; it registers nothing. Miss this and `@InjectRepository(...)`
+// fails at boot with "No metadata found" — this has already happened twice
+// (WorkItemAttachment, BusinessInvoiceLine). entities.spec.ts checks this
+// automatically; keep it green.
 export const entities = [
   ActivityEvent,
   AuditEntry,
