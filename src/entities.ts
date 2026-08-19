@@ -40,7 +40,8 @@ import { BusinessOpportunity } from './business/business-opportunity.entity';
 import { BusinessContract } from './business/business-contract.entity';
 import { ProjectBudget } from './business/project-budget.entity';
 import { BusinessExpense } from './business/business-expense.entity';
-import { BusinessInvoice } from './business/business-invoice.entity';
+import { BusinessInvoice, BusinessInvoiceLine } from './business/business-invoice.entity';
+import { BusinessNumberSequence } from './business/business-number-sequence.entity';
 import { BusinessQuote, BusinessQuoteLine } from './business/business-quote.entity';
 import { BusinessDocument } from './business/business-document.entity';
 import { BusinessReminder } from './business/business-reminder.entity';
@@ -93,6 +94,8 @@ export const entities = [
   ProjectBudget,
   BusinessExpense,
   BusinessInvoice,
+  BusinessInvoiceLine,
+  BusinessNumberSequence,
   BusinessQuote,
   BusinessQuoteLine,
   BusinessDocument,

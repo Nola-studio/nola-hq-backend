@@ -19,13 +19,18 @@ function makeRepo(overrides: Record<string, unknown> = {}) {
  * `createInvoice`/`updateInvoice` run inside `this.dataSource.transaction`,
  * grabbing repos off the transaction manager rather than the injected ones —
  * this fake mirrors that indirection so line/invoice saves land on the right
- * capture arrays for assertions.
+ * capture arrays for assertions. `connection`/`query` back `nextBusinessNumber`
+ * (see business-number-sequence.spec.ts for that function's own tests) —
+ * here it just needs to hand back an incrementing number without erroring.
  */
 function makeDataSource(invoiceRepo: any, lineRepo: any) {
+  let lastValue = 0;
   return {
     transaction: async (fn: (manager: any) => Promise<any>) =>
       fn({
         getRepository: (entity: unknown) => (entity === BusinessInvoiceLine ? lineRepo : invoiceRepo),
+        connection: { options: { type: 'postgres' } },
+        query: mock(async () => [{ last_value: ++lastValue }]),
       }),
   } as any;
 }

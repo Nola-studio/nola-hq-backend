@@ -6,6 +6,7 @@ import { BusinessContract } from './business-contract.entity';
 import { BusinessController } from './business.controller';
 import { BusinessExpense } from './business-expense.entity';
 import { BusinessInvoice, BusinessInvoiceLine } from './business-invoice.entity';
+import { BusinessNumberSequence } from './business-number-sequence.entity';
 import { BusinessOpportunity } from './business-opportunity.entity';
 import { BusinessService } from './business.service';
 import { ProjectBudget } from './project-budget.entity';
@@ -29,6 +30,7 @@ import { ProjectRisk } from '../work-items/project-risk.entity';
       BusinessExpense,
       BusinessInvoice,
       BusinessInvoiceLine,
+      BusinessNumberSequence,
       RoadmapInitiative,
       WorkItem,
       BusinessQuote,

@@ -12,6 +12,7 @@ import { ProjectTimeEntry } from './project-time-entry.entity';
 import { WorkItem, isDoneStatus } from '../work-items/work-item.entity';
 import { ProjectRisk } from '../work-items/project-risk.entity';
 import { BusinessDocument } from './business-document.entity';
+import { nextBusinessNumber } from './business-number-sequence';
 import { BusinessReminder } from './business-reminder.entity';
 import {
   BusinessInvoiceLineDto,
@@ -94,12 +95,6 @@ export class BusinessService {
     if (start && end && end < start) {
       throw new BadRequestException(`${label} doit être postérieure à la date de début.`);
     }
-  }
-
-  private makeNumber(prefix: 'CTR' | 'FAC') {
-    const date = new Date().toISOString().slice(0, 10).replaceAll('-', '');
-    const suffix = Math.random().toString(36).slice(2, 8).toUpperCase();
-    return `${prefix}-${date}-${suffix}`;
   }
 
   private invoiceLineTotals(lines: BusinessInvoiceLineDto[]) {
@@ -230,7 +225,7 @@ export class BusinessService {
     if (dto.projectId) await this.project(dto.projectId);
     if (dto.opportunityId) await this.assertOpportunity(dto.opportunityId, dto.clientId, dto.projectId);
     this.assertDates(dto.startDate, dto.endDate);
-    const number = dto.number?.trim() || this.makeNumber('CTR');
+    const number = dto.number?.trim() || (await nextBusinessNumber(this.dataSource.manager, 'CTR'));
     if (await this.contracts.findOne({ where: { number } })) throw new ConflictException(`Le contrat ${number} existe déjà.`);
     const now = new Date();
     return this.contracts.save(this.contracts.create({
@@ -383,11 +378,13 @@ export class BusinessService {
     } else if (taxRate > 0) {
       throw new BadRequestException('Le taux de taxe nécessite des lignes détaillées.');
     }
-    const number = dto.number?.trim() || this.makeNumber('FAC');
-    if (await this.invoices.findOne({ where: { number } })) throw new ConflictException(`La facture ${number} existe déjà.`);
+    if (dto.number?.trim() && await this.invoices.findOne({ where: { number: dto.number.trim() } })) {
+      throw new ConflictException(`La facture ${dto.number.trim()} existe déjà.`);
+    }
     const now = new Date();
     const status = this.paymentStatus(dto.status ?? 'draft', dto.amountCdf, paid);
     const id = await this.dataSource.transaction(async (manager) => {
+      const number = dto.number?.trim() || (await nextBusinessNumber(manager, 'FAC'));
       const invoiceRepo = manager.getRepository(BusinessInvoice);
       const lineRepo = manager.getRepository(BusinessInvoiceLine);
       const invoice = await invoiceRepo.save(invoiceRepo.create({
