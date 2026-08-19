@@ -1,9 +1,13 @@
 import { PartialType } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
   IsEmail,
   IsIn,
   IsInt,
+  IsNumber,
   IsOptional,
   IsString,
   IsUUID,
@@ -12,6 +16,7 @@ import {
   MaxLength,
   Min,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
 import { BUSINESS_CLIENT_STATUSES, type BusinessClientStatus } from '../business-client.entity';
 import { BUSINESS_CONTRACT_STATUSES, type BusinessContractStatus } from '../business-contract.entity';
@@ -95,6 +100,12 @@ export class CreateBusinessExpenseDto {
 
 export class UpdateBusinessExpenseDto extends PartialType(CreateBusinessExpenseDto) {}
 
+export class BusinessInvoiceLineDto {
+  @IsString() @MinLength(2) @MaxLength(240) description!: string;
+  @Type(() => Number) @IsNumber({ maxDecimalPlaces: 2 }) @Min(0.01) @Max(1_000_000) quantity!: number;
+  @Type(() => Number) @IsInt() @Min(0) @Max(MAX_MONEY) unitPriceCdf!: number;
+}
+
 export class CreateBusinessInvoiceDto {
   @IsOptional() @IsString() @MaxLength(64) number?: string;
   @IsUUID() clientId!: string;
@@ -107,6 +118,8 @@ export class CreateBusinessInvoiceDto {
   @Matches(DATE_PATTERN) dueOn!: string;
   @IsOptional() @IsIn(BUSINESS_INVOICE_STATUSES as unknown as string[]) status?: BusinessInvoiceStatus;
   @IsOptional() @IsString() @MaxLength(5_000) description?: string;
+  @IsOptional() @IsArray() @ArrayMinSize(1) @ArrayMaxSize(200) @ValidateNested({ each: true }) @Type(() => BusinessInvoiceLineDto)
+  lines?: BusinessInvoiceLineDto[];
 }
 
 export class UpdateBusinessInvoiceDto extends PartialType(CreateBusinessInvoiceDto) {}

@@ -31,18 +31,48 @@ export class BusinessPdfService {
       doc.fillColor(INK).font('Helvetica-Bold').fontSize(15).text(invoice.description || `Prestations ${LEGAL_ENTITY.name}`, 50, 225);
       doc.fillColor(MUTE).font('Helvetica').fontSize(9).text(`Projet : ${invoice.project?.title ?? 'Non renseigné'}`, 50, 248);
       doc.text(`Échéance : ${this.date(invoice.dueOn)}`, 50, 263);
-      const y = 305;
-      doc.fillColor(GREEN).rect(50, y, 495, 28).fill();
-      doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(9).text('DESCRIPTION', 62, y + 10);
-      doc.text('MONTANT', 430, y + 10, { width: 103, align: 'right' });
-      doc.fillColor(INK).font('Helvetica').fontSize(10).text(invoice.description || 'Prestations et services', 62, y + 44, { width: 335 });
-      doc.font('Helvetica-Bold').text(this.money(invoice.amountCdf, invoice.currency), 430, y + 44, { width: 103, align: 'right' });
-      doc.strokeColor(LINE).moveTo(50, y + 70).lineTo(545, y + 70).stroke();
-      this.totals(doc, invoice.amountCdf, 0, invoice.amountCdf, 0, invoice.currency, y + 95);
-      doc.fillColor(MUTE).font('Helvetica').fontSize(9).text(`Montant paye : ${this.money(invoice.paidAmountCdf, invoice.currency)}`, 50, y + 178);
-      doc.text(`Solde : ${this.money(Math.max(0, invoice.amountCdf - invoice.paidAmountCdf), invoice.currency)}`, 50, y + 194);
+      const totalsY = (invoice.lines?.length ?? 0) > 0 ? this.invoiceLineTable(doc, invoice) : this.invoiceSingleRow(doc, invoice);
+      this.totals(doc, invoice.amountCdf, 0, invoice.amountCdf, 0, invoice.currency, totalsY);
+      doc.fillColor(MUTE).font('Helvetica').fontSize(9).text(`Montant paye : ${this.money(invoice.paidAmountCdf, invoice.currency)}`, 50, totalsY + 83);
+      doc.text(`Solde : ${this.money(Math.max(0, invoice.amountCdf - invoice.paidAmountCdf), invoice.currency)}`, 50, totalsY + 99);
       this.footer(doc, invoice.number);
     });
+  }
+
+  private invoiceSingleRow(doc: PDFKit.PDFDocument, invoice: BusinessInvoice) {
+    const y = 305;
+    doc.fillColor(GREEN).rect(50, y, 495, 28).fill();
+    doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(9).text('DESCRIPTION', 62, y + 10);
+    doc.text('MONTANT', 430, y + 10, { width: 103, align: 'right' });
+    doc.fillColor(INK).font('Helvetica').fontSize(10).text(invoice.description || 'Prestations et services', 62, y + 44, { width: 335 });
+    doc.font('Helvetica-Bold').text(this.money(invoice.amountCdf, invoice.currency), 430, y + 44, { width: 103, align: 'right' });
+    doc.strokeColor(LINE).moveTo(50, y + 70).lineTo(545, y + 70).stroke();
+    return y + 95;
+  }
+
+  private invoiceLineTable(doc: PDFKit.PDFDocument, invoice: BusinessInvoice) {
+    let y = 285;
+    const header = () => {
+      doc.fillColor(GREEN).rect(50, y, 495, 28).fill();
+      doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(8)
+        .text('DESCRIPTION', 62, y + 10, { width: 230 })
+        .text('QTÉ', 305, y + 10, { width: 45, align: 'right' })
+        .text('PRIX UNITAIRE', 360, y + 10, { width: 80, align: 'right' })
+        .text('TOTAL', 450, y + 10, { width: 83, align: 'right' });
+      y += 38;
+    };
+    header();
+    for (const line of invoice.lines ?? []) {
+      const rowHeight = Math.max(31, doc.heightOfString(line.description, { width: 230 }) + 12);
+      if (y + rowHeight > 690) { doc.addPage(); y = 60; header(); }
+      doc.fillColor(INK).font('Helvetica').fontSize(9).text(line.description, 62, y + 6, { width: 230 });
+      doc.text(String(line.quantity), 305, y + 6, { width: 45, align: 'right' });
+      doc.text(this.money(line.unitPriceCdf, invoice.currency), 360, y + 6, { width: 80, align: 'right' });
+      doc.font('Helvetica-Bold').text(this.money(line.totalCdf, invoice.currency), 450, y + 6, { width: 83, align: 'right' });
+      doc.strokeColor(LINE).moveTo(50, y + rowHeight).lineTo(545, y + rowHeight).stroke();
+      y += rowHeight;
+    }
+    return y + 18;
   }
 
   private build(draw: (doc: PDFKit.PDFDocument) => void): Promise<Buffer> {

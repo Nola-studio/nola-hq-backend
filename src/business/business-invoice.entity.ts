@@ -1,4 +1,4 @@
-import { Column, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
+import { Column, Entity, Index, JoinColumn, ManyToOne, OneToMany, PrimaryGeneratedColumn } from 'typeorm';
 import { RoadmapInitiative } from '../roadmap/roadmap-initiative.entity';
 import { BusinessClient } from './business-client.entity';
 import { BusinessContract } from './business-contract.entity';
@@ -73,9 +73,45 @@ export class BusinessInvoice {
   @Column({ type: 'text', nullable: true })
   description!: string | null;
 
+  @OneToMany(() => BusinessInvoiceLine, (line) => line.invoice)
+  lines?: BusinessInvoiceLine[];
+
   @Column({ name: 'created_at' })
   createdAt!: Date;
 
   @Column({ name: 'updated_at' })
   updatedAt!: Date;
+}
+
+/**
+ * Optional itemized breakdown for an invoice. When absent, the invoice
+ * renders its single `description` row as before — no flag, the data decides.
+ */
+@Entity('business_invoice_lines')
+export class BusinessInvoiceLine {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ type: 'uuid', name: 'invoice_id' })
+  @Index()
+  invoiceId!: string;
+
+  @ManyToOne(() => BusinessInvoice, (invoice) => invoice.lines, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'invoice_id' })
+  invoice?: BusinessInvoice;
+
+  @Column({ type: 'varchar', length: 240 })
+  description!: string;
+
+  @Column({ type: 'numeric', precision: 10, scale: 2, transformer: moneyTransformer })
+  quantity!: number;
+
+  @Column({ type: 'bigint', name: 'unit_price_cdf', transformer: moneyTransformer })
+  unitPriceCdf!: number;
+
+  @Column({ type: 'bigint', name: 'total_cdf', transformer: moneyTransformer })
+  totalCdf!: number;
+
+  @Column({ type: 'integer', default: 0 })
+  position!: number;
 }

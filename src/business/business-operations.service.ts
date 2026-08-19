@@ -191,6 +191,14 @@ export class BusinessOperationsService {
   async convertQuote(id: string, dto: ConvertQuoteToInvoiceDto) {
     const quote = await this.findQuote(id);
     if (!quote.projectId) throw new BadRequestException('Associe le devis à un projet avant de créer la facture.');
+    const lines = (quote.lines ?? []).map((line) => ({
+      description: line.description,
+      quantity: line.quantity,
+      unitPriceCdf: line.unitPriceCdf,
+    }));
+    if (quote.taxCdf > 0) {
+      lines.push({ description: `Taxe (${quote.taxRate}%)`, quantity: 1, unitPriceCdf: quote.taxCdf });
+    }
     const invoice = await this.business.createInvoice({
       clientId: quote.clientId,
       projectId: quote.projectId,
@@ -200,6 +208,7 @@ export class BusinessOperationsService {
       dueOn: dto.dueOn,
       status: dto.status ?? 'draft',
       description: `${quote.title} — devis ${quote.number}`,
+      lines: lines.length ? lines : undefined,
     });
     if (quote.status !== 'accepted') await this.updateQuote(id, { status: 'accepted' });
     return invoice;
@@ -212,9 +221,10 @@ export class BusinessOperationsService {
   async invoicePdf(id: string) {
     const invoice = await this.invoices.findOne({
       where: { id },
-      relations: { client: true, project: true, contract: true },
+      relations: { client: true, project: true, contract: true, lines: true },
     });
     if (!invoice) throw new NotFoundException(`Facture business ${id} introuvable`);
+    invoice.lines = [...(invoice.lines ?? [])].sort((a, b) => a.position - b.position);
     return this.pdf.invoice(invoice);
   }
 
