@@ -120,6 +120,8 @@ export class CreateBusinessInvoiceDto {
   @IsOptional() @IsString() @MaxLength(5_000) description?: string;
   @IsOptional() @IsArray() @ArrayMinSize(1) @ArrayMaxSize(200) @ValidateNested({ each: true }) @Type(() => BusinessInvoiceLineDto)
   lines?: BusinessInvoiceLineDto[];
+  @IsOptional() @Type(() => Number) @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(100) taxRate?: number;
+  @IsOptional() @IsString() @MaxLength(40) taxLabel?: string;
 }
 
 export class UpdateBusinessInvoiceDto extends PartialType(CreateBusinessInvoiceDto) {}

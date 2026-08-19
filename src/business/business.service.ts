@@ -113,6 +113,12 @@ export class BusinessService {
     return { normalized, total: normalized.reduce((sum, line) => sum + line.totalCdf, 0) };
   }
 
+  /** Tax only has a subtotal to apply against once lines exist — mirrors `BusinessQuote`'s totals(). */
+  private invoiceTax(subtotal: number, taxRate: number) {
+    const taxCdf = Math.round((subtotal * taxRate) / 100);
+    return { taxCdf, total: subtotal + taxCdf };
+  }
+
   listClients(status?: string) {
     return this.clients.find({
       ...(status ? { where: { status: status as BusinessClient['status'] } } : {}),
@@ -365,9 +371,17 @@ export class BusinessService {
     this.assertDates(dto.issuedOn, dto.dueOn, 'La date d’échéance');
     const paid = dto.paidAmountCdf ?? 0;
     if (paid > dto.amountCdf) throw new BadRequestException('Le montant payé ne peut pas dépasser le montant facturé.');
+    const taxRate = dto.taxRate ?? 0;
     const computedLines = dto.lines ? this.invoiceLineTotals(dto.lines) : null;
-    if (computedLines && computedLines.total !== dto.amountCdf) {
-      throw new BadRequestException('Le total des lignes ne correspond pas au montant facturé.');
+    let taxCdf = 0;
+    if (computedLines) {
+      const tax = this.invoiceTax(computedLines.total, taxRate);
+      taxCdf = tax.taxCdf;
+      if (tax.total !== dto.amountCdf) {
+        throw new BadRequestException('Le total des lignes et de la taxe ne correspond pas au montant facturé.');
+      }
+    } else if (taxRate > 0) {
+      throw new BadRequestException('Le taux de taxe nécessite des lignes détaillées.');
     }
     const number = dto.number?.trim() || this.makeNumber('FAC');
     if (await this.invoices.findOne({ where: { number } })) throw new ConflictException(`La facture ${number} existe déjà.`);
@@ -383,6 +397,9 @@ export class BusinessService {
         contractId: dto.contractId ?? null,
         amountCdf: dto.amountCdf,
         paidAmountCdf: paid,
+        taxRate,
+        taxCdf,
+        taxLabel: this.clean(dto.taxLabel),
         currency: dto.currency ?? DEFAULT_BUSINESS_CURRENCY,
         issuedOn: dto.issuedOn,
         dueOn: dto.dueOn,
@@ -416,15 +433,25 @@ export class BusinessService {
     const paid = dto.paidAmountCdf ?? item.paidAmountCdf;
     if (paid > amount) throw new BadRequestException('Le montant payé ne peut pas dépasser le montant facturé.');
     this.assertDates(dto.issuedOn ?? item.issuedOn, dto.dueOn ?? item.dueOn, 'La date d’échéance');
+    const taxRate = dto.taxRate ?? item.taxRate;
     const computedLines = dto.lines ? this.invoiceLineTotals(dto.lines) : null;
-    const existingLineTotal = item.lines?.length ? item.lines.reduce((sum, line) => sum + line.totalCdf, 0) : null;
-    const effectiveLineTotal = computedLines ? computedLines.total : existingLineTotal;
-    if (effectiveLineTotal !== null && effectiveLineTotal !== amount) {
-      throw new BadRequestException('Le total des lignes ne correspond pas au montant facturé.');
+    const existingSubtotal = item.lines?.length ? item.lines.reduce((sum, line) => sum + line.totalCdf, 0) : null;
+    const subtotal = computedLines ? computedLines.total : existingSubtotal;
+    let taxCdf = 0;
+    if (subtotal !== null) {
+      const tax = this.invoiceTax(subtotal, taxRate);
+      taxCdf = tax.taxCdf;
+      if (tax.total !== amount) {
+        throw new BadRequestException('Le total des lignes et de la taxe ne correspond pas au montant facturé.');
+      }
+    } else if (taxRate > 0) {
+      throw new BadRequestException('Le taux de taxe nécessite des lignes détaillées.');
     }
     const { lines: _ignoredLines, ...patch } = dto;
     void _ignoredLines;
     Object.assign(item, patch);
+    item.taxRate = taxRate;
+    item.taxCdf = taxCdf;
     item.status = this.paymentStatus(dto.status ?? item.status, amount, paid);
     item.paidAt = item.status === 'paid' ? item.paidAt ?? new Date() : null;
     item.updatedAt = new Date();

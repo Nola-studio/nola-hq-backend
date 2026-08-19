@@ -53,6 +53,18 @@ export class BusinessInvoice {
   @Column({ type: 'bigint', name: 'paid_amount_cdf', default: 0, transformer: moneyTransformer })
   paidAmountCdf!: number;
 
+  /** Percentage, entered manually by the operator — no jurisdiction-based lookup. */
+  @Column({ type: 'numeric', precision: 5, scale: 2, name: 'tax_rate', default: 0, transformer: moneyTransformer })
+  taxRate!: number;
+
+  /** Always derived server-side from `taxRate` against the lines subtotal — never a raw client input. */
+  @Column({ type: 'bigint', name: 'tax_cdf', default: 0, transformer: moneyTransformer })
+  taxCdf!: number;
+
+  /** e.g. "TPS/TVQ", "TVA" — falls back to a generic "Taxe" label on the PDF when unset. */
+  @Column({ type: 'varchar', length: 40, name: 'tax_label', nullable: true })
+  taxLabel!: string | null;
+
   /** One currency for both `amountCdf` and `paidAmountCdf` — they're the same money in two states. */
   @Column({ type: 'varchar', length: 3, default: DEFAULT_BUSINESS_CURRENCY })
   currency!: BusinessCurrency;

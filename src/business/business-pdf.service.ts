@@ -32,7 +32,8 @@ export class BusinessPdfService {
       doc.fillColor(MUTE).font('Helvetica').fontSize(9).text(`Projet : ${invoice.project?.title ?? 'Non renseigné'}`, 50, 248);
       doc.text(`Échéance : ${this.date(invoice.dueOn)}`, 50, 263);
       const totalsY = (invoice.lines?.length ?? 0) > 0 ? this.invoiceLineTable(doc, invoice) : this.invoiceSingleRow(doc, invoice);
-      this.totals(doc, invoice.amountCdf, 0, invoice.amountCdf, 0, invoice.currency, totalsY);
+      const subtotal = invoice.amountCdf - invoice.taxCdf;
+      this.totals(doc, subtotal, invoice.taxCdf, invoice.amountCdf, invoice.taxRate, invoice.currency, totalsY, invoice.taxLabel || 'Taxe');
       doc.fillColor(MUTE).font('Helvetica').fontSize(9).text(`Montant paye : ${this.money(invoice.paidAmountCdf, invoice.currency)}`, 50, totalsY + 83);
       doc.text(`Solde : ${this.money(Math.max(0, invoice.amountCdf - invoice.paidAmountCdf), invoice.currency)}`, 50, totalsY + 99);
       this.footer(doc, invoice.number);
@@ -129,10 +130,10 @@ export class BusinessPdfService {
     this.totals(doc, quote.subtotalCdf, quote.taxCdf, quote.totalCdf, quote.taxRate, quote.currency, y + 18);
   }
 
-  private totals(doc: PDFKit.PDFDocument, subtotal: number, tax: number, total: number, taxRate: number, currency: string, y = 520) {
+  private totals(doc: PDFKit.PDFDocument, subtotal: number, tax: number, total: number, taxRate: number, currency: string, y = 520, label = 'Taxe') {
     doc.fillColor(MUTE).font('Helvetica').fontSize(9).text('Sous-total', 350, y, { width: 90 });
     doc.fillColor(INK).text(this.money(subtotal, currency), 450, y, { width: 83, align: 'right' });
-    doc.fillColor(MUTE).text(`Taxe (${taxRate}%)`, 350, y + 19, { width: 90 });
+    doc.fillColor(MUTE).text(`${label} (${taxRate}%)`, 350, y + 19, { width: 90 });
     doc.fillColor(INK).text(this.money(tax, currency), 450, y + 19, { width: 83, align: 'right' });
     doc.fillColor(GREEN).rect(340, y + 42, 205, 34).fill();
     doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(10).text('TOTAL', 352, y + 54);

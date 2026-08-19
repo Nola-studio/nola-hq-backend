@@ -196,9 +196,6 @@ export class BusinessOperationsService {
       quantity: line.quantity,
       unitPriceCdf: line.unitPriceCdf,
     }));
-    if (quote.taxCdf > 0) {
-      lines.push({ description: `Taxe (${quote.taxRate}%)`, quantity: 1, unitPriceCdf: quote.taxCdf });
-    }
     const invoice = await this.business.createInvoice({
       clientId: quote.clientId,
       projectId: quote.projectId,
@@ -209,6 +206,7 @@ export class BusinessOperationsService {
       status: dto.status ?? 'draft',
       description: `${quote.title} — devis ${quote.number}`,
       lines: lines.length ? lines : undefined,
+      taxRate: quote.taxRate,
     });
     if (quote.status !== 'accepted') await this.updateQuote(id, { status: 'accepted' });
     return invoice;
