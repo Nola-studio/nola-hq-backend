@@ -6,9 +6,9 @@
  * admin). Les apps déclarées ici correspondent aux `AppId` connus
  * côté front (`kelasi`, `mycv`, `stock`, `vente`, `nola-hq`).
  *
- * Rename Kelasi → Yekoli : le realm Keycloak `kelasi` est renommé
- * `yekoli` (Phase 4). L'`AppId` reste `kelasi` jusqu'à la Phase 8 —
- * d'où l'entrée realm `yekoli` / apps `['kelasi']` ci-dessous.
+ * Rename Kelasi → Yekoli : le realm Keycloak est passé à `yekoli`
+ * (Phase 4) et l'app id l'a suivi (Phase 8, 2026-08-09) — realm et
+ * app portent donc le même nom.
  *
  * Convention tenants : chaque tenant = un *group* Keycloak sous
  * `/tenants/{tenantId}` dans son realm.
@@ -24,7 +24,7 @@ export const REALMS: RealmDef[] = [
   {
     id: 'yekoli',
     label: 'Yekoli',
-    apps: ['kelasi'],
+    apps: ['yekoli'],
     description: 'Écoles, profs et élèves (Yekoli)',
   },
   {

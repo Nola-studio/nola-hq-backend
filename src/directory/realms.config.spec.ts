@@ -2,10 +2,10 @@ import { test, expect, describe } from 'bun:test';
 import { REALMS, realmById, realmForApp } from './realms.config';
 
 /**
- * Phase 4 du rename Kelasi → Yekoli : le realm Keycloak `kelasi` est
- * renommé `yekoli`, mais l'AppId reste `kelasi` jusqu'à la Phase 8.
+ * Rename Kelasi → Yekoli achevé : le realm Keycloak (Phase 4) et l'app id
+ * (Phase 8, 2026-08-09) portent tous deux `yekoli`.
  */
-describe('realms.config (realm yekoli, app id kelasi)', () => {
+describe('realms.config (realm et app id yekoli)', () => {
   test('le realm yekoli existe et porte le libellé Yekoli', () => {
     const realm = realmById('yekoli');
     expect(realm).toBeDefined();
@@ -16,8 +16,12 @@ describe('realms.config (realm yekoli, app id kelasi)', () => {
     expect(realmById('kelasi')).toBeUndefined();
   });
 
-  test("l'app id kelasi (inchangé jusqu'à la Phase 8) résout vers le realm yekoli", () => {
-    expect(realmForApp('kelasi')?.id).toBe('yekoli');
+  test("l'app id yekoli résout vers le realm yekoli", () => {
+    expect(realmForApp('yekoli')?.id).toBe('yekoli');
+  });
+
+  test("l'ancien app id kelasi ne résout plus vers aucun realm", () => {
+    expect(realmForApp('kelasi')).toBeUndefined();
   });
 
   test('les ids de realm restent uniques', () => {
