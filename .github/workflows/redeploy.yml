@@ -1,0 +1,29 @@
+# Redéploiement MANUEL de secours (`railway up` explicite).
+#
+# Le chemin normal n'est PAS ici : Railway est connecté aux branches (avec
+# « Wait for CI ») et auto-déploie sur push. Ce workflow sert à forcer un
+# redéploiement sans nouveau commit, ou si l'intégration GitHub de Railway
+# est en panne.
+
+name: redeploy (secours)
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environnement Railway
+        type: choice
+        required: true
+        default: dev
+        options: [dev, production]
+
+jobs:
+  deploy:
+    uses: Nola-studio/infra/.github/workflows/deploy-service.yml@main
+    with:
+      project: Nola-Core
+      service: nola-hq-backend
+      environment: ${{ github.event.inputs.environment }}
+      gh_environment: ${{ github.event.inputs.environment == 'production' && 'production' || 'dev' }}
+      install_packages: false
+    secrets: inherit

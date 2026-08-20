@@ -1,7 +1,11 @@
-# Promotion PROD de nola-hq-backend : avance `main` sur `dev` (fast-forward
-# uniquement) puis déploie dans l'environnement Railway `production`.
-# Manuel uniquement. L'environment GitHub `production` porte le token Railway
-# prod et, si configuré, un gate d'approbation.
+# Promotion PROD : avance `main` sur `dev` (fast-forward uniquement).
+#
+# C'est TOUT ce que fait ce workflow : le déploiement lui-même revient à
+# l'intégration GitHub de Railway — le push sur `main` déclenche les checks
+# du repo (s'il y en a) et Railway, gaté par « Wait for CI », build une fois
+# tout au vert. L'environment GitHub `production` porte, si configuré, un
+# gate d'approbation. Si `main` a divergé de `dev`, le job échoue — passer
+# alors par une PR dev → main (même effet après merge).
 
 name: promote prod
 
@@ -24,19 +28,8 @@ jobs:
           git fetch origin dev main
           if git merge-base --is-ancestor origin/main origin/dev; then
             git push origin origin/dev:main
-            echo "main avancé sur $(git rev-parse --short origin/dev)"
+            echo "main avancé sur $(git rev-parse --short origin/dev) — Railway enchaîne."
           else
-            echo "::error::main a divergé de dev — passer par une PR dev → main puis relancer."
+            echo "::error::main a divergé de dev — passer par une PR dev → main."
             exit 1
           fi
-
-  deploy:
-    needs: avancer-main
-    uses: Nola-studio/infra/.github/workflows/deploy-service.yml@main
-    with:
-      project: Nola-Core
-      service: nola-hq-backend
-      environment: production
-      gh_environment: production
-      install_packages: false
-    secrets: inherit
