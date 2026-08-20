@@ -9,6 +9,7 @@ import {
   CreateBusinessExpenseDto,
   CreateBusinessInvoiceDto,
   CreateBusinessOpportunityDto,
+  MarkInvoicePaidDto,
   UpdateBusinessClientDto,
   UpdateBusinessContractDto,
   UpdateBusinessExpenseDto,
@@ -147,5 +148,17 @@ export class BusinessController {
   @HqRoles(HqRole.Operator)
   updateInvoice(@Param('id') id: string, @Body() dto: UpdateBusinessInvoiceDto) {
     return this.svc.updateInvoice(id, dto);
+  }
+
+  @Post('invoices/:id/mark-paid')
+  @HqRoles(HqRole.Operator)
+  markInvoicePaid(@Param('id') id: string, @Body() dto: MarkInvoicePaidDto) {
+    return this.svc.markPaid(id, dto);
+  }
+
+  @Post('invoices/:id/void-receipt')
+  @HqRoles(HqRole.Operator)
+  voidReceipt(@Param('id') id: string) {
+    return this.svc.voidReceipt(id);
   }
 }

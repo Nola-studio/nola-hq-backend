@@ -42,6 +42,7 @@ import { RoadmapModule } from './roadmap/roadmap.module';
 import { StudioModule } from './studio/studio.module';
 import { WorkItemsModule } from './work-items/work-items.module';
 import { BusinessModule } from './business/business.module';
+import { VerifyModule } from './verify/verify.module';
 
 import { entities } from './entities';
 import { validate } from './config/env.validation';
@@ -133,6 +134,7 @@ import { validate } from './config/env.validation';
     StudioModule,
     WorkItemsModule,
     BusinessModule,
+    VerifyModule,
   ],
   // Guards globaux dans l'ordre de chaîne :
   //   1. JwtAuthGuard — hydrate `req.user` depuis la session.

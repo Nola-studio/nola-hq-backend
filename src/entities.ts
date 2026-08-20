@@ -40,7 +40,8 @@ import { BusinessOpportunity } from './business/business-opportunity.entity';
 import { BusinessContract } from './business/business-contract.entity';
 import { ProjectBudget } from './business/project-budget.entity';
 import { BusinessExpense } from './business/business-expense.entity';
-import { BusinessInvoice } from './business/business-invoice.entity';
+import { BusinessInvoice, BusinessInvoiceLine } from './business/business-invoice.entity';
+import { BusinessNumberSequence } from './business/business-number-sequence.entity';
 import { BusinessQuote, BusinessQuoteLine } from './business/business-quote.entity';
 import { BusinessDocument } from './business/business-document.entity';
 import { BusinessReminder } from './business/business-reminder.entity';
@@ -49,6 +50,17 @@ import { ProjectTimeEntry } from './business/project-time-entry.entity';
 // Le registry des apps n'a PAS de table — c'est une projection in-memory
 // reconstruite à partir du JetStream NOLA_REGISTRY (cf. AppsService).
 // Aligné sur nola-studio/server.
+//
+// Every entity used in ANY module's `TypeOrmModule.forFeature([...])` MUST
+// also be listed here. `entities.ts` is what actually gets passed to
+// `TypeOrmModule.forRootAsync` in app.module.ts (both the Postgres prod
+// connection and the SQLite dev one) — that's what registers an entity's
+// metadata with the connection. `forFeature()` alone only requests a
+// repository provider for an entity the connection is assumed to already
+// know about; it registers nothing. Miss this and `@InjectRepository(...)`
+// fails at boot with "No metadata found" — this has already happened twice
+// (WorkItemAttachment, BusinessInvoiceLine). entities.spec.ts checks this
+// automatically; keep it green.
 export const entities = [
   ActivityEvent,
   AuditEntry,
@@ -93,6 +105,8 @@ export const entities = [
   ProjectBudget,
   BusinessExpense,
   BusinessInvoice,
+  BusinessInvoiceLine,
+  BusinessNumberSequence,
   BusinessQuote,
   BusinessQuoteLine,
   BusinessDocument,
