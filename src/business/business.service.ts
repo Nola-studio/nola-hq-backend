@@ -509,6 +509,18 @@ export class BusinessService {
     return this.findInvoice(id2);
   }
 
+  /** Voiding doesn't clear receiptNumber/verificationToken — the public verify endpoint still resolves them, just as "voided". */
+  async voidReceipt(id: string) {
+    const item = await this.invoices.findOne({ where: { id } });
+    if (!item) throw new NotFoundException(`Facture business ${id} introuvable`);
+    if (!item.receiptNumber) throw new BadRequestException('Cette facture n’a pas de reçu à annuler.');
+    if (item.receiptVoidedAt) throw new BadRequestException('Ce reçu est déjà annulé.');
+    item.receiptVoidedAt = new Date();
+    item.updatedAt = new Date();
+    await this.invoices.save(item);
+    return this.findInvoice(id);
+  }
+
   private async assertInvoiceContract(contractId: string, clientId: string, projectId: string) {
     const contract = await this.contract(contractId);
     if (contract.clientId !== clientId) throw new BadRequestException('La facture et le contrat doivent avoir le même client.');

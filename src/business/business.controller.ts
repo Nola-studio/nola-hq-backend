@@ -155,4 +155,10 @@ export class BusinessController {
   markInvoicePaid(@Param('id') id: string, @Body() dto: MarkInvoicePaidDto) {
     return this.svc.markPaid(id, dto);
   }
+
+  @Post('invoices/:id/void-receipt')
+  @HqRoles(HqRole.Operator)
+  voidReceipt(@Param('id') id: string) {
+    return this.svc.voidReceipt(id);
+  }
 }

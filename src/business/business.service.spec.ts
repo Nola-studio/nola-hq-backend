@@ -213,4 +213,30 @@ describe('BusinessService — markPaid / receipted-invoice lock', () => {
     const result = await svc.updateInvoice('inv-1', { description: 'Note updated' } as any);
     expect(result.description).toBe('Note updated');
   });
+
+  test('voidReceipt sets receiptVoidedAt but keeps receiptNumber/verificationToken resolvable', async () => {
+    const existing: Partial<BusinessInvoice> = {
+      id: 'inv-1', amountCdf: 1_000, paidAmountCdf: 1_000, status: 'paid',
+      receiptNumber: 'REC-2026-00001', verificationToken: 'tok-abc', receiptVoidedAt: null, lines: [],
+    };
+    const { svc } = makeService({ invoicesFindOne: (args: any) => (args.where?.id === 'inv-1' ? existing : null) });
+    const result = await svc.voidReceipt('inv-1');
+    expect(result.receiptVoidedAt).toBeInstanceOf(Date);
+    expect(result.receiptNumber).toBe('REC-2026-00001');
+    expect(result.verificationToken).toBe('tok-abc');
+  });
+
+  test('voidReceipt rejects an invoice with no receipt to void', async () => {
+    const existing: Partial<BusinessInvoice> = { id: 'inv-1', receiptNumber: null };
+    const { svc } = makeService({ invoicesFindOne: (args: any) => (args.where?.id === 'inv-1' ? existing : null) });
+    await expect(svc.voidReceipt('inv-1')).rejects.toThrow(BadRequestException);
+  });
+
+  test('voidReceipt rejects a receipt that is already voided', async () => {
+    const existing: Partial<BusinessInvoice> = {
+      id: 'inv-1', receiptNumber: 'REC-2026-00001', receiptVoidedAt: new Date('2026-08-12T00:00:00Z'),
+    };
+    const { svc } = makeService({ invoicesFindOne: (args: any) => (args.where?.id === 'inv-1' ? existing : null) });
+    await expect(svc.voidReceipt('inv-1')).rejects.toThrow(BadRequestException);
+  });
 });

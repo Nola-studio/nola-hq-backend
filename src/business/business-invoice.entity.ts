@@ -111,6 +111,10 @@ export class BusinessInvoice {
   @Column({ type: 'varchar', length: 64, name: 'verification_token', unique: true, nullable: true })
   verificationToken!: string | null;
 
+  /** Set by `voidReceipt()`. The token/number stay resolvable — verification reports "voided", not 404. */
+  @Column({ type: 'timestamp', name: 'receipt_voided_at', nullable: true })
+  receiptVoidedAt!: Date | null;
+
   @OneToMany(() => BusinessInvoiceLine, (line) => line.invoice)
   lines?: BusinessInvoiceLine[];
 
