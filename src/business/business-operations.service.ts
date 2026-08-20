@@ -8,6 +8,7 @@ import { BusinessContract } from './business-contract.entity';
 import { BusinessDocument } from './business-document.entity';
 import { BusinessExpense } from './business-expense.entity';
 import { BusinessInvoice } from './business-invoice.entity';
+import { nextBusinessNumber } from './business-number-sequence';
 import { BusinessOpportunity } from './business-opportunity.entity';
 import { BusinessPdfService } from './business-pdf.service';
 import { BusinessQuote, BusinessQuoteLine } from './business-quote.entity';
@@ -50,11 +51,6 @@ export class BusinessOperationsService {
 
   private clean(value?: string | null) {
     return value?.trim() || null;
-  }
-
-  private makeNumber(prefix: string) {
-    const date = new Date().toISOString().slice(0, 10).replaceAll('-', '');
-    return `${prefix}-${date}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
   }
 
   async listQuotes(projectId?: string) {
@@ -108,12 +104,14 @@ export class BusinessOperationsService {
   async createQuote(dto: CreateBusinessQuoteDto) {
     await this.assertQuoteLinks(dto.clientId, dto.projectId, dto.opportunityId);
     if (dto.validUntil < dto.issuedOn) throw new BadRequestException('La validité du devis doit être postérieure à sa date d’émission.');
-    const number = dto.number?.trim() || this.makeNumber('DEV');
-    if (await this.quotes.findOne({ where: { number } })) throw new ConflictException(`Le devis ${number} existe déjà.`);
+    if (dto.number?.trim() && await this.quotes.findOne({ where: { number: dto.number.trim() } })) {
+      throw new ConflictException(`Le devis ${dto.number.trim()} existe déjà.`);
+    }
     const taxRate = dto.taxRate ?? 0;
     const computed = this.totals(dto.lines, taxRate);
     const now = new Date();
     const id = await this.dataSource.transaction(async (manager) => {
+      const number = dto.number?.trim() || (await nextBusinessNumber(manager, 'DEV'));
       const quotes = manager.getRepository(BusinessQuote);
       const lines = manager.getRepository(BusinessQuoteLine);
       const quote = await quotes.save(quotes.create({
@@ -191,6 +189,11 @@ export class BusinessOperationsService {
   async convertQuote(id: string, dto: ConvertQuoteToInvoiceDto) {
     const quote = await this.findQuote(id);
     if (!quote.projectId) throw new BadRequestException('Associe le devis à un projet avant de créer la facture.');
+    const lines = (quote.lines ?? []).map((line) => ({
+      description: line.description,
+      quantity: line.quantity,
+      unitPriceCdf: line.unitPriceCdf,
+    }));
     const invoice = await this.business.createInvoice({
       clientId: quote.clientId,
       projectId: quote.projectId,
@@ -200,6 +203,8 @@ export class BusinessOperationsService {
       dueOn: dto.dueOn,
       status: dto.status ?? 'draft',
       description: `${quote.title} — devis ${quote.number}`,
+      lines: lines.length ? lines : undefined,
+      taxRate: quote.taxRate,
     });
     if (quote.status !== 'accepted') await this.updateQuote(id, { status: 'accepted' });
     return invoice;
@@ -212,10 +217,26 @@ export class BusinessOperationsService {
   async invoicePdf(id: string) {
     const invoice = await this.invoices.findOne({
       where: { id },
-      relations: { client: true, project: true, contract: true },
+      relations: { client: true, project: true, contract: true, lines: true },
     });
     if (!invoice) throw new NotFoundException(`Facture business ${id} introuvable`);
+    invoice.lines = [...(invoice.lines ?? [])].sort((a, b) => a.position - b.position);
     return this.pdf.invoice(invoice);
+  }
+
+  async receiptPdf(id: string) {
+    const invoice = await this.invoices.findOne({
+      where: { id },
+      relations: { client: true, project: true, contract: true, lines: true },
+    });
+    if (!invoice) throw new NotFoundException(`Facture business ${id} introuvable`);
+    if (!invoice.receiptNumber) {
+      throw new BadRequestException(
+        'Aucun reçu n’a été émis pour cette facture. Utilisez d’abord l’action « marquer payée ».',
+      );
+    }
+    invoice.lines = [...(invoice.lines ?? [])].sort((a, b) => a.position - b.position);
+    return this.pdf.receipt(invoice);
   }
 
   listDocuments(entityType?: BusinessDocument['entityType'], entityId?: string) {

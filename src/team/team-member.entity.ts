@@ -32,6 +32,14 @@ export class TeamMember {
   @Column({ length: 2 })
   country!: string;
 
+  /**
+   * Unused beyond storage/display — no guard anywhere reads this to gate
+   * access (only `hqAccess` is checked, via the `hq:*` Keycloak realm
+   * role). Kept on the entity and echoed in `/auth/me` for now (no
+   * migration), but the frontend no longer collects or displays it —
+   * a decorative permissions list on an access-control page reads as
+   * enforcement it isn't.
+   */
   @Column({ type: 'simple-json' })
   perms!: string[];
 

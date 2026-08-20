@@ -1,24 +1,28 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsWhere, Repository } from 'typeorm';
+import { randomBytes } from 'node:crypto';
+import { DataSource, FindOptionsWhere, Repository } from 'typeorm';
 import { RoadmapInitiative, type RoadmapInitiativeScope } from '../roadmap/roadmap-initiative.entity';
 import { BusinessClient } from './business-client.entity';
 import { BusinessContract } from './business-contract.entity';
 import { BusinessExpense } from './business-expense.entity';
-import { BusinessInvoice, type BusinessInvoiceStatus } from './business-invoice.entity';
+import { BusinessInvoice, BusinessInvoiceLine, type BusinessInvoiceStatus } from './business-invoice.entity';
 import { BusinessOpportunity } from './business-opportunity.entity';
 import { ProjectBudget } from './project-budget.entity';
 import { ProjectTimeEntry } from './project-time-entry.entity';
 import { WorkItem, isDoneStatus } from '../work-items/work-item.entity';
 import { ProjectRisk } from '../work-items/project-risk.entity';
 import { BusinessDocument } from './business-document.entity';
+import { nextBusinessNumber } from './business-number-sequence';
 import { BusinessReminder } from './business-reminder.entity';
 import {
+  BusinessInvoiceLineDto,
   CreateBusinessClientDto,
   CreateBusinessContractDto,
   CreateBusinessExpenseDto,
   CreateBusinessInvoiceDto,
   CreateBusinessOpportunityDto,
+  MarkInvoicePaidDto,
   UpdateBusinessClientDto,
   UpdateBusinessContractDto,
   UpdateBusinessExpenseDto,
@@ -45,12 +49,14 @@ export class BusinessService {
     @InjectRepository(ProjectBudget) private readonly budgets: Repository<ProjectBudget>,
     @InjectRepository(BusinessExpense) private readonly expenses: Repository<BusinessExpense>,
     @InjectRepository(BusinessInvoice) private readonly invoices: Repository<BusinessInvoice>,
+    @InjectRepository(BusinessInvoiceLine) private readonly invoiceLines: Repository<BusinessInvoiceLine>,
     @InjectRepository(RoadmapInitiative) private readonly projects: Repository<RoadmapInitiative>,
     @InjectRepository(ProjectTimeEntry) private readonly timeEntries: Repository<ProjectTimeEntry>,
     @InjectRepository(WorkItem) private readonly workItems: Repository<WorkItem>,
     @InjectRepository(ProjectRisk) private readonly risks: Repository<ProjectRisk>,
     @InjectRepository(BusinessDocument) private readonly documents: Repository<BusinessDocument>,
     @InjectRepository(BusinessReminder) private readonly reminders: Repository<BusinessReminder>,
+    private readonly dataSource: DataSource,
   ) {}
 
   private clean(value?: string | null) {
@@ -93,10 +99,21 @@ export class BusinessService {
     }
   }
 
-  private makeNumber(prefix: 'CTR' | 'FAC') {
-    const date = new Date().toISOString().slice(0, 10).replaceAll('-', '');
-    const suffix = Math.random().toString(36).slice(2, 8).toUpperCase();
-    return `${prefix}-${date}-${suffix}`;
+  private invoiceLineTotals(lines: BusinessInvoiceLineDto[]) {
+    const normalized = lines.map((line, position) => ({
+      description: line.description.trim(),
+      quantity: line.quantity,
+      unitPriceCdf: line.unitPriceCdf,
+      totalCdf: Math.round(line.quantity * line.unitPriceCdf),
+      position,
+    }));
+    return { normalized, total: normalized.reduce((sum, line) => sum + line.totalCdf, 0) };
+  }
+
+  /** Tax only has a subtotal to apply against once lines exist — mirrors `BusinessQuote`'s totals(). */
+  private invoiceTax(subtotal: number, taxRate: number) {
+    const taxCdf = Math.round((subtotal * taxRate) / 100);
+    return { taxCdf, total: subtotal + taxCdf };
   }
 
   listClients(status?: string) {
@@ -210,7 +227,7 @@ export class BusinessService {
     if (dto.projectId) await this.project(dto.projectId);
     if (dto.opportunityId) await this.assertOpportunity(dto.opportunityId, dto.clientId, dto.projectId);
     this.assertDates(dto.startDate, dto.endDate);
-    const number = dto.number?.trim() || this.makeNumber('CTR');
+    const number = dto.number?.trim() || (await nextBusinessNumber(this.dataSource.manager, 'CTR'));
     if (await this.contracts.findOne({ where: { number } })) throw new ConflictException(`Le contrat ${number} existe déjà.`);
     const now = new Date();
     return this.contracts.save(this.contracts.create({
@@ -325,10 +342,24 @@ export class BusinessService {
     if (clientId) where.clientId = clientId;
     const rows = await this.invoices.find({
       where,
-      relations: { client: true, project: true, contract: true },
+      relations: { client: true, project: true, contract: true, lines: true },
       order: { issuedOn: 'DESC', createdAt: 'DESC' },
     });
-    return rows.map((row) => ({ ...row, status: this.effectiveInvoiceStatus(row) }));
+    return rows.map((row) => ({
+      ...row,
+      status: this.effectiveInvoiceStatus(row),
+      lines: [...(row.lines ?? [])].sort((a, b) => a.position - b.position),
+    }));
+  }
+
+  async findInvoice(id: string) {
+    const invoice = await this.invoices.findOne({
+      where: { id },
+      relations: { client: true, project: true, contract: true, lines: true },
+    });
+    if (!invoice) throw new NotFoundException(`Facture business ${id} introuvable`);
+    invoice.lines = [...(invoice.lines ?? [])].sort((a, b) => a.position - b.position);
+    return invoice;
   }
 
   async createInvoice(dto: CreateBusinessInvoiceDto) {
@@ -337,31 +368,60 @@ export class BusinessService {
     this.assertDates(dto.issuedOn, dto.dueOn, 'La date d’échéance');
     const paid = dto.paidAmountCdf ?? 0;
     if (paid > dto.amountCdf) throw new BadRequestException('Le montant payé ne peut pas dépasser le montant facturé.');
-    const number = dto.number?.trim() || this.makeNumber('FAC');
-    if (await this.invoices.findOne({ where: { number } })) throw new ConflictException(`La facture ${number} existe déjà.`);
+    const taxRate = dto.taxRate ?? 0;
+    const computedLines = dto.lines ? this.invoiceLineTotals(dto.lines) : null;
+    let taxCdf = 0;
+    if (computedLines) {
+      const tax = this.invoiceTax(computedLines.total, taxRate);
+      taxCdf = tax.taxCdf;
+      if (tax.total !== dto.amountCdf) {
+        throw new BadRequestException('Le total des lignes et de la taxe ne correspond pas au montant facturé.');
+      }
+    } else if (taxRate > 0) {
+      throw new BadRequestException('Le taux de taxe nécessite des lignes détaillées.');
+    }
+    if (dto.number?.trim() && await this.invoices.findOne({ where: { number: dto.number.trim() } })) {
+      throw new ConflictException(`La facture ${dto.number.trim()} existe déjà.`);
+    }
     const now = new Date();
     const status = this.paymentStatus(dto.status ?? 'draft', dto.amountCdf, paid);
-    return this.invoices.save(this.invoices.create({
-      number,
-      clientId: dto.clientId,
-      projectId: dto.projectId,
-      contractId: dto.contractId ?? null,
-      amountCdf: dto.amountCdf,
-      paidAmountCdf: paid,
-      currency: dto.currency ?? DEFAULT_BUSINESS_CURRENCY,
-      issuedOn: dto.issuedOn,
-      dueOn: dto.dueOn,
-      paidAt: status === 'paid' ? now : null,
-      status,
-      description: this.clean(dto.description),
-      createdAt: now,
-      updatedAt: now,
-    }));
+    const id = await this.dataSource.transaction(async (manager) => {
+      const number = dto.number?.trim() || (await nextBusinessNumber(manager, 'FAC'));
+      const invoiceRepo = manager.getRepository(BusinessInvoice);
+      const lineRepo = manager.getRepository(BusinessInvoiceLine);
+      const invoice = await invoiceRepo.save(invoiceRepo.create({
+        number,
+        clientId: dto.clientId,
+        projectId: dto.projectId,
+        contractId: dto.contractId ?? null,
+        amountCdf: dto.amountCdf,
+        paidAmountCdf: paid,
+        taxRate,
+        taxCdf,
+        taxLabel: this.clean(dto.taxLabel),
+        currency: dto.currency ?? DEFAULT_BUSINESS_CURRENCY,
+        issuedOn: dto.issuedOn,
+        dueOn: dto.dueOn,
+        paidAt: status === 'paid' ? now : null,
+        status,
+        description: this.clean(dto.description),
+        createdAt: now,
+        updatedAt: now,
+      }));
+      if (computedLines) {
+        await lineRepo.save(computedLines.normalized.map((line) => lineRepo.create({ ...line, invoiceId: invoice.id })));
+      }
+      return invoice.id;
+    });
+    return this.findInvoice(id);
   }
 
   async updateInvoice(id: string, dto: UpdateBusinessInvoiceDto) {
-    const item = await this.invoices.findOne({ where: { id } });
+    const item = await this.invoices.findOne({ where: { id }, relations: { lines: true } });
     if (!item) throw new NotFoundException(`Facture business ${id} introuvable`);
+    if (item.receiptNumber && this.changesFinancials(item, dto)) {
+      throw new BadRequestException('Cette facture a déjà été reçue ; son montant ne peut plus être modifié.');
+    }
     const clientId = dto.clientId ?? item.clientId;
     const projectId = dto.projectId ?? item.projectId;
     const contractId = dto.contractId ?? item.contractId;
@@ -375,11 +435,90 @@ export class BusinessService {
     const paid = dto.paidAmountCdf ?? item.paidAmountCdf;
     if (paid > amount) throw new BadRequestException('Le montant payé ne peut pas dépasser le montant facturé.');
     this.assertDates(dto.issuedOn ?? item.issuedOn, dto.dueOn ?? item.dueOn, 'La date d’échéance');
-    Object.assign(item, dto);
+    const taxRate = dto.taxRate ?? item.taxRate;
+    const computedLines = dto.lines ? this.invoiceLineTotals(dto.lines) : null;
+    const existingSubtotal = item.lines?.length ? item.lines.reduce((sum, line) => sum + line.totalCdf, 0) : null;
+    const subtotal = computedLines ? computedLines.total : existingSubtotal;
+    let taxCdf = 0;
+    if (subtotal !== null) {
+      const tax = this.invoiceTax(subtotal, taxRate);
+      taxCdf = tax.taxCdf;
+      if (tax.total !== amount) {
+        throw new BadRequestException('Le total des lignes et de la taxe ne correspond pas au montant facturé.');
+      }
+    } else if (taxRate > 0) {
+      throw new BadRequestException('Le taux de taxe nécessite des lignes détaillées.');
+    }
+    const { lines: _ignoredLines, ...patch } = dto;
+    void _ignoredLines;
+    Object.assign(item, patch);
+    item.taxRate = taxRate;
+    item.taxCdf = taxCdf;
     item.status = this.paymentStatus(dto.status ?? item.status, amount, paid);
     item.paidAt = item.status === 'paid' ? item.paidAt ?? new Date() : null;
     item.updatedAt = new Date();
-    return this.invoices.save(item);
+    await this.dataSource.transaction(async (manager) => {
+      const invoiceRepo = manager.getRepository(BusinessInvoice);
+      const lineRepo = manager.getRepository(BusinessInvoiceLine);
+      await invoiceRepo.save(item);
+      if (dto.lines) {
+        await lineRepo.delete({ invoiceId: id });
+        await lineRepo.save(computedLines!.normalized.map((line) => lineRepo.create({ ...line, invoiceId: id })));
+      }
+    });
+    return this.findInvoice(id);
+  }
+
+  /** Once a receipt has been issued, the amounts it was computed from are frozen. */
+  private changesFinancials(item: BusinessInvoice, dto: UpdateBusinessInvoiceDto): boolean {
+    return (
+      (dto.amountCdf !== undefined && dto.amountCdf !== item.amountCdf) ||
+      (dto.paidAmountCdf !== undefined && dto.paidAmountCdf !== item.paidAmountCdf) ||
+      (dto.taxRate !== undefined && dto.taxRate !== item.taxRate) ||
+      dto.lines !== undefined
+    );
+  }
+
+  /**
+   * The single path to a receipted invoice — 1:1:1 (one payment = one
+   * invoice = one receipt). `updateInvoice`'s ordinary PATCH can still move
+   * `paidAmountCdf`/`status` around freely, but only this action mints the
+   * receipt number + verification token, and once minted `updateInvoice`
+   * refuses to touch the invoice's financial fields (see `changesFinancials`).
+   */
+  async markPaid(id: string, dto: MarkInvoicePaidDto) {
+    const item = await this.invoices.findOne({ where: { id } });
+    if (!item) throw new NotFoundException(`Facture business ${id} introuvable`);
+    if (item.status === 'cancelled') throw new BadRequestException('Une facture annulée ne peut pas être marquée payée.');
+    if (item.receiptNumber) throw new BadRequestException('Cette facture a déjà été marquée payée et reçue.');
+    const now = new Date();
+    const paidAt = dto.paidAt ? new Date(dto.paidAt) : now;
+    const id2 = await this.dataSource.transaction(async (manager) => {
+      const invoiceRepo = manager.getRepository(BusinessInvoice);
+      item.paidAmountCdf = item.amountCdf;
+      item.status = 'paid';
+      item.paidAt = paidAt;
+      item.paymentMethod = dto.paymentMethod;
+      item.paymentReference = this.clean(dto.paymentReference);
+      item.receiptNumber = await nextBusinessNumber(manager, 'REC', now);
+      item.verificationToken = randomBytes(24).toString('base64url');
+      item.updatedAt = now;
+      await invoiceRepo.save(item);
+      return item.id;
+    });
+    return this.findInvoice(id2);
+  }
+
+  /** Voiding doesn't clear receiptNumber/verificationToken — the public verify endpoint still resolves them, just as "voided". */
+  async voidReceipt(id: string) {
+    const item = await this.invoices.findOne({ where: { id } });
+    if (!item) throw new NotFoundException(`Facture business ${id} introuvable`);
+    if (!item.receiptNumber) throw new BadRequestException('Cette facture n’a pas de reçu à annuler.');
+    if (item.receiptVoidedAt) throw new BadRequestException('Ce reçu est déjà annulé.');
+    item.receiptVoidedAt = new Date();
+    item.updatedAt = new Date();
+    await this.invoices.save(item);
+    return this.findInvoice(id);
   }
 
   private async assertInvoiceContract(contractId: string, clientId: string, projectId: string) {

@@ -1,9 +1,14 @@
 import { PartialType } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
   IsEmail,
   IsIn,
   IsInt,
+  IsISO8601,
+  IsNumber,
   IsOptional,
   IsString,
   IsUUID,
@@ -12,11 +17,17 @@ import {
   MaxLength,
   Min,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
 import { BUSINESS_CLIENT_STATUSES, type BusinessClientStatus } from '../business-client.entity';
 import { BUSINESS_CONTRACT_STATUSES, type BusinessContractStatus } from '../business-contract.entity';
 import { BUSINESS_EXPENSE_STATUSES, type BusinessExpenseStatus } from '../business-expense.entity';
-import { BUSINESS_INVOICE_STATUSES, type BusinessInvoiceStatus } from '../business-invoice.entity';
+import {
+  BUSINESS_INVOICE_STATUSES,
+  BUSINESS_PAYMENT_METHODS,
+  type BusinessInvoiceStatus,
+  type BusinessPaymentMethod,
+} from '../business-invoice.entity';
 import { BUSINESS_OPPORTUNITY_STAGES, type BusinessOpportunityStage } from '../business-opportunity.entity';
 import { INITIATIVE_SCOPES } from '../../roadmap/dto/create-initiative.dto';
 import type { RoadmapInitiativeScope } from '../../roadmap/roadmap-initiative.entity';
@@ -95,6 +106,12 @@ export class CreateBusinessExpenseDto {
 
 export class UpdateBusinessExpenseDto extends PartialType(CreateBusinessExpenseDto) {}
 
+export class BusinessInvoiceLineDto {
+  @IsString() @MinLength(2) @MaxLength(240) description!: string;
+  @Type(() => Number) @IsNumber({ maxDecimalPlaces: 2 }) @Min(0.01) @Max(1_000_000) quantity!: number;
+  @Type(() => Number) @IsInt() @Min(0) @Max(MAX_MONEY) unitPriceCdf!: number;
+}
+
 export class CreateBusinessInvoiceDto {
   @IsOptional() @IsString() @MaxLength(64) number?: string;
   @IsUUID() clientId!: string;
@@ -107,9 +124,25 @@ export class CreateBusinessInvoiceDto {
   @Matches(DATE_PATTERN) dueOn!: string;
   @IsOptional() @IsIn(BUSINESS_INVOICE_STATUSES as unknown as string[]) status?: BusinessInvoiceStatus;
   @IsOptional() @IsString() @MaxLength(5_000) description?: string;
+  @IsOptional() @IsArray() @ArrayMinSize(1) @ArrayMaxSize(200) @ValidateNested({ each: true }) @Type(() => BusinessInvoiceLineDto)
+  lines?: BusinessInvoiceLineDto[];
+  @IsOptional() @Type(() => Number) @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(100) taxRate?: number;
+  @IsOptional() @IsString() @MaxLength(40) taxLabel?: string;
 }
 
 export class UpdateBusinessInvoiceDto extends PartialType(CreateBusinessInvoiceDto) {}
+
+/**
+ * The only way to reach a receipted invoice — mints receiptNumber +
+ * verificationToken server-side. Deliberately separate from
+ * UpdateBusinessInvoiceDto: payment method/reference are only meaningful at
+ * the moment of payment, not as freely-patchable invoice fields.
+ */
+export class MarkInvoicePaidDto {
+  @IsIn(BUSINESS_PAYMENT_METHODS as unknown as string[]) paymentMethod!: BusinessPaymentMethod;
+  @IsOptional() @IsString() @MaxLength(120) paymentReference?: string;
+  @IsOptional() @IsISO8601() paidAt?: string;
+}
 
 /**
  * GET /business/project-portfolio — omit `scope` to get every project row
