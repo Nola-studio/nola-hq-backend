@@ -155,6 +155,11 @@ export class IamEventsListener
           text: `Membership ré-accordé${personId ? ` — person ${personId.slice(0, 8)}…` : ''}`,
           ref: orgId,
         };
+      case 'person.linked':
+        return {
+          text: `Personne liée${name ? ` — ${name}` : ''}${personId ? ` (${personId.slice(0, 8)}…)` : ''}`,
+          ref: orgId ?? personId,
+        };
       default:
         return {
           text: `IAM ${eventTail}`,

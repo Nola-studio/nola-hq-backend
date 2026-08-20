@@ -14,6 +14,11 @@ import { UpdateTeamMemberDto } from './dto/update-team-member.dto';
 import { InviteTeamMemberDto } from './dto/invite-team-member.dto';
 import { HqRoles } from '../common/auth/hq-roles.decorator';
 import { HqRole } from '../common/auth/hq-role.enum';
+import { CurrentUser, type AuthenticatedUser } from '../common/auth/current-user.decorator';
+
+function actor(user?: AuthenticatedUser): string {
+  return user?.email ?? user?.sub ?? 'unknown';
+}
 
 @ApiBearerAuth()
 @ApiTags('team')
@@ -51,14 +56,43 @@ export class TeamController {
 
   @Patch(':id')
   @HqRoles(HqRole.Owner)
-  update(@Param('id') id: string, @Body() dto: UpdateTeamMemberDto) {
-    return this.svc.update(id, dto);
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateTeamMemberDto,
+    @CurrentUser() user?: AuthenticatedUser,
+  ) {
+    return this.svc.update(id, dto, actor(user));
   }
 
   @Delete(':id')
   @HqRoles(HqRole.Owner)
   @HttpCode(204)
-  async remove(@Param('id') id: string) {
-    await this.svc.remove(id);
+  async remove(@Param('id') id: string, @CurrentUser() user?: AuthenticatedUser) {
+    await this.svc.remove(id, actor(user));
+  }
+
+  /**
+   * Backfills `hqAccess` for every member that predates the column, by
+   * reading their current Keycloak realm roles. Idempotent — safe to call
+   * repeatedly (a no-op once every member is resolved). Never guesses: a
+   * member with no matching Keycloak account or no `hq:*` role there is
+   * reported `unresolved`, not defaulted.
+   */
+  @Post('backfill-hq-access')
+  @HqRoles(HqRole.Owner)
+  backfillHqAccess() {
+    return this.svc.backfillHqAccessFromKeycloak();
+  }
+
+  /**
+   * Creates a `team_members` row for any Keycloak user holding an `hq:*`
+   * realm role (real, enforced access) that has no row here at all — the
+   * gap `backfill-hq-access` doesn't cover, since that one only repairs
+   * existing rows. Manual repair action, never run automatically.
+   */
+  @Post('backfill-missing-members')
+  @HqRoles(HqRole.Owner)
+  backfillMissingMembers() {
+    return this.svc.backfillMissingMembers();
   }
 }

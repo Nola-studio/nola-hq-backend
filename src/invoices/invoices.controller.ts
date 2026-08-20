@@ -35,6 +35,7 @@ export class InvoicesController {
   }
 
   @Get('summary')
+  @HqRoles(HqRole.Viewer)
   summary() {
     return this.svc.summary();
   }

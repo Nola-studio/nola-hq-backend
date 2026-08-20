@@ -54,10 +54,11 @@ export class SnapshotsService implements OnApplicationBootstrap, OnModuleDestroy
   ) {}
 
   onApplicationBootstrap(): void {
-    // One capture shortly after boot (so a fresh deploy has today's point),
-    // then once a day. Errors are swallowed — a transient billing outage must
-    // not crash the app or stop future captures.
-    setTimeout(() => void this.captureDaily(), 3_000);
+    // No boot-time capture: this repo redeploys feature branches into a
+    // single live environment, and a capture 3s after boot raced NATS/billing
+    // warm-up on every deploy, upserting an empty/zero snapshot that then
+    // permanently overwrote that day's row (upsert key is
+    // [metricKey, date] — last write wins). Only the daily interval writes.
     this.timer = setInterval(() => void this.captureDaily(), DAY_MS);
   }
 
@@ -78,6 +79,19 @@ export class SnapshotsService implements OnApplicationBootstrap, OnModuleDestroy
   async captureDaily(): Promise<void> {
     try {
       const metrics = await this.currentMetrics();
+      // A resolved-but-empty tenant fetch is indistinguishable from a real
+      // all-zero day once it reaches `metrics` — skip it the same way a
+      // thrown error is skipped, rather than overwriting history with zeros.
+      // (Deliberately narrower than an "every metric is falsy" check: this
+      // repo's `open_tickets` count is independent of the tenant fetch, so
+      // that broader check both misses a tenants=0/tickets>0 corrupt payload
+      // and false-positives on a legitimate all-zero-except-tenants day.)
+      if (metrics.tenants === 0) {
+        this.logger.warn(
+          'Daily snapshot capture skipped: resolved zero tenants (fetch succeeded but returned an empty set)',
+        );
+        return;
+      }
       const date = dayKey(new Date());
       for (const key of METRIC_KEYS) {
         await this.repo.upsert(

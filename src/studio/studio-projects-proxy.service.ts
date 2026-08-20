@@ -1,6 +1,6 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsWhere, Not, Repository } from 'typeorm';
+import { FindOptionsWhere, In, Not, Repository } from 'typeorm';
 import {
   RoadmapInitiative,
   type RoadmapInitiativePriority,
@@ -8,6 +8,7 @@ import {
 } from '../roadmap/roadmap-initiative.entity';
 import { RoadmapService } from '../roadmap/roadmap.service';
 import { TeamMember } from '../team/team-member.entity';
+import { StudioNotifyService } from './studio-notify.service';
 import { WorkItem, type WorkItemStatus } from '../work-items/work-item.entity';
 import { WorkItemsService } from '../work-items/work-items.service';
 import {
@@ -22,7 +23,18 @@ import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { MoveTaskDto } from './dto/move-task.dto';
 import { ListTasksDto } from './dto/list-tasks.dto';
+import { SearchTasksDto } from './dto/search-tasks.dto';
 import { ListStudioProjectsDto } from './dto/list-studio-projects.dto';
+import type { AddWorkItemCommentDto, ListWorkItemsDto } from '../work-items/dto/work-item.dto';
+
+/**
+ * How far back the live board looks for `closed` cards — older ones stay in
+ * the archive only (`searchTasks`). Intentionally kept equal to
+ * `REOPEN_WINDOW_MS` (`work-items.service.ts`) — an item's reopen countdown
+ * and its live-board visibility are meant to end together. If you change
+ * one, reconsider the other.
+ */
+const BOARD_CLOSED_WINDOW_MS = 2 * 24 * 60 * 60 * 1000;
 
 /** Studio's `high|medium|low` project priority → `RoadmapInitiative`'s `P0-P3`. */
 const PROJECT_PRIORITY_TO_ROADMAP: Record<StudioProjectPriority, RoadmapInitiativePriority> = {
@@ -63,6 +75,7 @@ export class StudioProjectsProxyService {
     private readonly team: Repository<TeamMember>,
     private readonly roadmap: RoadmapService,
     private readonly workItems: WorkItemsService,
+    private readonly notify: StudioNotifyService,
   ) {}
 
   // ── projects ─────────────────────────────────────────────────────
@@ -129,7 +142,9 @@ export class StudioProjectsProxyService {
     const project = await this.findInitiative(id, 'project');
     if (project.archived) return this.toStudioProject(project);
 
-    const openCount = await this.tasks.count({ where: { projectId: id, status: Not('done') } });
+    const openCount = await this.tasks.count({
+      where: { projectId: id, status: Not(In(['resolved', 'closed'])) },
+    });
     if (openCount > 0) {
       throw new ConflictException(
         `Impossible d'archiver « ${project.keyPrefix ?? project.title} » : ${openCount} tâche(s) encore ouverte(s). Terminez-les ou déplacez-les d'abord.`,
@@ -193,13 +208,47 @@ export class StudioProjectsProxyService {
     }
     if (filter.late) {
       qb.andWhere('w.dueDate < :today', { today: new Date().toISOString().slice(0, 10) });
-      qb.andWhere('w.status != :done', { done: 'done' });
+      qb.andWhere('w.status NOT IN (:...doneStatuses)', { doneStatuses: ['resolved', 'closed'] });
     }
+    // This is the live board's fetch — dnd-kit's collision detection runs
+    // over every draggable/droppable on the board on each drag, so an
+    // ever-growing `closed` column degrades drag performance board-wide,
+    // not just in that column. Cap it to a recent window; anything older is
+    // still reachable via `searchTasks()`, just not part of the live board.
+    qb.andWhere('(w.status != :closedStatus OR w.closedAt >= :closedCutoff)', {
+      closedStatus: 'closed',
+      closedCutoff: new Date(Date.now() - BOARD_CLOSED_WINDOW_MS),
+    });
     qb.orderBy('w.status', 'ASC').addOrderBy('w.position', 'ASC').addOrderBy('w.createdAt', 'ASC');
 
     const rows = await qb.getMany();
     const emailById = await this.emailById();
     return rows.map((r) => this.toStudioTask(r, emailById));
+  }
+
+  /**
+   * Archive/search view — every task regardless of age or how long it's
+   * been closed, paginated. `findAllTasks()` (the live board) only shows
+   * `closed` cards from the last `BOARD_CLOSED_WINDOW_MS`; this is where an
+   * older one can still be found and opened. Delegates to
+   * `WorkItemsService.list()`, which was already paginated/searchable but
+   * unused by the board.
+   */
+  async searchTasks(query: SearchTasksDto) {
+    const result = await this.workItems.list({
+      page: query.page,
+      limit: query.limit,
+      q: query.q,
+      projectId: query.project,
+      status: query.status ? STUDIO_STATUS_TO_WORK_ITEM_STATUS[query.status] : undefined,
+    } as ListWorkItemsDto);
+    const emailById = await this.emailById();
+    return {
+      items: result.items.map((r) => this.toStudioTask(r, emailById)),
+      total: result.total,
+      page: result.page,
+      limit: result.limit,
+    };
   }
 
   async findOneTask(id: string) {
@@ -226,12 +275,36 @@ export class StudioProjectsProxyService {
       },
       createdByEmail,
     );
+    const notifyEmail = assignee ? await this.notifyEmailFor(assignee) : null;
+    void this.notify.taskCreated({
+      identifier: created.reference ?? String(created.id),
+      title: created.title,
+      assigneeEmail: notifyEmail,
+      dueDate: created.dueDate,
+    });
+    if (notifyEmail) {
+      void this.notify.taskAssigned({
+        identifier: created.reference ?? String(created.id),
+        title: created.title,
+        assigneeEmail: notifyEmail,
+        dueDate: created.dueDate,
+      });
+    }
     const emailById = await this.emailById();
     return this.toStudioTask(created, emailById);
   }
 
+  /** Where ticket notifications actually go for a `team_members.id` — falls back to the login `email`. */
+  private async notifyEmailFor(memberId: string): Promise<string | null> {
+    const member = await this.team.findOne({ where: { id: memberId } });
+    return member ? member.notifyEmail || member.email : null;
+  }
+
   async updateTask(id: string, dto: UpdateTaskDto, actor: string) {
     const workItemId = this.parseId(id);
+    const previous = dto.assigneeEmail !== undefined ? await this.findWorkItem(id) : null;
+    const previousAssigneeEmail =
+      previous?.assignee ? (await this.emailById()).get(previous.assignee) ?? null : null;
     const assignee =
       dto.assigneeEmail === undefined
         ? undefined
@@ -254,6 +327,17 @@ export class StudioProjectsProxyService {
       }),
       actor,
     );
+    if (dto.assigneeEmail && dto.assigneeEmail !== previousAssigneeEmail && assignee) {
+      const notifyEmail = await this.notifyEmailFor(assignee);
+      if (notifyEmail) {
+        void this.notify.taskAssigned({
+          identifier: updated.reference ?? String(updated.id),
+          title: updated.title,
+          assigneeEmail: notifyEmail,
+          dueDate: updated.dueDate,
+        });
+      }
+    }
     const emailById = await this.emailById();
     return this.toStudioTask(updated, emailById);
   }
@@ -268,6 +352,30 @@ export class StudioProjectsProxyService {
 
   async removeTask(id: string) {
     await this.tasks.delete(this.parseId(id));
+  }
+
+  listComments(id: string) {
+    return this.workItems.listComments(this.parseId(id));
+  }
+
+  addComment(id: string, dto: AddWorkItemCommentDto, actor: string) {
+    return this.workItems.addComment(this.parseId(id), dto, actor);
+  }
+
+  listAttachments(id: string) {
+    return this.workItems.listAttachments(this.parseId(id));
+  }
+
+  addAttachment(id: string, file: { originalname: string; mimetype: string; size: number; buffer: Buffer }, actor: string) {
+    return this.workItems.addAttachment(this.parseId(id), file, actor);
+  }
+
+  getAttachmentFile(id: string, attachmentId: string) {
+    return this.workItems.getAttachmentFile(this.parseId(id), attachmentId);
+  }
+
+  removeAttachment(id: string, attachmentId: string, actor: string) {
+    return this.workItems.removeAttachment(this.parseId(id), attachmentId, actor);
   }
 
   private async findWorkItem(id: string): Promise<WorkItem> {
@@ -315,6 +423,7 @@ export class StudioProjectsProxyService {
       createdByEmail: item.reporter,
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
+      resolvedAt: item.resolvedAt,
       completedAt: item.closedAt,
       position: item.position,
       hoursSpent: item.hoursSpent,

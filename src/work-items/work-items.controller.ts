@@ -8,11 +8,17 @@ import {
   Post,
   Query,
   Delete,
+  Res,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, type AuthenticatedUser } from '../common/auth/current-user.decorator';
 import { HqRole } from '../common/auth/hq-role.enum';
 import { HqRoles } from '../common/auth/hq-roles.decorator';
+import { MAX_ATTACHMENT_BYTES } from './work-item-attachment-storage';
 import {
   CreateWorkItemDto,
   ListWorkItemsDto,
@@ -123,6 +129,46 @@ export class WorkItemsController {
   @HqRoles(HqRole.Operator)
   removeDependency(@Param('id') id: string, @CurrentUser() user?: AuthenticatedUser) {
     return this.planning.removeDependency(id, actor(user));
+  }
+
+  @Get(':id/attachments')
+  @HqRoles(HqRole.Viewer)
+  listAttachments(@Param('id', ParseIntPipe) id: number) {
+    return this.svc.listAttachments(id);
+  }
+
+  @Post(':id/attachments')
+  @HqRoles(HqRole.Operator)
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_ATTACHMENT_BYTES } }))
+  uploadAttachment(
+    @Param('id', ParseIntPipe) id: number,
+    @UploadedFile() file: { originalname: string; mimetype: string; size: number; buffer: Buffer },
+    @CurrentUser() user?: AuthenticatedUser,
+  ) {
+    return this.svc.addAttachment(id, file, actor(user));
+  }
+
+  @Get(':id/attachments/:attachmentId')
+  @HqRoles(HqRole.Viewer)
+  async downloadAttachment(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('attachmentId') attachmentId: string,
+    @Res() res: Response,
+  ) {
+    const { attachment, buffer } = await this.svc.getAttachmentFile(id, attachmentId);
+    res.setHeader('Content-Type', attachment.mimeType);
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(attachment.originalName)}"`);
+    res.send(buffer);
+  }
+
+  @Delete(':id/attachments/:attachmentId')
+  @HqRoles(HqRole.Operator)
+  removeAttachment(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('attachmentId') attachmentId: string,
+    @CurrentUser() user?: AuthenticatedUser,
+  ) {
+    return this.svc.removeAttachment(id, attachmentId, actor(user));
   }
 }
 

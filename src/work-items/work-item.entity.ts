@@ -14,14 +14,19 @@ export const WORK_ITEM_TYPES = ['bug', 'feature', 'task', 'ops', 'debt'] as cons
 export type WorkItemType = (typeof WORK_ITEM_TYPES)[number];
 
 export const WORK_ITEM_STATUSES = [
-  'backlog',
   'todo',
   'in_progress',
-  'review',
   'blocked',
-  'done',
+  'review',
+  'resolved',
+  'closed',
 ] as const;
 export type WorkItemStatus = (typeof WORK_ITEM_STATUSES)[number];
+
+/** `resolved` and `closed` both mean "work is done" — `closed` is just past its reopen window. */
+export function isDoneStatus(status: WorkItemStatus | string): boolean {
+  return status === 'resolved' || status === 'closed';
+}
 
 export const WORK_ITEM_PRIORITIES = ['P0', 'P1', 'P2', 'P3'] as const;
 export type WorkItemPriority = (typeof WORK_ITEM_PRIORITIES)[number];
@@ -68,7 +73,7 @@ export class WorkItem {
   @Column({ type: 'varchar', default: 'task' })
   type!: WorkItemType;
 
-  @Column({ type: 'varchar', default: 'backlog' })
+  @Column({ type: 'varchar', default: 'todo' })
   @Index()
   status!: WorkItemStatus;
 
@@ -122,6 +127,11 @@ export class WorkItem {
   @Column({ name: 'updated_at' })
   updatedAt!: Date;
 
+  /** Stamped when status enters `resolved`; cleared if reopened before closing. */
+  @Column({ name: 'resolved_at', type: 'timestamp', nullable: true })
+  resolvedAt!: Date | null;
+
+  /** Stamped when status enters `closed` (auto, `REOPEN_WINDOW_MS` after `resolvedAt`, or a manual move). */
   @Column({ name: 'closed_at', type: 'timestamp', nullable: true })
   closedAt!: Date | null;
 }

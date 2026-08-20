@@ -16,12 +16,12 @@ import type { StudioTaskPriority, StudioTaskStatus } from '../../work-items/work
 import type { WorkItemCategory } from '../../work-items/work-item.entity';
 
 export const TASK_STATUSES: StudioTaskStatus[] = [
-  'backlog',
-  'this_quarter',
+  'todo',
   'in_progress',
   'blocked',
-  'in_review',
-  'done',
+  'review',
+  'resolved',
+  'closed',
 ];
 
 export const TASK_CATEGORIES = [

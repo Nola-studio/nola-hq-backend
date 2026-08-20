@@ -226,6 +226,26 @@ export class KeycloakAdminService {
     );
   }
 
+  /**
+   * Every user directly holding `roleName` as a realm role (composites not
+   * expanded — same scope as `userRealmRoles`'s own results, so the two are
+   * consistent). Used to find `hq:*` holders that have no local
+   * `team_members` row at all, the other direction from `userRealmRoles`
+   * (which starts from a known user and asks what they hold).
+   */
+  async usersWithRealmRole(
+    realm: string,
+    roleName: string,
+    params: { first?: number; max?: number } = {},
+  ): Promise<KcUser[]> {
+    const qs = new URLSearchParams();
+    if (params.first != null) qs.set('first', String(params.first));
+    if (params.max != null) qs.set('max', String(params.max));
+    return (
+      (await this.adminGet<KcUser[]>(realm, `/roles/${encodeURIComponent(roleName)}/users`, qs)) ?? []
+    );
+  }
+
   // ───────────────────────────────────────────────────────────────────────────
   // Write operations (provisioning). All best-effort: in degraded mode
   // (`isConfigured()` false) or on error they return null/false + warn, never
@@ -372,6 +392,29 @@ export class KeycloakAdminService {
     if (res.ok) return true;
     this.logger.warn(
       `Keycloak assignRealmRole ${roleName}→${userId} failed (status=${res.status})`,
+    );
+    return false;
+  }
+
+  /**
+   * Un-assigns a realm role from a user. Used to swap `hq:*` roles on an
+   * access-level change (assign the new one, remove the old) — Keycloak
+   * doesn't auto-exclusive these, so without this a demoted user would
+   * simply accumulate every role they ever held.
+   */
+  async removeRealmRole(realm: string, userId: string, roleName: string): Promise<boolean> {
+    const role = await this.adminGet<{ id: string; name: string }>(
+      realm,
+      `/roles/${encodeURIComponent(roleName)}`,
+    );
+    if (!role) return true; // nothing to remove
+    const res = await this.adminSend(realm, 'DELETE', `/users/${userId}/role-mappings/realm`, [
+      { id: role.id, name: role.name },
+    ]);
+    if (!res) return false;
+    if (res.ok) return true;
+    this.logger.warn(
+      `Keycloak removeRealmRole ${roleName}→${userId} failed (status=${res.status})`,
     );
     return false;
   }

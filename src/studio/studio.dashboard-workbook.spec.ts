@@ -29,7 +29,7 @@ function project(over: Partial<DashboardProject> = {}): DashboardProject {
 
 function task(over: Partial<DashboardTask> = {}): DashboardTask {
   return {
-    status: 'backlog',
+    status: 'todo',
     priority: 'none',
     assigneeEmail: null,
     dueDate: null,
@@ -104,9 +104,9 @@ describe('buildSectionA', () => {
     expect(buildSectionA([], [], tasks, [], RANGE, TODAY).stats.hoursSpent).toBe(6.5);
   });
 
-  test('taskActivityByMonth buckets done/in_progress/everything-else', () => {
+  test('taskActivityByMonth buckets resolved/in_progress/everything-else', () => {
     const tasks = [
-      task({ dueDate: '2026-03-15', status: 'done' }),
+      task({ dueDate: '2026-03-15', status: 'resolved' }),
       task({ dueDate: '2026-03-20', status: 'in_progress' }),
       task({ dueDate: '2026-03-25', status: 'blocked' }),
     ];
@@ -234,6 +234,26 @@ describe('buildSectionB', () => {
     expect(buildSectionB([], domains, [], RANGE, TODAY).stats.domainsOwned).toBe(2);
   });
 
+  test('domain registry prices are amortized into recurringPerMonthCents/PerYearCents, no matching expense needed', () => {
+    const domains: DashboardDomain[] = [{ price: '120', billingCycle: 'Annual' }];
+    const recurring: DashboardRecurring[] = [{ service: 'ProtonMail', amount: '12', cycle: 'Monthly' }];
+    const result = buildSectionB([], domains, recurring, RANGE, TODAY);
+    // 12/mo (ProtonMail) + (120/12)/mo (domain) = 22/mo
+    expect(result.stats.recurringPerMonthCents).toBe(2200);
+    expect(result.stats.recurringPerYearCents).toBe(26400);
+    expect(result.donuts.recurringMonthlyMix).toEqual(
+      expect.arrayContaining([
+        { key: 'ProtonMail', amountCents: 1200 },
+        { key: 'Domaines', amountCents: 1000 },
+      ]),
+    );
+  });
+
+  test('no "Domaines" entry in recurringMonthlyMix when there are no domains', () => {
+    const result = buildSectionB([], [], [], RANGE, TODAY);
+    expect(result.donuts.recurringMonthlyMix.find((r) => r.key === 'Domaines')).toBeUndefined();
+  });
+
   test('spendByCategory and spendByPayer group only in-period, paid, USD expenses', () => {
     const expenses = [
       expense({ category: 'domains_saas', paidByEmail: 'a@nola.dev', amountCents: 1000 }),
@@ -277,6 +297,18 @@ describe('buildSectionB', () => {
       expect(march.domainsCents).toBe(500);
       expect(april.subscriptionsCents).toBe(3000);
       expect(april.domainsCents).toBe(0);
+    });
+
+    test('domainsCents also includes the amortized registry cost, additive with any billed domains_saas expenses, every month', () => {
+      const domains: DashboardDomain[] = [{ price: '120', billingCycle: 'Annual' }];
+      const expenses = [expense({ category: 'domains_saas', amountCents: 500, date: '2026-03-20' })];
+      const result = buildSectionB(expenses, domains, recurring, RANGE, TODAY);
+      const march = result.monthlyBreakdown.find((r) => r.month === 3)!;
+      const april = result.monthlyBreakdown.find((r) => r.month === 4)!;
+      // March has both a billed expense (500) and the amortized registry cost (1000).
+      expect(march.domainsCents).toBe(1500);
+      // April has no billed expense, but the amortized registry cost still applies.
+      expect(april.domainsCents).toBe(1000);
     });
 
     test('protonMailCents is the flat monthly recurring amount, identical every month, even with zero expenses', () => {

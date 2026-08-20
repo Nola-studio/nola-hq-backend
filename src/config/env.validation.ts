@@ -13,10 +13,15 @@ export class EnvironmentVariables {
 
   @IsOptional() @IsString() DATABASE_URL?: string;
   @IsOptional() @IsString() DB_PATH?: string;
+  @IsOptional() @IsString() ATTACHMENTS_DIR?: string;
   @IsOptional() @IsString() NATS_URL?: string;
   @IsOptional() @IsString() NATS_USER?: string;
   @IsOptional() @IsString() NATS_PASS?: string;
   @IsOptional() @IsString() CORS_ORIGINS?: string;
+  // Base URL of the public-facing console — used to build the receipt
+  // verification link embedded in the QR code (business-pdf.service.ts).
+  @IsOptional() @IsString() PUBLIC_APP_URL?: string;
+  @IsOptional() @IsString() SESSION_COOKIE_SECURE?: string;
   @IsOptional() @IsString() NODE_ENV?: string;
   @IsOptional() @IsString() PORT?: string;
   // Web Push (PWA) — optionnels : sans clés VAPID le push est simplement
@@ -28,6 +33,14 @@ export class EnvironmentVariables {
 
 /** base64 of 32 zero bytes — the dev placeholder that must never reach prod. */
 const PLACEHOLDER_SESSION_KEY = Buffer.alloc(32).toString('base64');
+
+function isAbsoluteHttpUrl(value: string): boolean {
+  try {
+    return ['http:', 'https:'].includes(new URL(value).protocol);
+  } catch {
+    return false;
+  }
+}
 
 export function validate(config: Record<string, unknown>) {
   const validated = plainToInstance(EnvironmentVariables, config, {
@@ -55,6 +68,17 @@ export function validate(config: Record<string, unknown>) {
     }
     if (validated.SESSION_ENCRYPTION_KEY === PLACEHOLDER_SESSION_KEY) {
       problems.push('SESSION_ENCRYPTION_KEY is the all-zero dev placeholder — generate a real key (`openssl rand -base64 32`).');
+    }
+    if (validated.SESSION_COOKIE_SECURE !== 'true') {
+      problems.push('SESSION_COOKIE_SECURE must be "true" in production — the session cookie must not ship without Secure.');
+    }
+    if (!validated.ATTACHMENTS_DIR?.trim()) {
+      problems.push('ATTACHMENTS_DIR is required in production — the relative-path fallback lands on ephemeral container disk and loses attachments on every redeploy.');
+    }
+    if (!validated.PUBLIC_APP_URL?.trim()) {
+      problems.push('PUBLIC_APP_URL is required in production — receipt QR codes need it to build a working verification link.');
+    } else if (!isAbsoluteHttpUrl(validated.PUBLIC_APP_URL)) {
+      problems.push('PUBLIC_APP_URL must be an absolute http(s) URL — a malformed value still produces a QR code, just one that points nowhere.');
     }
     if (problems.length) {
       throw new Error(

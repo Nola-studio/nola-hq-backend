@@ -1,5 +1,6 @@
 import { annualizedAmount } from './studio.recurring';
 import { inPeriod, monthOf, monthNumbersInRange, monthsInRange, type PeriodRange } from './studio.dashboard-period';
+import { isDoneStatus } from '../work-items/work-item.entity';
 
 function isSameMonth(dateStr: string, todayYearMonth: string): boolean {
   return dateStr.slice(0, 7) === todayYearMonth;
@@ -106,13 +107,15 @@ export interface CurrencyTotal {
 
 /**
  * One row of the workbook's M:Q monthly pivot. `subscriptionsCents`
- * ("Abonnements") and `domainsCents` ("Domaines") are billed expenses for
- * that month, grouped by category (`infra_hosting`/`domains_saas`).
- * `protonMailCents` is NOT billed per-invoice — it's the flat recurring
- * subscription amount (`StudioRecurring` row, `=Recurring!$C$2` in the
- * source sheet), the same value every month in range. `totalCents` is the
- * sum of the three, not the actual billed total for the month (ProtonMail
- * never appears as its own expense row — see the class doc comment).
+ * ("Abonnements") is billed expenses for that month, category
+ * `infra_hosting`. `domainsCents` ("Domaines") is billed `domains_saas`
+ * expenses for that month PLUS the flat amortized cost of every row in the
+ * `StudioDomain` registry (its annual `price` / 12) — domains don't need a
+ * matching expense logged by hand to show up here, same treatment as
+ * `protonMailCents`, which is NOT billed per-invoice at all — it's the flat
+ * recurring subscription amount (`StudioRecurring` row, `=Recurring!$C$2` in
+ * the source sheet), the same value every month in range. `totalCents` is
+ * the sum of the three, not the actual billed total for the month.
  */
 export interface MonthlyBreakdownRow {
   month: number;
@@ -197,7 +200,8 @@ function groupSumCents<T>(items: T[], keyFn: (item: T) => string, amountFn: (ite
 }
 
 const TASK_ACTIVITY_BUCKET: Record<string, 'completed' | 'inProgress' | 'pending'> = {
-  done: 'completed',
+  resolved: 'completed',
+  closed: 'completed',
   in_progress: 'inProgress',
 };
 
@@ -235,12 +239,12 @@ export function buildSectionA(
       projects: projectsInPeriod.length,
       cost,
       tasks: tasksInPeriod.length,
-      tasksDone: tasksInPeriod.filter((t) => t.status === 'done').length,
+      tasksDone: tasksInPeriod.filter((t) => isDoneStatus(t.status)).length,
       hoursSpent: sum(tasksInPeriod.map((t) => t.hoursSpent)),
       // Overdue is always "as of today", independent of the period filter —
       // same semantics as the kanban board's own `isLate`.
       overdueProjects: visibleProjects.filter((p) => p.dueDate && p.dueDate < today && p.healthStatus !== 'completed').length,
-      overdueTasks: visibleTasks.filter((t) => t.dueDate && t.dueDate < today && t.status !== 'done').length,
+      overdueTasks: visibleTasks.filter((t) => t.dueDate && t.dueDate < today && !isDoneStatus(t.status)).length,
       // As-of-today, like the overdue counts above — not period-filtered.
       requestsOpen: requests.filter((r) => OPEN_REQUEST_STATUSES.has(r.status)).length,
       initiatives: initiativesInPeriod.length,
@@ -284,16 +288,25 @@ export function buildSectionB(
   const months = monthsInRange(range);
   const avgPerMonthCents = months > 0 ? Math.round(spendInPeriodCents / months) : 0;
 
-  const recurringMonthlyCentsByService = recurring.map((r) => ({
-    key: r.service,
-    amountCents: Math.round((annualizedAmount(Number(r.amount), r.cycle) / 12) * 100),
-  }));
-  const recurringPerMonthCents = recurringMonthlyCentsByService.reduce((t, r) => t + r.amountCents, 0);
-  const recurringPerYearCents = recurringPerMonthCents * 12;
-
   const domainCostPerYearCents = Math.round(
     sum(domains.map((d) => d.price)) * 100, // all current domains are Annual-cycle; see StudioDomain.billingCycle
   );
+  // Domain registry entries are amortized into the recurring figures exactly
+  // like a StudioRecurring row, rather than requiring a matching
+  // `domains_saas` expense to be logged by hand for every domain — the
+  // Domaines table is the single source of truth for what a domain costs,
+  // so nothing else should need re-entering it.
+  const domainsMonthlyCents = Math.round(domainCostPerYearCents / 12);
+
+  const recurringMonthlyCentsByService = [
+    ...recurring.map((r) => ({
+      key: r.service,
+      amountCents: Math.round((annualizedAmount(Number(r.amount), r.cycle) / 12) * 100),
+    })),
+    ...(domainsMonthlyCents > 0 ? [{ key: 'Domaines', amountCents: domainsMonthlyCents }] : []),
+  ];
+  const recurringPerMonthCents = recurringMonthlyCentsByService.reduce((t, r) => t + r.amountCents, 0);
+  const recurringPerYearCents = recurringPerMonthCents * 12;
 
   const otherCurrencyMap = new Map<string, number>();
   for (const e of otherInPeriod) otherCurrencyMap.set(e.currency, (otherCurrencyMap.get(e.currency) ?? 0) + e.amountCents);
@@ -308,9 +321,12 @@ export function buildSectionB(
     const subscriptionsCents = monthExpenses
       .filter((e) => e.category === 'infra_hosting')
       .reduce((t, e) => t + e.amountCents, 0);
-    const domainsCents = monthExpenses
-      .filter((e) => e.category === 'domains_saas')
-      .reduce((t, e) => t + e.amountCents, 0);
+    // Actual billed `domains_saas` expenses (e.g. non-domain SaaS tools also
+    // logged under that category) PLUS the flat amortized registry cost —
+    // additive, not a replacement, so nothing logged by hand is lost.
+    const domainsCents =
+      monthExpenses.filter((e) => e.category === 'domains_saas').reduce((t, e) => t + e.amountCents, 0) +
+      domainsMonthlyCents;
     return {
       month,
       subscriptionsCents,

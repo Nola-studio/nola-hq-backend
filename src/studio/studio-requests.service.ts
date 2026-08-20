@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { StudioRequest, type StudioRequestPriority } from './studio-request.entity';
@@ -79,10 +79,27 @@ export class StudioRequestsService {
 
   async updateStatus(id: string, dto: UpdateStudioRequestStatusDto): Promise<StudioRequest> {
     const request = await this.findOne(id);
+    this.assertStatusMutable(request);
     request.status = dto.status;
     request.updatedAt = new Date();
     request.closedAt = TERMINAL_STATUSES.includes(dto.status) ? request.updatedAt : null;
     return this.requests.save(request);
+  }
+
+  /**
+   * Throws if `request` is already terminal (`rejetee` or `fermee`) — no
+   * Owner/admin override, matching `WorkItem.assertMutable()`'s posture
+   * that closed items are not reopenable by anyone. Narrower than
+   * `WorkItem`'s guard: this only blocks further *status* changes, not
+   * every mutation (title/description edits on a closed request still go
+   * through `update()` unguarded).
+   */
+  private assertStatusMutable(request: StudioRequest) {
+    if (TERMINAL_STATUSES.includes(request.status)) {
+      throw new ForbiddenException(
+        `Cette demande est ${request.status === 'fermee' ? 'fermée' : 'rejetée'} et ne peut plus changer de statut.`,
+      );
+    }
   }
 
   async remove(id: string): Promise<void> {
@@ -102,6 +119,7 @@ export class StudioRequestsService {
     actorEmail: string,
   ): Promise<{ request: StudioRequest; task: Awaited<ReturnType<StudioProjectsProxyService['createTask']>> }> {
     const request = await this.findOne(id);
+    this.assertStatusMutable(request);
     if (request.linkedWorkItemId) {
       throw new ConflictException(
         `Cette demande est déjà convertie (ticket ${request.linkedWorkItem?.reference ?? request.linkedWorkItemId}).`,
