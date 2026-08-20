@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import PDFDocument = require('pdfkit');
-import type { BusinessInvoice } from './business-invoice.entity';
+import { toBuffer as qrToBuffer } from 'qrcode';
+import { amountInWords } from './amount-in-words';
+import { BUSINESS_PAYMENT_METHOD_LABELS, type BusinessInvoice } from './business-invoice.entity';
 import type { BusinessQuote } from './business-quote.entity';
 import { LEGAL_ENTITY } from './legal-entity.config';
 
@@ -12,6 +15,8 @@ const LINE = '#DDE3DF';
 
 @Injectable()
 export class BusinessPdfService {
+  constructor(private readonly config: ConfigService) {}
+
   quote(quote: BusinessQuote) {
     return this.build((doc) => {
       this.header(doc, 'DEVIS', quote.number, quote.issuedOn);
@@ -40,8 +45,60 @@ export class BusinessPdfService {
     });
   }
 
-  private invoiceSingleRow(doc: PDFKit.PDFDocument, invoice: BusinessInvoice) {
-    const y = 305;
+  /** Only for invoices already marked paid (receiptNumber/verificationToken/paymentMethod all set by markPaid()). */
+  async receipt(invoice: BusinessInvoice): Promise<Buffer> {
+    const verifyUrl = this.verifyUrl(invoice.verificationToken!);
+    const qr = await qrToBuffer(verifyUrl, { width: 110, margin: 1, color: { dark: INK, light: '#FFFFFF' } });
+
+    return this.build((doc) => {
+      this.header(doc, 'REÇU', invoice.receiptNumber!, (invoice.paidAt ?? new Date()).toISOString().slice(0, 10));
+      this.parties(doc, invoice.client?.name ?? 'Client', invoice.client?.email, invoice.client?.phone);
+      doc.fillColor(MUTE).font('Helvetica').fontSize(9)
+        .text(`Facture : ${invoice.number}`, 50, 222)
+        .text(`Mode de paiement : ${BUSINESS_PAYMENT_METHOD_LABELS[invoice.paymentMethod!]}`, 50, 237)
+        .text(`Référence de paiement : ${invoice.paymentReference ?? '—'}`, 50, 252);
+
+      const totalsY = (invoice.lines?.length ?? 0) > 0
+        ? this.invoiceLineTable(doc, invoice, 282)
+        : this.invoiceSingleRow(doc, invoice, 300);
+      const subtotal = invoice.amountCdf - invoice.taxCdf;
+      this.totals(doc, subtotal, invoice.taxCdf, invoice.amountCdf, invoice.taxRate, invoice.currency, totalsY, invoice.taxLabel || 'Taxe');
+
+      const paidY = totalsY + 95;
+      doc.fillColor(OCRE).rect(50, paidY, 495, 40).fill();
+      doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(10).text('MONTANT PAYÉ', 62, paidY + 14);
+      doc.fontSize(14).text(this.money(invoice.paidAmountCdf, invoice.currency), 300, paidY + 10, { width: 233, align: 'right' });
+      doc.fillColor(MUTE).font('Helvetica').fontSize(9)
+        .text(`Solde restant : ${this.money(Math.max(0, invoice.amountCdf - invoice.paidAmountCdf), invoice.currency)}`, 50, paidY + 52);
+      doc.fillColor(INK).font('Helvetica-Oblique').fontSize(9)
+        .text(`Arrêté à la somme de : ${amountInWords(invoice.paidAmountCdf, invoice.currency)}.`, 50, paidY + 70, { width: 495 });
+
+      const qrY = Math.min(660, Math.max(doc.y + 25, paidY + 100));
+      doc.image(qr, 50, qrY, { width: 85 });
+      doc.fillColor(MUTE).font('Helvetica').fontSize(7)
+        .text('Scannez pour vérifier ce reçu, ou consultez :', 150, qrY + 4, { width: 395 })
+        .fillColor(INK).font('Helvetica-Bold').fontSize(8).text(verifyUrl, 150, qrY + 17, { width: 395 })
+        .fillColor(MUTE).font('Helvetica').fontSize(7).text(`Code : ${invoice.receiptNumber}`, 150, qrY + 34, { width: 395 });
+
+      this.signatureBlocks(doc, qrY + 95);
+      this.footer(doc, invoice.receiptNumber!);
+    });
+  }
+
+  private signatureBlocks(doc: PDFKit.PDFDocument, y: number) {
+    doc.strokeColor(LINE).moveTo(50, y).lineTo(255, y).stroke();
+    doc.fillColor(MUTE).font('Helvetica').fontSize(8).text('LE CAISSIER', 50, y + 6, { width: 205, align: 'center' });
+    doc.strokeColor(LINE).moveTo(340, y).lineTo(545, y).stroke();
+    doc.fillColor(MUTE).font('Helvetica').fontSize(8).text('LE PAYEUR', 340, y + 6, { width: 205, align: 'center' });
+  }
+
+  private verifyUrl(token: string): string {
+    const base = (this.config.get<string>('PUBLIC_APP_URL') ?? 'http://localhost:5173').replace(/\/$/, '');
+    return `${base}/verify/receipt/${token}`;
+  }
+
+  private invoiceSingleRow(doc: PDFKit.PDFDocument, invoice: BusinessInvoice, startY = 305) {
+    const y = startY;
     doc.fillColor(GREEN).rect(50, y, 495, 28).fill();
     doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(9).text('DESCRIPTION', 62, y + 10);
     doc.text('MONTANT', 430, y + 10, { width: 103, align: 'right' });
@@ -51,8 +108,8 @@ export class BusinessPdfService {
     return y + 95;
   }
 
-  private invoiceLineTable(doc: PDFKit.PDFDocument, invoice: BusinessInvoice) {
-    let y = 285;
+  private invoiceLineTable(doc: PDFKit.PDFDocument, invoice: BusinessInvoice, startY = 285) {
+    let y = startY;
     const header = () => {
       doc.fillColor(GREEN).rect(50, y, 495, 28).fill();
       doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(8)

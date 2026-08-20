@@ -58,6 +58,14 @@ export class BusinessOperationsController {
     response.send(pdf);
   }
 
+  @Get('invoices/:id/receipt-pdf')
+  async receiptPdf(@Param('id') id: string, @Res() response: Response) {
+    const pdf = await this.svc.receiptPdf(id);
+    response.setHeader('Content-Type', 'application/pdf');
+    response.setHeader('Content-Disposition', `inline; filename="recu-${id}.pdf"`);
+    response.send(pdf);
+  }
+
   @Get('documents')
   documents(@Query('entityType') entityType?: BusinessDocumentEntityType, @Query('entityId') entityId?: string) {
     return this.svc.listDocuments(entityType, entityId);

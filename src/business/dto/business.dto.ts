@@ -7,6 +7,7 @@ import {
   IsEmail,
   IsIn,
   IsInt,
+  IsISO8601,
   IsNumber,
   IsOptional,
   IsString,
@@ -21,7 +22,12 @@ import {
 import { BUSINESS_CLIENT_STATUSES, type BusinessClientStatus } from '../business-client.entity';
 import { BUSINESS_CONTRACT_STATUSES, type BusinessContractStatus } from '../business-contract.entity';
 import { BUSINESS_EXPENSE_STATUSES, type BusinessExpenseStatus } from '../business-expense.entity';
-import { BUSINESS_INVOICE_STATUSES, type BusinessInvoiceStatus } from '../business-invoice.entity';
+import {
+  BUSINESS_INVOICE_STATUSES,
+  BUSINESS_PAYMENT_METHODS,
+  type BusinessInvoiceStatus,
+  type BusinessPaymentMethod,
+} from '../business-invoice.entity';
 import { BUSINESS_OPPORTUNITY_STAGES, type BusinessOpportunityStage } from '../business-opportunity.entity';
 import { INITIATIVE_SCOPES } from '../../roadmap/dto/create-initiative.dto';
 import type { RoadmapInitiativeScope } from '../../roadmap/roadmap-initiative.entity';
@@ -125,6 +131,18 @@ export class CreateBusinessInvoiceDto {
 }
 
 export class UpdateBusinessInvoiceDto extends PartialType(CreateBusinessInvoiceDto) {}
+
+/**
+ * The only way to reach a receipted invoice — mints receiptNumber +
+ * verificationToken server-side. Deliberately separate from
+ * UpdateBusinessInvoiceDto: payment method/reference are only meaningful at
+ * the moment of payment, not as freely-patchable invoice fields.
+ */
+export class MarkInvoicePaidDto {
+  @IsIn(BUSINESS_PAYMENT_METHODS as unknown as string[]) paymentMethod!: BusinessPaymentMethod;
+  @IsOptional() @IsString() @MaxLength(120) paymentReference?: string;
+  @IsOptional() @IsISO8601() paidAt?: string;
+}
 
 /**
  * GET /business/project-portfolio — omit `scope` to get every project row

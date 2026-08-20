@@ -224,6 +224,21 @@ export class BusinessOperationsService {
     return this.pdf.invoice(invoice);
   }
 
+  async receiptPdf(id: string) {
+    const invoice = await this.invoices.findOne({
+      where: { id },
+      relations: { client: true, project: true, contract: true, lines: true },
+    });
+    if (!invoice) throw new NotFoundException(`Facture business ${id} introuvable`);
+    if (!invoice.receiptNumber) {
+      throw new BadRequestException(
+        'Aucun reçu n’a été émis pour cette facture. Utilisez d’abord l’action « marquer payée ».',
+      );
+    }
+    invoice.lines = [...(invoice.lines ?? [])].sort((a, b) => a.position - b.position);
+    return this.pdf.receipt(invoice);
+  }
+
   listDocuments(entityType?: BusinessDocument['entityType'], entityId?: string) {
     const where: FindOptionsWhere<BusinessDocument> = {};
     if (entityType) where.entityType = entityType;

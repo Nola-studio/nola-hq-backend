@@ -1,4 +1,5 @@
 import { test, expect, describe, mock } from 'bun:test';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { BusinessOperationsService } from './business-operations.service';
 
 function makeRepo(overrides: Record<string, unknown> = {}) {
@@ -101,5 +102,46 @@ describe('BusinessOperationsService.convertQuote — tax handling', () => {
     const dto = createInvoice.mock.calls[0][0];
     expect(dto.taxRate).toBe(0);
     expect(dto.amountCdf).toBe(500);
+  });
+});
+
+/** A receipt can only be generated for a paid, receipted invoice — a clear 4xx otherwise, not a 500. */
+function makeReceiptPdfService(invoice: any) {
+  const invoices = makeRepo({ findOne: mock(async () => invoice) });
+  const svc = new BusinessOperationsService(
+    makeRepo(), // quotes
+    makeRepo(), // quoteLines
+    makeRepo(), // documents
+    makeRepo(), // reminders
+    makeRepo(), // timeEntries
+    makeRepo(), // clients
+    makeRepo(), // opportunities
+    makeRepo(), // contracts
+    invoices, // invoices
+    makeRepo(), // expenses
+    makeRepo(), // projects
+    makeRepo(), // workItems
+    {} as any, // dataSource
+    {} as any, // business
+    { receipt: mock(async () => Buffer.from('pdf')) } as any, // pdf
+  );
+  return svc;
+}
+
+describe('BusinessOperationsService.receiptPdf — gate', () => {
+  test('rejects with a clear BadRequestException when the invoice has no receipt yet', async () => {
+    const svc = makeReceiptPdfService({ id: 'inv-1', status: 'sent', receiptNumber: null, lines: [] });
+    await expect(svc.receiptPdf('inv-1')).rejects.toThrow(BadRequestException);
+  });
+
+  test('throws NotFoundException for an unknown invoice, not a 500', async () => {
+    const svc = makeReceiptPdfService(null);
+    await expect(svc.receiptPdf('missing')).rejects.toThrow(NotFoundException);
+  });
+
+  test('generates the PDF once the invoice has a receipt', async () => {
+    const svc = makeReceiptPdfService({ id: 'inv-1', status: 'paid', receiptNumber: 'REC-2026-00001', lines: [] });
+    const buf = await svc.receiptPdf('inv-1');
+    expect(Buffer.isBuffer(buf)).toBe(true);
   });
 });

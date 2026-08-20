@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { randomBytes } from 'node:crypto';
 import { DataSource, FindOptionsWhere, Repository } from 'typeorm';
 import { RoadmapInitiative, type RoadmapInitiativeScope } from '../roadmap/roadmap-initiative.entity';
 import { BusinessClient } from './business-client.entity';
@@ -21,6 +22,7 @@ import {
   CreateBusinessExpenseDto,
   CreateBusinessInvoiceDto,
   CreateBusinessOpportunityDto,
+  MarkInvoicePaidDto,
   UpdateBusinessClientDto,
   UpdateBusinessContractDto,
   UpdateBusinessExpenseDto,
@@ -417,6 +419,9 @@ export class BusinessService {
   async updateInvoice(id: string, dto: UpdateBusinessInvoiceDto) {
     const item = await this.invoices.findOne({ where: { id }, relations: { lines: true } });
     if (!item) throw new NotFoundException(`Facture business ${id} introuvable`);
+    if (item.receiptNumber && this.changesFinancials(item, dto)) {
+      throw new BadRequestException('Cette facture a déjà été reçue ; son montant ne peut plus être modifié.');
+    }
     const clientId = dto.clientId ?? item.clientId;
     const projectId = dto.projectId ?? item.projectId;
     const contractId = dto.contractId ?? item.contractId;
@@ -462,6 +467,46 @@ export class BusinessService {
       }
     });
     return this.findInvoice(id);
+  }
+
+  /** Once a receipt has been issued, the amounts it was computed from are frozen. */
+  private changesFinancials(item: BusinessInvoice, dto: UpdateBusinessInvoiceDto): boolean {
+    return (
+      (dto.amountCdf !== undefined && dto.amountCdf !== item.amountCdf) ||
+      (dto.paidAmountCdf !== undefined && dto.paidAmountCdf !== item.paidAmountCdf) ||
+      (dto.taxRate !== undefined && dto.taxRate !== item.taxRate) ||
+      dto.lines !== undefined
+    );
+  }
+
+  /**
+   * The single path to a receipted invoice — 1:1:1 (one payment = one
+   * invoice = one receipt). `updateInvoice`'s ordinary PATCH can still move
+   * `paidAmountCdf`/`status` around freely, but only this action mints the
+   * receipt number + verification token, and once minted `updateInvoice`
+   * refuses to touch the invoice's financial fields (see `changesFinancials`).
+   */
+  async markPaid(id: string, dto: MarkInvoicePaidDto) {
+    const item = await this.invoices.findOne({ where: { id } });
+    if (!item) throw new NotFoundException(`Facture business ${id} introuvable`);
+    if (item.status === 'cancelled') throw new BadRequestException('Une facture annulée ne peut pas être marquée payée.');
+    if (item.receiptNumber) throw new BadRequestException('Cette facture a déjà été marquée payée et reçue.');
+    const now = new Date();
+    const paidAt = dto.paidAt ? new Date(dto.paidAt) : now;
+    const id2 = await this.dataSource.transaction(async (manager) => {
+      const invoiceRepo = manager.getRepository(BusinessInvoice);
+      item.paidAmountCdf = item.amountCdf;
+      item.status = 'paid';
+      item.paidAt = paidAt;
+      item.paymentMethod = dto.paymentMethod;
+      item.paymentReference = this.clean(dto.paymentReference);
+      item.receiptNumber = await nextBusinessNumber(manager, 'REC', now);
+      item.verificationToken = randomBytes(24).toString('base64url');
+      item.updatedAt = now;
+      await invoiceRepo.save(item);
+      return item.id;
+    });
+    return this.findInvoice(id2);
   }
 
   private async assertInvoiceContract(contractId: string, clientId: string, projectId: string) {

@@ -15,6 +15,18 @@ export const BUSINESS_INVOICE_STATUSES = [
 ] as const;
 export type BusinessInvoiceStatus = (typeof BUSINESS_INVOICE_STATUSES)[number];
 
+export const BUSINESS_PAYMENT_METHODS = ['cash', 'bank_transfer', 'mobile_money', 'card', 'other'] as const;
+export type BusinessPaymentMethod = (typeof BUSINESS_PAYMENT_METHODS)[number];
+
+/** French display labels for the receipt PDF (Yekoli's reference shows "Espèces" for cash). */
+export const BUSINESS_PAYMENT_METHOD_LABELS: Record<BusinessPaymentMethod, string> = {
+  cash: 'Espèces',
+  bank_transfer: 'Virement bancaire',
+  mobile_money: 'Mobile Money',
+  card: 'Carte',
+  other: 'Autre',
+};
+
 @Entity('business_invoices')
 export class BusinessInvoice {
   @PrimaryGeneratedColumn('uuid')
@@ -84,6 +96,20 @@ export class BusinessInvoice {
 
   @Column({ type: 'text', nullable: true })
   description!: string | null;
+
+  /** Minted once, by `markPaid()`, at the same moment as `paymentMethod`/`verificationToken`. */
+  @Column({ type: 'varchar', length: 64, name: 'receipt_number', unique: true, nullable: true })
+  receiptNumber!: string | null;
+
+  @Column({ type: 'varchar', length: 24, name: 'payment_method', nullable: true })
+  paymentMethod!: BusinessPaymentMethod | null;
+
+  @Column({ type: 'varchar', length: 120, name: 'payment_reference', nullable: true })
+  paymentReference!: string | null;
+
+  /** Random, stored value — not a content hash. Powers the public `/verify/receipt/:token` lookup. */
+  @Column({ type: 'varchar', length: 64, name: 'verification_token', unique: true, nullable: true })
+  verificationToken!: string | null;
 
   @OneToMany(() => BusinessInvoiceLine, (line) => line.invoice)
   lines?: BusinessInvoiceLine[];

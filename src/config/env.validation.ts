@@ -18,6 +18,9 @@ export class EnvironmentVariables {
   @IsOptional() @IsString() NATS_USER?: string;
   @IsOptional() @IsString() NATS_PASS?: string;
   @IsOptional() @IsString() CORS_ORIGINS?: string;
+  // Base URL of the public-facing console — used to build the receipt
+  // verification link embedded in the QR code (business-pdf.service.ts).
+  @IsOptional() @IsString() PUBLIC_APP_URL?: string;
   @IsOptional() @IsString() SESSION_COOKIE_SECURE?: string;
   @IsOptional() @IsString() NODE_ENV?: string;
   @IsOptional() @IsString() PORT?: string;

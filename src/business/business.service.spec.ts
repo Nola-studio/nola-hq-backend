@@ -154,3 +154,63 @@ describe('BusinessService — invoice line/tax totals', () => {
     await expect(svc.updateInvoice('inv-1', { amountCdf: 5_000 } as any)).rejects.toThrow(BadRequestException);
   });
 });
+
+describe('BusinessService — markPaid / receipted-invoice lock', () => {
+  test('markPaid mints a receipt number/token, sets payment metadata, and locks paidAmountCdf to amountCdf', async () => {
+    const existing: Partial<BusinessInvoice> = {
+      id: 'inv-1', amountCdf: 1_000, paidAmountCdf: 0, taxRate: 0, taxCdf: 0,
+      status: 'sent', receiptNumber: null, paymentMethod: null, paymentReference: null,
+      verificationToken: null, paidAt: null, lines: [],
+    };
+    const { svc, invoiceRepoTx } = makeService({
+      invoicesFindOne: (args: any) => (args.where?.id === 'inv-1' ? existing : null),
+    });
+
+    const result = await svc.markPaid('inv-1', { paymentMethod: 'cash', paymentReference: 'REF-1' } as any);
+
+    expect(result.status).toBe('paid');
+    expect(result.paidAmountCdf).toBe(1_000);
+    expect(result.receiptNumber).toMatch(/^REC-\d{4}-\d{5}$/);
+    expect(result.verificationToken).toBeTruthy();
+    expect(result.paymentMethod).toBe('cash');
+    expect(result.paymentReference).toBe('REF-1');
+    expect(invoiceRepoTx.save).toHaveBeenCalled();
+  });
+
+  test('markPaid rejects an invoice that already has a receipt', async () => {
+    const existing: Partial<BusinessInvoice> = {
+      id: 'inv-1', status: 'paid', receiptNumber: 'REC-2026-00001', amountCdf: 1_000, paidAmountCdf: 1_000,
+    };
+    const { svc } = makeService({ invoicesFindOne: (args: any) => (args.where?.id === 'inv-1' ? existing : null) });
+    await expect(svc.markPaid('inv-1', { paymentMethod: 'cash' } as any)).rejects.toThrow(BadRequestException);
+  });
+
+  test('markPaid rejects a cancelled invoice', async () => {
+    const existing: Partial<BusinessInvoice> = {
+      id: 'inv-1', status: 'cancelled', receiptNumber: null, amountCdf: 1_000, paidAmountCdf: 0,
+    };
+    const { svc } = makeService({ invoicesFindOne: (args: any) => (args.where?.id === 'inv-1' ? existing : null) });
+    await expect(svc.markPaid('inv-1', { paymentMethod: 'cash' } as any)).rejects.toThrow(BadRequestException);
+  });
+
+  test('updateInvoice rejects amount/line changes once a receipt has been issued', async () => {
+    const existing: Partial<BusinessInvoice> = {
+      id: 'inv-1', amountCdf: 1_000, paidAmountCdf: 1_000, taxRate: 0, taxCdf: 0,
+      status: 'paid', receiptNumber: 'REC-2026-00001', issuedOn: '2026-08-01', dueOn: '2026-08-15',
+      clientId: 'client-1', projectId: 'project-1', contractId: null, number: 'FAC-1', lines: [],
+    };
+    const { svc } = makeService({ invoicesFindOne: (args: any) => (args.where?.id === 'inv-1' ? existing : null) });
+    await expect(svc.updateInvoice('inv-1', { amountCdf: 2_000 } as any)).rejects.toThrow(BadRequestException);
+  });
+
+  test('updateInvoice still allows non-financial edits once receipted', async () => {
+    const existing: Partial<BusinessInvoice> = {
+      id: 'inv-1', amountCdf: 1_000, paidAmountCdf: 1_000, taxRate: 0, taxCdf: 0,
+      status: 'paid', receiptNumber: 'REC-2026-00001', issuedOn: '2026-08-01', dueOn: '2026-08-15',
+      clientId: 'client-1', projectId: 'project-1', contractId: null, number: 'FAC-1', lines: [],
+    };
+    const { svc } = makeService({ invoicesFindOne: (args: any) => (args.where?.id === 'inv-1' ? existing : null) });
+    const result = await svc.updateInvoice('inv-1', { description: 'Note updated' } as any);
+    expect(result.description).toBe('Note updated');
+  });
+});
