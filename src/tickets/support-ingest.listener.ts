@@ -18,11 +18,10 @@ const CATEGORIES: TicketCategory[] = [
 ];
 const PRIORITIES: TicketPriority[] = ['P1', 'P2', 'P3'];
 
-/** Wire shape published by the kelasi/yekoli gateway on
- * `nola.events.kelasi.support.requested` (variante historique) et
- * `nola.events.yekoli.support.requested` (variante post-rename). Everything
- * is best-effort: a malformed payload is dropped (acked) rather than
- * retried forever. */
+/** Wire shape published by every producing app on
+ * `nola.events.<app>.support.requested` — kelasi (variante historique),
+ * yekoli (post-rename) et vantelisit. Everything is best-effort: a malformed
+ * payload is dropped (acked) rather than retried forever. */
 interface SupportRequestPayload {
   /** School tenant id (or org id) the owner is writing about. */
   tenant?: string;
@@ -47,24 +46,32 @@ interface SupportRequestPayload {
 }
 
 /**
- * Turns owner support requests from the Kelasi/Yekoli apps into HQ tickets.
+ * Turns support requests from the Nola apps into HQ tickets.
  *
  * Flow:
- *   kelasi-gateway  POST /api/owner/support
+ *   app  (kelasi-gateway POST /api/owner/support, portail Vantelis IT, …)
  *     → NolaEventsService.emit('<app>.support.requested', payload)
- *       → nola.events.{kelasi|yekoli}.support.requested  (JetStream, NOLA_EVENTS)
+ *       → nola.events.<app>.support.requested  (JetStream, NOLA_EVENTS)
  *         → THIS listener  → TicketsService.create(...)  → ticket (status=open)
  *
- * Rename Kelasi → Yekoli (Phase 6a) : le producteur va renommer le segment
- * app de ses sujets (`kelasi` → `yekoli`). Pendant la transition, ce
- * listener consomme LES DEUX variantes — même handler, mêmes garanties.
- * Chaque variante a son consumer durable : `EventBus.consume` binde un
- * durable existant TEL QUEL (le filtre passé n'est appliqué qu'à la
- * création), donc changer le filtre du durable historique serait sans effet
- * sur les environnements déjà déployés. Les deux sujets sont disjoints et le
- * producteur ne publie chaque évènement que sur UNE variante : pas de
- * doublon inter-consumers. Une fois le producteur 100 % yekoli (Phase 8),
- * le durable kelasi pourra être retiré.
+ * `SOURCES` liste un consumer durable PAR SUJET produit. Deux raisons de ne
+ * jamais réutiliser un durable pour un autre filtre : `EventBus.consume` binde
+ * un durable existant TEL QUEL (le filtre n'est appliqué qu'à la création),
+ * donc changer le filtre d'un durable déjà déployé n'aurait aucun effet ; et
+ * les sujets étant disjoints, un producteur ne publie chaque évènement que sur
+ * UN sujet — pas de doublon inter-consumers.
+ *
+ * Rename Kelasi → Yekoli (Phase 6a) : le producteur a renommé le segment app
+ * de ses sujets (`kelasi` → `yekoli`). Les deux variantes restent écoutées le
+ * temps de la transition ; une fois le producteur 100 % yekoli (Phase 8), le
+ * durable kelasi pourra être retiré. Son nom historique reste lié au sujet
+ * kelasi pour préserver l'état (curseur/backlog) du durable déjà déployé.
+ *
+ * Vantelis IT (`vantelisit`) publie un évènement par billet ouvert dans son
+ * portail client. Deux particularités, absorbées côté producteur : ses
+ * priorités vont jusqu'à P4 — descendu ici en P3, l'original restant dans
+ * `meta.priority` — et son `tenant` est l'identifiant d'organisation
+ * nola-auth, le nom lisible arrivant dans `meta.orgName`.
  *
  * Consumed over JetStream (EventBus.consume) — NOT raw core-NATS subscribe:
  * the `nola` user has no core `sub` permission on the nola.events.* space
@@ -86,7 +93,7 @@ export class SupportIngestListener implements OnApplicationBootstrap {
   private readonly enabled: boolean;
 
   private static readonly STREAM = 'NOLA_EVENTS';
-  /** Un consumer durable par variante de sujet (voir doc de classe).
+  /** Un consumer durable par sujet produit (voir doc de classe).
    * Le nom historique reste lié au sujet kelasi pour préserver l'état
    * (curseur/backlog) du durable déjà déployé. */
   static readonly SOURCES: ReadonlyArray<{
@@ -100,6 +107,10 @@ export class SupportIngestListener implements OnApplicationBootstrap {
     {
       consumer: 'nola-hq-support-ingest-yekoli',
       filter: 'nola.events.yekoli.support.requested',
+    },
+    {
+      consumer: 'nola-hq-support-ingest-vantelisit',
+      filter: 'nola.events.vantelisit.support.requested',
     },
   ];
 
@@ -145,9 +156,9 @@ export class SupportIngestListener implements OnApplicationBootstrap {
       return;
     }
 
-    // Chaque variante est branchée indépendamment : l'échec d'un consumer
-    // (ex. création du nouveau durable yekoli refusée) ne doit pas priver
-    // HQ des tickets arrivant encore sur l'autre sujet.
+    // Chaque source est branchée indépendamment : l'échec d'un consumer
+    // (ex. création d'un nouveau durable refusée) ne doit pas priver HQ des
+    // tickets arrivant encore sur les autres sujets.
     for (const { consumer, filter } of SupportIngestListener.SOURCES) {
       try {
         await this.eventBus.consume<SupportRequestPayload>(

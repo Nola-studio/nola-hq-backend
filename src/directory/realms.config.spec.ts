@@ -24,6 +24,13 @@ describe('realms.config (realm et app id yekoli)', () => {
     expect(realmForApp('kelasi')).toBeUndefined();
   });
 
+  test('le realm vantelisit existe et porte son app', () => {
+    const realm = realmById('vantelisit');
+    expect(realm).toBeDefined();
+    expect(realm?.label).toBe('Vantelis IT');
+    expect(realmForApp('vantelisit')?.id).toBe('vantelisit');
+  });
+
   test('les ids de realm restent uniques', () => {
     const ids = REALMS.map((r) => r.id);
     expect(new Set(ids).size).toBe(ids.length);
