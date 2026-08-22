@@ -6,6 +6,10 @@
  * admin). Les apps déclarées ici correspondent aux `AppId` connus
  * côté front (`kelasi`, `mycv`, `stock`, `vente`, `nola-hq`).
  *
+ * Un realm déclaré ici mais pas encore créé dans Keycloak ne casse rien :
+ * `KeycloakAdminService.adminGet` renvoie `null` sur 404, donc l'entrée
+ * s'affiche à 0 utilisateur, 0 tenant, en attendant le provisioning.
+ *
  * Rename Kelasi → Yekoli : le realm Keycloak est passé à `yekoli`
  * (Phase 4) et l'app id l'a suivi (Phase 8, 2026-08-09) — realm et
  * app portent donc le même nom.
@@ -32,6 +36,12 @@ export const REALMS: RealmDef[] = [
     label: 'MyCVMatcher',
     apps: ['mycv'],
     description: 'Recruteurs et candidats (MyCVMatcher)',
+  },
+  {
+    id: 'vantelisit',
+    label: 'Vantelis IT',
+    apps: ['vantelisit'],
+    description: 'Services TI gérés au Québec (Vantelis IT)',
   },
   {
     id: 'nola-hq',
