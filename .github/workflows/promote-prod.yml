@@ -1,7 +1,8 @@
 # Promotion PROD de nola-hq-backend : avance `main` sur `dev` (fast-forward
-# uniquement) puis déploie dans l'environnement Railway `production`.
-# Manuel uniquement. L'environment GitHub `production` porte le token Railway
-# prod et, si configuré, un gate d'approbation.
+# uniquement), rien d'autre — Railway (connecté à main, « Wait for CI »)
+# déploie après le push. Manuel uniquement. Le job deploy historique
+# (`railway up`) est retiré : il doublait l'auto-deploy et le CLI refuse
+# les tokens de workspace (infra TODO n°22).
 
 name: promote prod
 
@@ -19,6 +20,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # Pousse main via la deploy key (secret de l'environment production) :
+          # le ruleset « main : PR ou workflows uniquement » (2026-08-21) ne
+          # laisse passer que les deploy keys — le GITHUB_TOKEN est bloqué
+          # comme les push manuels.
+          ssh-key: ${{ secrets.PROMOTE_DEPLOY_KEY }}
       - name: Fast-forward main sur dev
         run: |
           git fetch origin dev main
@@ -30,13 +36,3 @@ jobs:
             exit 1
           fi
 
-  deploy:
-    needs: avancer-main
-    uses: Nola-studio/infra/.github/workflows/deploy-service.yml@main
-    with:
-      project: Nola-Core
-      service: nola-hq-backend
-      environment: production
-      gh_environment: production
-      install_packages: false
-    secrets: inherit

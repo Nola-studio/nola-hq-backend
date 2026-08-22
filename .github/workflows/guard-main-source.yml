@@ -1,0 +1,26 @@
+# Garde de provenance : seules dev et develop peuvent ouvrir une PR vers
+# main/master. Consultatif tant que le plan GitHub Free empêche les rulesets
+# (TODO n°18) — deviendra bloquant quand le check `source-branch-gate` sera
+# déclaré requis dans le ruleset, après passage à GitHub Team.
+name: guard-main-source
+
+on:
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  source-branch-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: La PR doit venir de dev ou develop
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          case "$HEAD_REF" in
+            dev|develop)
+              echo "source autorisée : $HEAD_REF → $BASE_REF" ;;
+            *)
+              echo "::error::Seules dev et develop peuvent ouvrir une PR vers $BASE_REF (source : $HEAD_REF). Merger d'abord dans dev/develop."
+              exit 1 ;;
+          esac
