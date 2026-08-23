@@ -118,7 +118,7 @@ export class TicketsService {
     const ticket = await this.findOne(id);
     ticket.replies = [
       ...(ticket.replies ?? []),
-      { from: dto.from, t: dto.t ?? 'à l’instant', text: dto.text },
+      { from: dto.from, t: dto.t ?? 'à l’instant', text: dto.text, visibility: dto.visibility ?? 'internal' },
     ];
     ticket.updatedAt = new Date();
     return this.repo.save(ticket);

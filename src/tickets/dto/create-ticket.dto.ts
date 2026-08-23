@@ -9,6 +9,7 @@ const CATEGORIES = [
   'feature',
   'other',
 ] as const;
+const REPLY_VISIBILITIES = ['internal', 'client'] as const;
 
 export class CreateTicketDto {
   @IsString() tenant!: string;
@@ -35,6 +36,9 @@ export class AddReplyDto {
   @IsString() from!: string;
   @IsString() text!: string;
   @IsOptional() @IsString() t?: string;
+  /** Absent means 'internal' — an operator opts IN to client-visible, never opts out. */
+  @IsOptional() @IsIn(REPLY_VISIBILITIES as unknown as string[])
+  visibility?: (typeof REPLY_VISIBILITIES)[number];
 }
 
 export class UpdateTicketStatusDto {
