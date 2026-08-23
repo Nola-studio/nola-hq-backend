@@ -10,10 +10,14 @@ export type TicketCategory =
   | 'feature'
   | 'other';
 
+export type TicketReplyVisibility = 'internal' | 'client';
+
 export interface TicketReply {
   from: string;
   t: string;
   text: string;
+  /** Whether the eventual portal read path may show this to the client. Never inferred — an operator opts in. */
+  visibility: TicketReplyVisibility;
 }
 
 @Entity('tickets')
