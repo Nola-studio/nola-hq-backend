@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Ticket, TicketStatus } from './ticket.entity';
@@ -9,6 +9,7 @@ import {
 import { PaginationDto, type PaginatedResult } from '../common/dto/pagination.dto';
 import { PushService } from '../push/push.service';
 import { TicketsNotifyService } from './tickets-notify.service';
+import { BusinessUnitResolverService, DEFAULT_BUSINESS_UNIT_CODE } from '../company/business-unit-resolver.service';
 
 export interface TicketsListQuery extends PaginationDto {
   tenant?: string;
@@ -19,10 +20,13 @@ export interface TicketsListQuery extends PaginationDto {
 
 @Injectable()
 export class TicketsService {
+  private readonly logger = new Logger(TicketsService.name);
+
   constructor(
     @InjectRepository(Ticket) private readonly repo: Repository<Ticket>,
     private readonly push: PushService,
     private readonly notify: TicketsNotifyService,
+    private readonly businessUnits: BusinessUnitResolverService,
   ) {}
 
   async list(query: TicketsListQuery): Promise<PaginatedResult<Ticket>> {
@@ -57,6 +61,12 @@ export class TicketsService {
 
   async create(dto: CreateTicketDto) {
     const now = new Date();
+    if (!dto.businessUnitCode) {
+      this.logger.debug(
+        `create(): no businessUnitCode supplied, defaulting to '${DEFAULT_BUSINESS_UNIT_CODE}'`,
+      );
+    }
+    const businessUnitId = await this.businessUnits.resolve(dto.businessUnitCode ?? DEFAULT_BUSINESS_UNIT_CODE);
     const ticket = this.repo.create({
       tenant: dto.tenant,
       subject: dto.subject,
@@ -70,6 +80,7 @@ export class TicketsService {
       sla: dto.sla ?? '24h',
       category: dto.category ?? null,
       source: dto.source ?? null,
+      businessUnitId,
       age: '0 min',
       ago: '0 min',
       replies: [],
