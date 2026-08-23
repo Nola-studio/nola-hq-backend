@@ -6,11 +6,11 @@ import { TenantsService } from './tenants.service';
 import { KelasiProvisionClient } from './kelasi-provision.client';
 import { Invoice } from '../invoices/invoice.entity';
 import { MomoEntry } from '../momo/momo-entry.entity';
-import { Ticket } from '../tickets/ticket.entity';
 import { ActivityEvent } from '../activity/activity.entity';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { PlansModule } from '../plans/plans.module';
 import { IamModule } from '../iam/iam.module';
+import { TicketsModule } from '../tickets/tickets.module';
 
 @Module({
   imports: [
@@ -18,7 +18,7 @@ import { IamModule } from '../iam/iam.module';
     // TenantCrm = local-only CRM augmentation (city/owner/nps/notes/etc.)
     // + the HQ-driven provisioning state (kcUserId, kelasiSchoolId,
     //   provisionedAt, provisionError).
-    TypeOrmModule.forFeature([TenantCrm, Invoice, MomoEntry, Ticket, ActivityEvent]),
+    TypeOrmModule.forFeature([TenantCrm, Invoice, MomoEntry, ActivityEvent]),
     // change-plan / app-activation delegate to the canonical billing flow
     // owned by SubscriptionsService (NATS admin.subscription.*).
     SubscriptionsModule,
@@ -28,6 +28,10 @@ import { IamModule } from '../iam/iam.module';
     // tenant→org→memberships resolution for the Users tab (org id lives on
     // the canonical billing tenant; memberships come from nola-iam).
     IamModule,
+    // detail()'s ticket list goes through TicketsService now, not a raw
+    // Repository<Ticket> — no cycle: TicketsModule's own imports
+    // (NolaSdkModule, PushModule, CompanyModule) never reach TenantsModule.
+    TicketsModule,
   ],
   controllers: [TenantsController],
   providers: [TenantsService, KelasiProvisionClient],
