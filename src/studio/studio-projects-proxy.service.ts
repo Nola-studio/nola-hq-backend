@@ -6,7 +6,7 @@ import {
   type RoadmapInitiativePriority,
   type RoadmapInitiativeScope,
 } from '../roadmap/roadmap-initiative.entity';
-import { RoadmapService } from '../roadmap/roadmap.service';
+import { RoadmapService, type RoadmapInitiativeView } from '../roadmap/roadmap.service';
 import { TeamMember } from '../team/team-member.entity';
 import { StudioNotifyService } from './studio-notify.service';
 import { WorkItem, type WorkItemStatus } from '../work-items/work-item.entity';
@@ -172,7 +172,7 @@ export class StudioProjectsProxyService {
     return project;
   }
 
-  private toStudioProject(p: RoadmapInitiative) {
+  private toStudioProject(p: RoadmapInitiative | RoadmapInitiativeView) {
     return {
       id: p.id,
       scope: p.scope,

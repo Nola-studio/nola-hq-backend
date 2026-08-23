@@ -57,11 +57,15 @@ import { BusinessUnitResolverService, DEFAULT_BUSINESS_UNIT_CODE } from '../comp
 /**
  * An initiative as the API returns it: the stored row plus the **effective**
  * progress (derived from its milestones when it has any) and the checklist
- * counters the UI renders.
+ * counters the UI renders. `businessUnit` is trimmed to `{code, name}` and
+ * only present on the endpoints that eager-load the relation (board,
+ * timeline, listInitiatives, findInitiative) — create/update paths don't
+ * reload it, so the key is simply absent there rather than stale/wrong.
  */
-export interface RoadmapInitiativeView extends RoadmapInitiative {
+export interface RoadmapInitiativeView extends Omit<RoadmapInitiative, 'businessUnit'> {
   milestoneCount: number;
   milestonesDone: number;
+  businessUnit?: { code: string; name: string };
   /** Only hydrated by `findInitiative` — the list views stay light. */
   milestones?: RoadmapMilestone[];
 }
@@ -155,13 +159,17 @@ export class RoadmapService {
    * `scope: 'initiative'` to see only bounded work.
    */
   async board(scope?: RoadmapInitiativeScope): Promise<RoadmapBoardColumn<RoadmapInitiativeView>[]> {
-    const views = await this.withProgress(await this.initiatives.find({ where: scope ? { scope } : {} }));
+    const views = await this.withProgress(
+      await this.initiatives.find({ where: scope ? { scope } : {}, relations: ['businessUnit'] }),
+    );
     return buildBoard(views);
   }
 
   /** Bucketed by quarter, unscheduled ones last. Same opt-in `scope` as `board()`. */
   async timeline(scope?: RoadmapInitiativeScope): Promise<RoadmapTimelineBucket<RoadmapInitiativeView>[]> {
-    const views = await this.withProgress(await this.initiatives.find({ where: scope ? { scope } : {} }));
+    const views = await this.withProgress(
+      await this.initiatives.find({ where: scope ? { scope } : {}, relations: ['businessUnit'] }),
+    );
     return buildTimeline(views);
   }
 
@@ -472,13 +480,17 @@ export class RoadmapService {
     const rows = await this.initiatives.find({
       where,
       order: { position: 'ASC', createdAt: 'ASC' },
+      relations: ['businessUnit'],
     });
     return this.withProgress(rows);
   }
 
   /** Single initiative, hydrated with its milestones (checklist order). A durable product's id 404s here — it's `/projects`' row, not `/roadmap`'s. */
   async findInitiative(id: string): Promise<RoadmapInitiativeView> {
-    const initiative = await this.initiatives.findOne({ where: { id, scope: 'initiative' } });
+    const initiative = await this.initiatives.findOne({
+      where: { id, scope: 'initiative' },
+      relations: ['businessUnit'],
+    });
     if (!initiative) throw new NotFoundException(`Initiative ${id} introuvable`);
     const milestones = await this.milestones.find({
       where: { initiativeId: id },
@@ -938,6 +950,9 @@ export class RoadmapService {
       progress: deriveInitiativeProgress(initiative.progress, milestones),
       milestoneCount: milestones.length,
       milestonesDone: milestones.filter((m) => m.done).length,
+      businessUnit: initiative.businessUnit
+        ? { code: initiative.businessUnit.code, name: initiative.businessUnit.name }
+        : undefined,
     };
   }
 }
