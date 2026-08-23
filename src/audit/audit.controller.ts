@@ -20,6 +20,7 @@ export class AuditController {
   constructor(private readonly svc: AuditService) {}
 
   @Get()
+  @HqRoles(HqRole.Owner)
   list(@Query() query: AuditQuery) {
     return this.svc.list(query);
   }

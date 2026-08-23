@@ -7,6 +7,7 @@ import { HqRole } from '../common/auth/hq-role.enum';
 @ApiBearerAuth()
 @ApiTags('apps')
 @Controller('apps')
+@HqRoles(HqRole.Viewer)
 export class AppsController {
   constructor(private readonly svc: AppsService) {}
 

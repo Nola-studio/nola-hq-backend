@@ -9,6 +9,7 @@ import { HqRole } from '../common/auth/hq-role.enum';
 @ApiBearerAuth()
 @ApiTags('momo')
 @Controller('momo')
+@HqRoles(HqRole.Viewer)
 export class MomoController {
   constructor(private readonly svc: MomoService) {}
 

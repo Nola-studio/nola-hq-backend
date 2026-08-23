@@ -40,6 +40,7 @@ export class StudioRequestsController {
   }
 
   @Post()
+  @HqRoles(HqRole.Viewer)
   @ApiOperation({ summary: 'File a request — any authenticated user, not just operators' })
   create(@Body() dto: CreateStudioRequestDto, @CurrentUser() user: AuthenticatedUser) {
     return this.svc.create(dto, user.email);

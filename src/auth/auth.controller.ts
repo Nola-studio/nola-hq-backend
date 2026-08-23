@@ -15,6 +15,7 @@ import { AuthService } from './auth.service';
 import { CookieConfigService } from './cookie-config';
 import { LoginDto } from './dto/login.dto';
 import { Public } from '../common/auth/public.decorator';
+import { HqRoles } from '../common/auth/hq-roles.decorator';
 import {
   CurrentUser,
   type AuthenticatedUser,
@@ -111,6 +112,7 @@ export class AuthController {
   }
 
   @Get('me')
+  @HqRoles(HqRole.Viewer)
   async me(@CurrentUser() user: AuthenticatedUser | undefined) {
     if (!user) throw new UnauthorizedException('not_authenticated');
     const profile = await this.auth.profile(user.sub, user.email);

@@ -22,6 +22,7 @@ import { HqRole } from '../common/auth/hq-role.enum';
 @ApiBearerAuth()
 @ApiTags('tickets')
 @Controller('tickets')
+@HqRoles(HqRole.Viewer)
 export class TicketsController {
   constructor(private readonly svc: TicketsService) {}
 

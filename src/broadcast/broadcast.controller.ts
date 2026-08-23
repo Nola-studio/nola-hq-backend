@@ -20,6 +20,7 @@ import { HqRole } from '../common/auth/hq-role.enum';
 @ApiBearerAuth()
 @ApiTags('broadcast')
 @Controller('broadcasts')
+@HqRoles(HqRole.Viewer)
 export class BroadcastController {
   constructor(private readonly svc: BroadcastService) {}
 

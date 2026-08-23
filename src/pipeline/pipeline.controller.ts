@@ -20,6 +20,7 @@ import { HqRole } from '../common/auth/hq-role.enum';
 @ApiBearerAuth()
 @ApiTags('pipeline')
 @Controller('pipeline')
+@HqRoles(HqRole.Viewer)
 export class PipelineController {
   constructor(private readonly svc: PipelineService) {}
 

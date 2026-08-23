@@ -15,6 +15,7 @@ import { HqRole } from '../common/auth/hq-role.enum';
 @ApiBearerAuth()
 @ApiTags('deploys')
 @Controller('deploys')
+@HqRoles(HqRole.Viewer)
 export class DeploysController {
   constructor(private readonly svc: DeploysService) {}
 

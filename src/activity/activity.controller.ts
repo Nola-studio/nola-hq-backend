@@ -17,6 +17,7 @@ class CreateActivityEventDto {
 @ApiBearerAuth()
 @ApiTags('activity')
 @Controller('activity')
+@HqRoles(HqRole.Viewer)
 export class ActivityController {
   constructor(private readonly svc: ActivityService) {}
 

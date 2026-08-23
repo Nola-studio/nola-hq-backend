@@ -21,6 +21,7 @@ import {
 @ApiBearerAuth()
 @ApiTags('business-operations')
 @Controller('business')
+@HqRoles(HqRole.Viewer)
 export class BusinessOperationsController {
   constructor(private readonly svc: BusinessOperationsService) {}
 
@@ -108,5 +109,6 @@ export class BusinessOperationsController {
   updateTimeEntry(@Param('id') id: string, @Body() dto: UpdateProjectTimeEntryDto) { return this.svc.updateTimeEntry(id, dto); }
 
   @Get('cashflow')
+  @HqRoles(HqRole.Owner)
   cashflow(@Query() query: CashflowQueryDto) { return this.svc.cashflow(query); }
 }

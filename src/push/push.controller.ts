@@ -19,6 +19,8 @@ import {
 } from 'class-validator';
 
 import { PushService } from './push.service';
+import { HqRoles } from '../common/auth/hq-roles.decorator';
+import { HqRole } from '../common/auth/hq-role.enum';
 
 class PushKeysDto {
   @IsString()
@@ -66,6 +68,7 @@ interface AuthedRequest {
 @ApiBearerAuth()
 @ApiTags('notifications')
 @Controller('notifications/push')
+@HqRoles(HqRole.Viewer)
 export class PushController {
   constructor(private readonly push: PushService) {}
 
