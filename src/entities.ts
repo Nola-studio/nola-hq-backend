@@ -1,6 +1,9 @@
 import { ActivityEvent } from './activity/activity.entity';
 import { AuditEntry } from './audit/audit.entity';
 import { Broadcast } from './broadcast/broadcast.entity';
+import { BusinessUnit } from './company/business-unit.entity';
+import { LegalEntity } from './company/legal-entity.entity';
+import { Product } from './company/product.entity';
 import { Country } from './countries/country.entity';
 import { Deploy } from './deploys/deploy.entity';
 import { HealthEntry } from './health/health-entry.entity';
@@ -65,6 +68,9 @@ export const entities = [
   ActivityEvent,
   AuditEntry,
   Broadcast,
+  BusinessUnit,
+  LegalEntity,
+  Product,
   Country,
   Deploy,
   HealthEntry,
