@@ -18,6 +18,15 @@ export interface TicketsListQuery extends PaginationDto {
   priority?: string;
 }
 
+/** `Ticket` as the API returns it: `businessUnit` trimmed to `{code, name}` rather than the full joined row. */
+export type TicketResponse = Omit<Ticket, 'businessUnit'> & {
+  businessUnit: { code: string; name: string };
+};
+
+function toTicketResponse(t: Ticket): TicketResponse {
+  return { ...t, businessUnit: { code: t.businessUnit!.code, name: t.businessUnit!.name } };
+}
+
 @Injectable()
 export class TicketsService {
   private readonly logger = new Logger(TicketsService.name);
@@ -29,10 +38,10 @@ export class TicketsService {
     private readonly businessUnits: BusinessUnitResolverService,
   ) {}
 
-  async list(query: TicketsListQuery): Promise<PaginatedResult<Ticket>> {
+  async list(query: TicketsListQuery): Promise<PaginatedResult<TicketResponse>> {
     const page = query.page ?? 1;
     const limit = query.limit ?? 50;
-    const qb = this.repo.createQueryBuilder('t');
+    const qb = this.repo.createQueryBuilder('t').leftJoinAndSelect('t.businessUnit', 'businessUnit');
     if (query.tenant) qb.andWhere('t.tenant = :tenant', { tenant: query.tenant });
     if (query.status) qb.andWhere('t.status = :status', { status: query.status });
     if (query.assignee)
@@ -50,13 +59,13 @@ export class TicketsService {
       .skip((page - 1) * limit)
       .take(limit)
       .getMany();
-    return { items, total, page, limit };
+    return { items: items.map(toTicketResponse), total, page, limit };
   }
 
-  async findOne(id: number) {
-    const t = await this.repo.findOne({ where: { id } });
+  async findOne(id: number): Promise<TicketResponse> {
+    const t = await this.repo.findOne({ where: { id }, relations: ['businessUnit'] });
     if (!t) throw new NotFoundException(`Ticket ${id} introuvable`);
-    return t;
+    return toTicketResponse(t);
   }
 
   async create(dto: CreateTicketDto) {

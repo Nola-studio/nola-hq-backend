@@ -214,7 +214,10 @@ async function main() {
           position: 0,
           archived: false,
           businessUnitId: defaultBusinessUnit.id,
-          isInternal: false,
+          // Only Nolaa HQ is internal-only work — every other seeded project
+          // (K-River, Yekoli, Butterfly, Mycvmatcher) is a client-facing product,
+          // matching the 'nolaa-hq' row's is_internal=true in `products`.
+          isInternal: name === 'Nolaa HQ',
           createdAt: now,
           updatedAt: now,
         }),

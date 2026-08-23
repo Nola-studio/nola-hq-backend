@@ -6,7 +6,7 @@ import {
   type RoadmapInitiativePriority,
   type RoadmapInitiativeScope,
 } from '../roadmap/roadmap-initiative.entity';
-import { RoadmapService } from '../roadmap/roadmap.service';
+import { RoadmapService, type RoadmapInitiativeView } from '../roadmap/roadmap.service';
 import { TeamMember } from '../team/team-member.entity';
 import { StudioNotifyService } from './studio-notify.service';
 import { WorkItem, type WorkItemStatus } from '../work-items/work-item.entity';
@@ -87,7 +87,11 @@ export class StudioProjectsProxyService {
     // grouped client-side; the /projects screen passes `scope=project`.
     const where: FindOptionsWhere<RoadmapInitiative> = {};
     if (filter.scope) where.scope = filter.scope;
-    const rows = await this.projects.find({ where, order: { keyPrefix: 'ASC', title: 'ASC' } });
+    const rows = await this.projects.find({
+      where,
+      order: { keyPrefix: 'ASC', title: 'ASC' },
+      relations: ['businessUnit'],
+    });
     return rows.map((p) => this.toStudioProject(p));
   }
 
@@ -167,12 +171,15 @@ export class StudioProjectsProxyService {
    * `RoadmapService`'s own methods — each screen only ever sees its own rows.
    */
   private async findInitiative(id: string, expectedScope: RoadmapInitiativeScope): Promise<RoadmapInitiative> {
-    const project = await this.projects.findOne({ where: { id, scope: expectedScope } });
+    const project = await this.projects.findOne({
+      where: { id, scope: expectedScope },
+      relations: ['businessUnit'],
+    });
     if (!project) throw new NotFoundException(`Projet ${id} introuvable`);
     return project;
   }
 
-  private toStudioProject(p: RoadmapInitiative) {
+  private toStudioProject(p: RoadmapInitiative | RoadmapInitiativeView) {
     return {
       id: p.id,
       scope: p.scope,
@@ -180,6 +187,8 @@ export class StudioProjectsProxyService {
       key: p.keyPrefix,
       description: p.summary,
       status: p.archived ? 'archived' : 'active',
+      businessUnit: p.businessUnit ? { code: p.businessUnit.code, name: p.businessUnit.name } : undefined,
+      isInternal: p.isInternal,
       color: p.color,
       ownerEmail: p.owner,
       type: p.type,
