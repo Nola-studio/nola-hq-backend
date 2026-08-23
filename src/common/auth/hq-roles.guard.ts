@@ -8,27 +8,40 @@ import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import { HqRole, hasHqRole } from './hq-role.enum';
 import { HQ_ROLES_KEY } from './hq-roles.decorator';
+import { IS_PUBLIC_KEY } from './public.decorator';
 import type { AuthenticatedUser } from './current-user.decorator';
 
 /**
  * Enforces `@HqRoles(...)` metadata on routes. Run *after* `JwtAuthGuard`
- * so `req.user` is already hydrated. Endpoints without the decorator are
- * left untouched — they only need authentication.
+ * so `req.user` is already hydrated.
  *
- * To make this active, register it as a global guard in `app.module.ts`
- * AFTER the JwtAuthGuard provider. Both must point at the same instance
- * via `useExisting` so they share the request context.
+ * Fail-closed policy:
+ * - Endpoints marked `@Public()` are allowed through.
+ * - Endpoints declaring `@HqRoles(...)` require the caller's session to satisfy
+ *   the minimum required role (hierarchical check).
+ * - Endpoints with NO `@HqRoles` metadata fail closed with 403 (`missing_hq_roles_guard`).
  */
 @Injectable()
 export class HqRolesGuard implements CanActivate {
   constructor(private readonly reflector: Reflector) {}
 
   canActivate(context: ExecutionContext): boolean {
+    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (isPublic) return true;
+
     const required = this.reflector.getAllAndOverride<HqRole[] | undefined>(
       HQ_ROLES_KEY,
       [context.getHandler(), context.getClass()],
     );
-    if (!required || required.length === 0) return true;
+    if (!required || required.length === 0) {
+      throw new ForbiddenException({
+        code: 'missing_hq_roles_guard',
+        message: 'Endpoint is not marked with @HqRoles or @Public',
+      });
+    }
 
     const req = context
       .switchToHttp()
@@ -49,3 +62,4 @@ export class HqRolesGuard implements CanActivate {
     return true;
   }
 }
+
