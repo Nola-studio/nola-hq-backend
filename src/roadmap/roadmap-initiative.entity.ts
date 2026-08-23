@@ -7,6 +7,7 @@ import {
   PrimaryGeneratedColumn,
 } from 'typeorm';
 import { RoadmapObjective } from './roadmap-objective.entity';
+import { BusinessUnit } from '../company/business-unit.entity';
 
 export type RoadmapInitiativeKind = 'product' | 'tech' | 'gtm' | 'ops';
 export type RoadmapInitiativeStatus =
@@ -64,6 +65,18 @@ export class RoadmapInitiative {
   @ManyToOne(() => RoadmapObjective, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'objective_id' })
   objective?: RoadmapObjective | null;
+
+  @Column({ type: 'uuid', name: 'business_unit_id' })
+  @Index()
+  businessUnitId!: string;
+
+  @ManyToOne(() => BusinessUnit, { onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'business_unit_id' })
+  businessUnit?: BusinessUnit;
+
+  /** Internal-only work (e.g. Nolaa HQ itself), as opposed to a client-facing product. */
+  @Column({ type: 'boolean', name: 'is_internal', default: false })
+  isInternal!: boolean;
 
   @Column({ type: 'varchar', length: 200 })
   title!: string;

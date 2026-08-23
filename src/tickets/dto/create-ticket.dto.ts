@@ -27,6 +27,8 @@ export class CreateTicketDto {
   category?: (typeof CATEGORIES)[number];
   /** Where the ticket came from, e.g. 'kelasi-owner-app'. */
   @IsOptional() @IsString() source?: string;
+  /** BusinessUnit code, e.g. 'khi-lab' — not a UUID. Defaults to 'khi-lab' when omitted. */
+  @IsOptional() @IsString() businessUnitCode?: string;
 }
 
 export class AddReplyDto {

@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -51,6 +52,7 @@ import {
   ListInitiativesDto,
   ListObjectivesDto,
 } from './dto/list-roadmap.dto';
+import { BusinessUnitResolverService, DEFAULT_BUSINESS_UNIT_CODE } from '../company/business-unit-resolver.service';
 
 /**
  * An initiative as the API returns it: the stored row plus the **effective**
@@ -124,6 +126,8 @@ interface ObjectiveContext {
  */
 @Injectable()
 export class RoadmapService {
+  private readonly logger = new Logger(RoadmapService.name);
+
   constructor(
     @InjectRepository(RoadmapObjective)
     private readonly objectives: Repository<RoadmapObjective>,
@@ -139,6 +143,7 @@ export class RoadmapService {
     private readonly snapshots: Repository<MetricSnapshot>,
     @InjectRepository(WorkItem)
     private readonly workItems: Repository<WorkItem>,
+    private readonly businessUnits: BusinessUnitResolverService,
   ) {}
 
   // ── board & timeline ─────────────────────────────────────────────
@@ -510,6 +515,12 @@ export class RoadmapService {
     if (dto.objectiveId) await this.assertObjectiveExists(dto.objectiveId);
     const now = new Date();
     const status = dto.status ?? 'idea';
+    if (!dto.businessUnitCode) {
+      this.logger.debug(
+        `createInitiative(): no businessUnitCode supplied, defaulting to '${DEFAULT_BUSINESS_UNIT_CODE}'`,
+      );
+    }
+    const businessUnitId = await this.businessUnits.resolve(dto.businessUnitCode ?? DEFAULT_BUSINESS_UNIT_CODE);
     const initiative = this.initiatives.create({
       objectiveId: dto.objectiveId ?? null,
       title: dto.title,
@@ -530,6 +541,8 @@ export class RoadmapService {
       tenantId: dto.tenantId ?? null,
       progress: dto.progress ?? 0,
       country: dto.country ?? null,
+      businessUnitId,
+      isInternal: dto.isInternal ?? false,
       // Lands at the bottom of its column — a new card never jumps the queue.
       // Counted within its own scope: a project's "position" (unused by any
       // UI today) must not be perturbed by how many initiatives share its status.

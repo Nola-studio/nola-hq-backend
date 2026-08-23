@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsEmail,
   IsIn,
   IsInt,
@@ -85,4 +86,7 @@ export class CreateInitiativeDto {
   @IsOptional() @IsString() @MaxLength(120) tenantId?: string;
   @IsOptional() @IsInt() @Min(0) @Max(100) progress?: number;
   @IsOptional() @IsIn(INITIATIVE_COUNTRIES as unknown as string[]) country?: RoadmapInitiativeCountry;
+  /** BusinessUnit code, e.g. 'khi-lab' — not a UUID. Defaults to 'khi-lab' when omitted. */
+  @IsOptional() @IsString() businessUnitCode?: string;
+  @IsOptional() @IsBoolean() isInternal?: boolean;
 }

@@ -8,9 +8,10 @@ import { TicketsNotifyService } from './tickets-notify.service';
 import { SupportIngestListener } from './support-ingest.listener';
 import { PushModule } from '../push/push.module';
 import { TeamMember } from '../team/team-member.entity';
+import { CompanyModule } from '../company/company.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Ticket, TeamMember]), NolaSdkModule, PushModule],
+  imports: [TypeOrmModule.forFeature([Ticket, TeamMember]), NolaSdkModule, PushModule, CompanyModule],
   controllers: [TicketsController],
   providers: [TicketsService, TicketsNotifyService, SupportIngestListener],
   exports: [TicketsService],
