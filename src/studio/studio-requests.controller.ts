@@ -8,6 +8,7 @@ import { ListStudioRequestsDto } from './dto/list-studio-requests.dto';
 import { ConvertStudioRequestDto } from './dto/convert-studio-request.dto';
 import { HqRoles } from '../common/auth/hq-roles.decorator';
 import { HqRole } from '../common/auth/hq-role.enum';
+import { AllowAuthenticated } from '../common/auth/allow-authenticated.decorator';
 import { CurrentUser, type AuthenticatedUser } from '../common/auth/current-user.decorator';
 
 /**
@@ -40,7 +41,7 @@ export class StudioRequestsController {
   }
 
   @Post()
-  @HqRoles(HqRole.Viewer)
+  @AllowAuthenticated()
   @ApiOperation({ summary: 'File a request — any authenticated user, not just operators' })
   create(@Body() dto: CreateStudioRequestDto, @CurrentUser() user: AuthenticatedUser) {
     return this.svc.create(dto, user.email);

@@ -36,6 +36,9 @@ describe('hasHqRole', () => {
   });
 });
 
+import { IS_SESSION_DISCOVERY_KEY } from './session-discovery.decorator';
+import { ALLOW_AUTHENTICATED_KEY } from './allow-authenticated.decorator';
+
 /** Minimal ExecutionContext double — only what canActivate() reads. */
 function makeContext(
   userRoles: string[] | undefined,
@@ -51,11 +54,18 @@ function makeContext(
   } as unknown as ExecutionContext;
 }
 
-/** Reflector double returning configured metadata for IS_PUBLIC_KEY and HQ_ROLES_KEY. */
-function makeReflector(options: { required?: HqRole[]; isPublic?: boolean }): Reflector {
+/** Reflector double returning configured metadata. */
+function makeReflector(options: {
+  required?: HqRole[];
+  isPublic?: boolean;
+  isSessionDiscovery?: boolean;
+  allowAuthenticated?: boolean;
+}): Reflector {
   return {
     getAllAndOverride: (key: string) => {
       if (key === IS_PUBLIC_KEY) return options.isPublic ?? false;
+      if (key === IS_SESSION_DISCOVERY_KEY) return options.isSessionDiscovery ?? false;
+      if (key === ALLOW_AUTHENTICATED_KEY) return options.allowAuthenticated ?? false;
       if (key === HQ_ROLES_KEY) return options.required;
       return undefined;
     },
@@ -69,18 +79,16 @@ describe('HqRolesGuard.canActivate (fail-closed)', () => {
     expect(guard.canActivate(makeContext(undefined))).toBe(true);
   });
 
-  test('GET /auth/me (AuthController.me) is allowed through without roles for session discovery', () => {
-    const guard = new HqRolesGuard(makeReflector({ isPublic: false, required: undefined }));
-    expect(
-      guard.canActivate(
-        makeContext([], { class: 'AuthController', handler: 'me' }),
-      ),
-    ).toBe(true);
-    expect(
-      guard.canActivate(
-        makeContext(['school_admin'], { class: 'AuthController', handler: 'me' }),
-      ),
-    ).toBe(true);
+  test('a route marked with @SessionDiscovery() is allowed through without roles for session discovery', () => {
+    const guard = new HqRolesGuard(makeReflector({ isSessionDiscovery: true }));
+    expect(guard.canActivate(makeContext([]))).toBe(true);
+    expect(guard.canActivate(makeContext(['school_admin']))).toBe(true);
+  });
+
+  test('a route marked with @AllowAuthenticated() is allowed through for any authenticated user', () => {
+    const guard = new HqRolesGuard(makeReflector({ allowAuthenticated: true }));
+    expect(guard.canActivate(makeContext([]))).toBe(true);
+    expect(guard.canActivate(makeContext(['unrelated_role']))).toBe(true);
   });
 
   test('a route with NO @HqRoles and NOT @Public fails closed with 403 missing_hq_roles_guard', () => {
@@ -195,6 +203,8 @@ describe('Exhaustive Route Gating Audit', () => {
         if (ts.isClassDeclaration(node)) {
           let classHqRoles: string[] | null = null;
           let classIsPublic = false;
+          let classIsSessionDiscovery = false;
+          let classAllowAuthenticated = false;
 
           const classDecorators = ts.canHaveDecorators(node) ? ts.getDecorators(node) : [];
           if (classDecorators) {
@@ -207,6 +217,12 @@ describe('Exhaustive Route Gating Audit', () => {
               if (name === 'Public') {
                 classIsPublic = true;
               }
+              if (name === 'SessionDiscovery') {
+                classIsSessionDiscovery = true;
+              }
+              if (name === 'AllowAuthenticated') {
+                classAllowAuthenticated = true;
+              }
             }
           }
 
@@ -216,6 +232,8 @@ describe('Exhaustive Route Gating Audit', () => {
               let isRoute = false;
               let methodHqRoles: string[] | null = null;
               let methodIsPublic = false;
+              let methodIsSessionDiscovery = false;
+              let methodAllowAuthenticated = false;
 
               if (methodDecorators) {
                 for (const dec of methodDecorators) {
@@ -230,20 +248,27 @@ describe('Exhaustive Route Gating Audit', () => {
                   if (name === 'Public') {
                     methodIsPublic = true;
                   }
+                  if (name === 'SessionDiscovery') {
+                    methodIsSessionDiscovery = true;
+                  }
+                  if (name === 'AllowAuthenticated') {
+                    methodAllowAuthenticated = true;
+                  }
                 }
               }
 
               if (isRoute) {
                 const effectiveRoles = methodHqRoles || classHqRoles;
                 const isPublic = methodIsPublic || classIsPublic;
+                const isSessionDiscovery = methodIsSessionDiscovery || classIsSessionDiscovery;
+                const isAllowAuthenticated = methodAllowAuthenticated || classAllowAuthenticated;
                 const relPath = path.relative(srcDir, filePath).replace(/\\/g, '/');
                 const methodName = member.name.getText(sourceFile);
-                const isAuthDiscoveryException =
-                  relPath.endsWith('auth/auth.controller.ts') && methodName === 'me';
 
                 if (
                   !isPublic &&
-                  !isAuthDiscoveryException &&
+                  !isSessionDiscovery &&
+                  !isAllowAuthenticated &&
                   (!effectiveRoles || effectiveRoles.length === 0)
                 ) {
                   const { line } = sourceFile.getLineAndCharacterOfPosition(member.getStart(sourceFile));

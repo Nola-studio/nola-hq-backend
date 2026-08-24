@@ -9,6 +9,8 @@ import type { Request } from 'express';
 import { HqRole, hasHqRole } from './hq-role.enum';
 import { HQ_ROLES_KEY } from './hq-roles.decorator';
 import { IS_PUBLIC_KEY } from './public.decorator';
+import { IS_SESSION_DISCOVERY_KEY } from './session-discovery.decorator';
+import { ALLOW_AUTHENTICATED_KEY } from './allow-authenticated.decorator';
 import type { AuthenticatedUser } from './current-user.decorator';
 
 /**
@@ -17,9 +19,12 @@ import type { AuthenticatedUser } from './current-user.decorator';
  *
  * Fail-closed policy:
  * - Endpoints marked `@Public()` are allowed through.
+ * - Endpoints marked `@SessionDiscovery()` or `@AllowAuthenticated()` are allowed through
+ *   for any authenticated session without role restrictions.
  * - Endpoints declaring `@HqRoles(...)` require the caller's session to satisfy
  *   the minimum required role (hierarchical check).
- * - Endpoints with NO `@HqRoles` metadata fail closed with 403 (`missing_hq_roles_guard`).
+ * - Endpoints with NO `@HqRoles`, `@Public`, `@SessionDiscovery`, or `@AllowAuthenticated`
+ *   metadata fail closed with 403 (`missing_hq_roles_guard`).
  */
 @Injectable()
 export class HqRolesGuard implements CanActivate {
@@ -32,14 +37,17 @@ export class HqRolesGuard implements CanActivate {
     ]);
     if (isPublic) return true;
 
-    // GET /auth/me is the session discovery endpoint. Any authenticated session
-    // must reach it to discover its own roles and derive HQ capabilities.
-    if (
-      context.getClass().name === 'AuthController' &&
-      context.getHandler().name === 'me'
-    ) {
-      return true;
-    }
+    const isSessionDiscovery = this.reflector.getAllAndOverride<boolean>(
+      IS_SESSION_DISCOVERY_KEY,
+      [context.getHandler(), context.getClass()],
+    );
+    if (isSessionDiscovery) return true;
+
+    const allowAuthenticated = this.reflector.getAllAndOverride<boolean>(
+      ALLOW_AUTHENTICATED_KEY,
+      [context.getHandler(), context.getClass()],
+    );
+    if (allowAuthenticated) return true;
 
     const required = this.reflector.getAllAndOverride<HqRole[] | undefined>(
       HQ_ROLES_KEY,
