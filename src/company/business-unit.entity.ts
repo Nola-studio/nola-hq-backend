@@ -25,6 +25,14 @@ export class BusinessUnit {
   @Column({ type: 'boolean', name: 'is_active', default: true })
   isActive!: boolean;
 
+  /** PDF display override — falls back to `LEGAL_ENTITY.tagline` when null. */
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  tagline!: string | null;
+
+  /** PDF footer override — falls back to `LEGAL_ENTITY.footerLine` when null. */
+  @Column({ type: 'varchar', length: 200, name: 'footer_line', nullable: true })
+  footerLine!: string | null;
+
   @Column({ name: 'created_at' })
   createdAt!: Date;
 

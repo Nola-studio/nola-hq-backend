@@ -80,6 +80,8 @@ export class CreateBusinessContractDto {
   @IsOptional() @Matches(DATE_PATTERN) endDate?: string;
   @IsOptional() @IsString() @MaxLength(200) paymentTerms?: string;
   @IsOptional() @IsString() @MaxLength(5_000) notes?: string;
+  /** BusinessUnit code, e.g. 'khi-lab' — not a UUID. Defaults to 'khi-lab' when omitted. */
+  @IsOptional() @IsString() businessUnitCode?: string;
 }
 
 export class UpdateBusinessContractDto extends PartialType(CreateBusinessContractDto) {}
@@ -128,6 +130,8 @@ export class CreateBusinessInvoiceDto {
   lines?: BusinessInvoiceLineDto[];
   @IsOptional() @Type(() => Number) @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(100) taxRate?: number;
   @IsOptional() @IsString() @MaxLength(40) taxLabel?: string;
+  /** BusinessUnit code, e.g. 'khi-lab' — not a UUID. Defaults to 'khi-lab' when omitted. */
+  @IsOptional() @IsString() businessUnitCode?: string;
 }
 
 export class UpdateBusinessInvoiceDto extends PartialType(CreateBusinessInvoiceDto) {}
