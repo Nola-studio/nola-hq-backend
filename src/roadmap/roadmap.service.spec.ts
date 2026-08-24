@@ -1,7 +1,7 @@
 import { test, expect, describe, mock } from 'bun:test';
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { RoadmapService } from './roadmap.service';
-import type { RoadmapInitiativeStatus } from './roadmap-initiative.entity';
+import type { RoadmapInitiativeScope, RoadmapInitiativeStatus } from './roadmap-initiative.entity';
 
 /**
  * `move` wiring: the reordering plan is computed by `planMove` (unit-tested
@@ -15,6 +15,8 @@ interface Row {
   status: RoadmapInitiativeStatus;
   position: number;
   progress: number;
+  scope?: RoadmapInitiativeScope;
+  businessUnitId?: string;
   updatedAt?: Date;
 }
 
@@ -22,8 +24,9 @@ function row(
   id: string,
   status: RoadmapInitiativeStatus,
   position: number,
+  scope: RoadmapInitiativeScope = 'initiative',
 ): Row {
-  return { id, status, position, progress: 0 };
+  return { id, status, position, progress: 0, scope, businessUnitId: 'bu-khi-lab-uuid-1111' };
 }
 
 /**
@@ -32,8 +35,28 @@ function row(
  */
 function makeInitiativesRepo(rows: Row[]) {
   return {
-    findOne: mock(async ({ where }: any) => rows.find((r) => r.id === where.id) ?? null),
-    find: mock(async () => rows.map((r) => ({ ...r }))),
+    findOne: mock(async ({ where }: any) => {
+      const buIn = where?.businessUnitId?._value ?? where?.businessUnitId;
+      return (
+        rows.find(
+          (r) =>
+            r.id === where.id &&
+            (!where.scope || (r.scope ?? 'initiative') === where.scope) &&
+            (!buIn || buIn.includes(r.businessUnitId ?? 'bu-khi-lab-uuid-1111')),
+        ) ?? null
+      );
+    }),
+    find: mock(async ({ where }: any = {}) => {
+      const buIn = where?.businessUnitId?._value ?? where?.businessUnitId;
+      let res = rows.map((r) => ({ ...r, scope: r.scope ?? 'initiative' }));
+      if (where?.scope) res = res.filter((r) => r.scope === where.scope);
+      if (where?.status) {
+        const statuses = where.status?._value ?? (Array.isArray(where.status) ? where.status : [where.status]);
+        res = res.filter((r) => statuses.includes(r.status));
+      }
+      if (buIn) res = res.filter((r) => buIn.includes(r.businessUnitId ?? 'bu-khi-lab-uuid-1111'));
+      return res;
+    }),
     save: mock(async (x: unknown) => x),
     count: mock(async () => rows.length),
   } as any;
@@ -45,6 +68,17 @@ const objectives = { findOne: mock(async () => null) } as any;
 /** Key results / trajectory points / snapshots are out of scope here. */
 const empty = () => ({ find: mock(async () => []), count: mock(async () => 0) }) as any;
 
+const businessUnitsMock = {
+  resolveAllowedUnits: mock(async (roles?: string[]) => {
+    if (!roles) return ['bu-khi-lab-uuid-1111', 'bu-vantelis-uuid-2222'];
+    if (roles.includes('hq:owner')) return ['bu-khi-lab-uuid-1111', 'bu-vantelis-uuid-2222'];
+    if (roles.includes('hq:bu:khi-lab')) return ['bu-khi-lab-uuid-1111'];
+    if (roles.includes('hq:bu:vantelis-it')) return ['bu-vantelis-uuid-2222'];
+    return [];
+  }),
+  resolve: mock(async (code: string) => `bu-${code}-uuid`),
+} as any;
+
 /** The service under test, with only the repositories these cases touch. */
 function makeService(initiatives: any, milestones: any = noMilestones, workItems: any = empty()) {
   return new RoadmapService(
@@ -55,6 +89,7 @@ function makeService(initiatives: any, milestones: any = noMilestones, workItems
     empty(),
     empty(),
     workItems,
+    businessUnitsMock,
   );
 }
 
@@ -545,3 +580,179 @@ describe('RoadmapService objective staging guards', () => {
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 });
+
+describe('RoadmapService (Brand Scope Filtering)', () => {
+  const KHI_LAB_ID = 'bu-khi-lab-uuid-1111';
+  const VANTELIS_ID = 'bu-vantelis-uuid-2222';
+
+  const sampleInitiatives: any[] = [
+    {
+      id: 'init-1',
+      title: 'Yekoli Feature',
+      scope: 'initiative',
+      status: 'planned',
+      position: 0,
+      businessUnitId: KHI_LAB_ID,
+      businessUnit: { id: KHI_LAB_ID, code: 'khi-lab', name: 'Khi-Lab' },
+      createdAt: new Date(),
+    },
+    {
+      id: 'init-2',
+      title: 'Vantelis Network Upgrade',
+      scope: 'initiative',
+      status: 'planned',
+      position: 1,
+      businessUnitId: VANTELIS_ID,
+      businessUnit: { id: VANTELIS_ID, code: 'vantelis-it', name: 'Vantelis IT' },
+      createdAt: new Date(),
+    },
+  ];
+
+  function makeScopeService(rows: any[]) {
+    const repo = {
+      find: mock(async ({ where }: any = {}) => {
+        let res = [...rows];
+        if (where?.scope) res = res.filter((r) => r.scope === where.scope);
+        const buIn = where?.businessUnitId?._value ?? where?.businessUnitId;
+        if (buIn) res = res.filter((r) => buIn.includes(r.businessUnitId));
+        return res;
+      }),
+      findOne: mock(async ({ where }: any) => {
+        let res = [...rows];
+        if (where.id) res = res.filter((r) => r.id === where.id);
+        if (where.scope) res = res.filter((r) => r.scope === where.scope);
+        const buIn = where?.businessUnitId?._value ?? where?.businessUnitId;
+        if (buIn) res = res.filter((r) => buIn.includes(r.businessUnitId));
+        return res[0] ?? null;
+      }),
+      save: mock(async (x: any) => x),
+      remove: mock(async (x: any) => x),
+    };
+    return makeService(repo, noMilestones, empty());
+  }
+
+  describe('listInitiatives', () => {
+    test('hq:owner sees initiatives from all brands', async () => {
+      const svc = makeScopeService(sampleInitiatives);
+      const res = await svc.listInitiatives({}, ['hq:owner']);
+      expect(res.length).toBe(2);
+      expect(res.map((i) => i.id)).toEqual(['init-1', 'init-2']);
+    });
+
+    test('khi-lab viewer sees only khi-lab initiatives', async () => {
+      const svc = makeScopeService(sampleInitiatives);
+      const res = await svc.listInitiatives({}, ['hq:viewer', 'hq:bu:khi-lab']);
+      expect(res.length).toBe(1);
+      expect(res[0].id).toBe('init-1');
+    });
+
+    test('unscoped non-owner sees zero initiatives (fail-closed)', async () => {
+      const svc = makeScopeService(sampleInitiatives);
+      const res = await svc.listInitiatives({}, ['hq:viewer']);
+      expect(res).toEqual([]);
+    });
+  });
+
+  describe('findInitiative', () => {
+    test('hq:owner can view any initiative', async () => {
+      const svc = makeScopeService(sampleInitiatives);
+      const i1 = await svc.findInitiative('init-1', ['hq:owner']);
+      expect(i1.id).toBe('init-1');
+      const i2 = await svc.findInitiative('init-2', ['hq:owner']);
+      expect(i2.id).toBe('init-2');
+    });
+
+    test('khi-lab viewer can view init-1 but 404s on init-2 (vantelis)', async () => {
+      const svc = makeScopeService(sampleInitiatives);
+      const i1 = await svc.findInitiative('init-1', ['hq:viewer', 'hq:bu:khi-lab']);
+      expect(i1.id).toBe('init-1');
+
+      expect(svc.findInitiative('init-2', ['hq:viewer', 'hq:bu:khi-lab'])).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    test('unscoped non-owner 404s on all initiatives', async () => {
+      const svc = makeScopeService(sampleInitiatives);
+      expect(svc.findInitiative('init-1', ['hq:viewer'])).rejects.toThrow(NotFoundException);
+      expect(svc.findInitiative('init-2', ['hq:viewer'])).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('board & timeline', () => {
+    test('hq:owner board contains all items', async () => {
+      const svc = makeScopeService(sampleInitiatives);
+      const board = await svc.board('initiative', ['hq:owner']);
+      const plannedCol = board.find((c) => c.id === 'planned');
+      expect(plannedCol?.items.length).toBe(2);
+    });
+
+    test('khi-lab viewer board contains only khi-lab items', async () => {
+      const svc = makeScopeService(sampleInitiatives);
+      const board = await svc.board('initiative', ['hq:viewer', 'hq:bu:khi-lab']);
+      const plannedCol = board.find((c) => c.id === 'planned');
+      expect(plannedCol?.items.length).toBe(1);
+      expect(plannedCol?.items[0].id).toBe('init-1');
+    });
+
+    test('unscoped non-owner board is empty across all columns', async () => {
+      const svc = makeScopeService(sampleInitiatives);
+      const board = await svc.board('initiative', ['hq:viewer']);
+      const totalItems = board.reduce((acc, col) => acc + col.items.length, 0);
+      expect(totalItems).toBe(0);
+    });
+  });
+
+  describe('mutations (operator brand isolation)', () => {
+    test('khi-lab operator can update init-1 but 404s on init-2 (vantelis)', async () => {
+      const svc = makeScopeService(sampleInitiatives);
+      const updated = await svc.updateInitiative(
+        'init-1',
+        { title: 'New title' },
+        ['hq:operator', 'hq:bu:khi-lab'],
+      );
+      expect(updated.id).toBe('init-1');
+
+      expect(
+        svc.updateInitiative('init-2', { title: 'New title' }, ['hq:operator', 'hq:bu:khi-lab']),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    test('khi-lab operator can move init-1 but 404s on init-2 (vantelis)', async () => {
+      const svc = makeScopeService(sampleInitiatives);
+      const moved = await svc.move('init-1', { status: 'planned', position: 0 }, [
+        'hq:operator',
+        'hq:bu:khi-lab',
+      ]);
+      expect(moved.id).toBe('init-1');
+
+      expect(
+        svc.move('init-2', { status: 'planned', position: 0 }, ['hq:operator', 'hq:bu:khi-lab']),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    test('khi-lab operator can remove init-1 but 404s on init-2 (vantelis)', async () => {
+      const svc = makeScopeService(sampleInitiatives);
+      const res = await svc.removeInitiative('init-1', ['hq:operator', 'hq:bu:khi-lab']);
+      expect(res.ok).toBe(true);
+
+      expect(
+        svc.removeInitiative('init-2', ['hq:operator', 'hq:bu:khi-lab']),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    test('unscoped operator 404s on all mutations', async () => {
+      const svc = makeScopeService(sampleInitiatives);
+      expect(
+        svc.updateInitiative('init-1', { title: 'New' }, ['hq:operator']),
+      ).rejects.toThrow(NotFoundException);
+      expect(
+        svc.move('init-1', { status: 'planned', position: 0 }, ['hq:operator']),
+      ).rejects.toThrow(NotFoundException);
+      expect(
+        svc.removeInitiative('init-1', ['hq:operator']),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+});
+

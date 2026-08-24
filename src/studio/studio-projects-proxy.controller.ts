@@ -53,14 +53,14 @@ export class StudioProjectsProxyController {
     enum: ['project', 'initiative'],
     description: 'Omit for both (task composer picker); pass to get only one (the /projects screen).',
   })
-  listProjects(@Query() query: ListStudioProjectsDto) {
-    return this.svc.listProjects(query);
+  listProjects(@Query() query: ListStudioProjectsDto, @CurrentUser() user?: AuthenticatedUser) {
+    return this.svc.listProjects(query, user?.roles);
   }
 
   @Get('projects/:id')
   @HqRoles(HqRole.Viewer)
-  findProject(@Param('id') id: string) {
-    return this.svc.findProject(id);
+  findProject(@Param('id') id: string, @CurrentUser() user?: AuthenticatedUser) {
+    return this.svc.findProject(id, user?.roles);
   }
 
   @Post('projects')
@@ -73,21 +73,25 @@ export class StudioProjectsProxyController {
   @Patch('projects/:id')
   @HqRoles(HqRole.Operator)
   @ApiOperation({ summary: "Edit everything but the key (immutable — it's baked into task identifiers)" })
-  updateProject(@Param('id') id: string, @Body() dto: UpdateProjectDto) {
-    return this.svc.updateProject(id, dto);
+  updateProject(
+    @Param('id') id: string,
+    @Body() dto: UpdateProjectDto,
+    @CurrentUser() user?: AuthenticatedUser,
+  ) {
+    return this.svc.updateProject(id, dto, user?.roles);
   }
 
   @Post('projects/:id/archive')
   @HqRoles(HqRole.Operator)
   @ApiOperation({ summary: 'Archive — blocked while the project has open (non-done) tasks' })
-  archiveProject(@Param('id') id: string) {
-    return this.svc.archiveProject(id);
+  archiveProject(@Param('id') id: string, @CurrentUser() user?: AuthenticatedUser) {
+    return this.svc.archiveProject(id, user?.roles);
   }
 
   @Post('projects/:id/unarchive')
   @HqRoles(HqRole.Operator)
-  unarchiveProject(@Param('id') id: string) {
-    return this.svc.unarchiveProject(id);
+  unarchiveProject(@Param('id') id: string, @CurrentUser() user?: AuthenticatedUser) {
+    return this.svc.unarchiveProject(id, user?.roles);
   }
 
   @Get('tasks')
