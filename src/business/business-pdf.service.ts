@@ -3,9 +3,22 @@ import { ConfigService } from '@nestjs/config';
 import PDFDocument = require('pdfkit');
 import { toBuffer as qrToBuffer } from 'qrcode';
 import { amountInWords } from './amount-in-words';
+import type { BusinessUnit } from '../company/business-unit.entity';
 import { BUSINESS_PAYMENT_METHOD_LABELS, type BusinessInvoice } from './business-invoice.entity';
 import type { BusinessQuote } from './business-quote.entity';
 import { LEGAL_ENTITY } from './legal-entity.config';
+
+/**
+ * The brand is the letterhead (header banner, tagline, footer line); the
+ * legal entity is the contracting party (appended to the footer). Null
+ * tagline/footerLine on the business unit fall back to `LEGAL_ENTITY`'s —
+ * e.g. `nolaa-corp`, which carries no override.
+ */
+interface DocumentBrand {
+  name: string;
+  tagline: string;
+  footerLine: string;
+}
 
 const GREEN = '#1F4D3A';
 const OCRE = '#D4A053';
@@ -18,22 +31,24 @@ export class BusinessPdfService {
   constructor(private readonly config: ConfigService) {}
 
   quote(quote: BusinessQuote) {
-    return this.build((doc) => {
-      this.header(doc, 'DEVIS', quote.number, quote.issuedOn);
+    const brand = this.brandOf(quote.businessUnit);
+    return this.build(brand, (doc) => {
+      this.header(doc, 'DEVIS', quote.number, quote.issuedOn, brand);
       this.parties(doc, quote.client?.name ?? 'Client', quote.client?.email, quote.client?.phone);
       doc.fillColor(INK).font('Helvetica-Bold').fontSize(15).text(quote.title, 50, 225);
       doc.fillColor(MUTE).font('Helvetica').fontSize(9).text(`Valable jusqu'au ${this.date(quote.validUntil)}`, 50, 248);
       this.quoteTable(doc, quote);
       this.notes(doc, quote.paymentTerms, quote.notes);
-      this.footer(doc, quote.number);
+      this.footer(doc, quote.number, brand);
     });
   }
 
   invoice(invoice: BusinessInvoice) {
-    return this.build((doc) => {
-      this.header(doc, 'FACTURE', invoice.number, invoice.issuedOn);
+    const brand = this.brandOf(invoice.businessUnit);
+    return this.build(brand, (doc) => {
+      this.header(doc, 'FACTURE', invoice.number, invoice.issuedOn, brand);
       this.parties(doc, invoice.client?.name ?? 'Client', invoice.client?.email, invoice.client?.phone);
-      doc.fillColor(INK).font('Helvetica-Bold').fontSize(15).text(invoice.description || `Prestations ${LEGAL_ENTITY.name}`, 50, 225);
+      doc.fillColor(INK).font('Helvetica-Bold').fontSize(15).text(invoice.description || `Prestations ${brand.name}`, 50, 225);
       doc.fillColor(MUTE).font('Helvetica').fontSize(9).text(`Projet : ${invoice.project?.title ?? 'Non renseigné'}`, 50, 248);
       doc.text(`Échéance : ${this.date(invoice.dueOn)}`, 50, 263);
       const totalsY = (invoice.lines?.length ?? 0) > 0 ? this.invoiceLineTable(doc, invoice) : this.invoiceSingleRow(doc, invoice);
@@ -41,17 +56,18 @@ export class BusinessPdfService {
       this.totals(doc, subtotal, invoice.taxCdf, invoice.amountCdf, invoice.taxRate, invoice.currency, totalsY, invoice.taxLabel || 'Taxe');
       doc.fillColor(MUTE).font('Helvetica').fontSize(9).text(`Montant paye : ${this.money(invoice.paidAmountCdf, invoice.currency)}`, 50, totalsY + 83);
       doc.text(`Solde : ${this.money(Math.max(0, invoice.amountCdf - invoice.paidAmountCdf), invoice.currency)}`, 50, totalsY + 99);
-      this.footer(doc, invoice.number);
+      this.footer(doc, invoice.number, brand);
     });
   }
 
   /** Only for invoices already marked paid (receiptNumber/verificationToken/paymentMethod all set by markPaid()). */
   async receipt(invoice: BusinessInvoice): Promise<Buffer> {
+    const brand = this.brandOf(invoice.businessUnit);
     const verifyUrl = this.verifyUrl(invoice.verificationToken!);
     const qr = await qrToBuffer(verifyUrl, { width: 110, margin: 1, color: { dark: INK, light: '#FFFFFF' } });
 
-    return this.build((doc) => {
-      this.header(doc, 'REÇU', invoice.receiptNumber!, (invoice.paidAt ?? new Date()).toISOString().slice(0, 10));
+    return this.build(brand, (doc) => {
+      this.header(doc, 'REÇU', invoice.receiptNumber!, (invoice.paidAt ?? new Date()).toISOString().slice(0, 10), brand);
       this.parties(doc, invoice.client?.name ?? 'Client', invoice.client?.email, invoice.client?.phone);
       doc.fillColor(MUTE).font('Helvetica').fontSize(9)
         .text(`Facture : ${invoice.number}`, 50, 222)
@@ -81,7 +97,7 @@ export class BusinessPdfService {
         .fillColor(MUTE).font('Helvetica').fontSize(7).text(`Code : ${invoice.receiptNumber}`, 150, qrY + 34, { width: 395 });
 
       this.signatureBlocks(doc, qrY + 95);
-      this.footer(doc, invoice.receiptNumber!);
+      this.footer(doc, invoice.receiptNumber!, brand);
     });
   }
 
@@ -133,9 +149,17 @@ export class BusinessPdfService {
     return y + 18;
   }
 
-  private build(draw: (doc: PDFKit.PDFDocument) => void): Promise<Buffer> {
+  private brandOf(unit?: BusinessUnit | null): DocumentBrand {
+    return {
+      name: unit?.name ?? LEGAL_ENTITY.name,
+      tagline: unit?.tagline ?? LEGAL_ENTITY.tagline,
+      footerLine: unit?.footerLine ?? LEGAL_ENTITY.footerLine,
+    };
+  }
+
+  private build(brand: DocumentBrand, draw: (doc: PDFKit.PDFDocument) => void): Promise<Buffer> {
     return new Promise((resolve, reject) => {
-      const doc = new PDFDocument({ size: 'A4', margin: 50, info: { Author: LEGAL_ENTITY.name } });
+      const doc = new PDFDocument({ size: 'A4', margin: 50, info: { Author: brand.name } });
       const chunks: Buffer[] = [];
       doc.on('data', (chunk: Buffer) => chunks.push(chunk));
       doc.on('end', () => resolve(Buffer.concat(chunks)));
@@ -145,12 +169,12 @@ export class BusinessPdfService {
     });
   }
 
-  private header(doc: PDFKit.PDFDocument, kind: string, number: string, date: string) {
+  private header(doc: PDFKit.PDFDocument, kind: string, number: string, date: string, brand: DocumentBrand) {
     doc.fillColor(GREEN).rect(0, 0, 595.28, 150).fill();
-    const [firstWord, ...restWords] = LEGAL_ENTITY.name.toUpperCase().split(' ');
+    const [firstWord, ...restWords] = brand.name.toUpperCase().split(' ');
     doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(25).text(firstWord, 50, 42, { continued: true });
     doc.fillColor(OCRE).text(restWords.length ? ` ${restWords.join(' ')}` : '');
-    doc.fillColor('#FFFFFF').font('Helvetica').fontSize(9).text(LEGAL_ENTITY.tagline, 50, 76);
+    doc.fillColor('#FFFFFF').font('Helvetica').fontSize(9).text(brand.tagline, 50, 76);
     doc.font('Helvetica-Bold').fontSize(22).text(kind, 390, 39, { width: 155, align: 'right' });
     doc.font('Helvetica').fontSize(9).text(number, 390, 71, { width: 155, align: 'right' });
     doc.text(this.date(date), 390, 87, { width: 155, align: 'right' });
@@ -209,10 +233,11 @@ export class BusinessPdfService {
     }
   }
 
-  private footer(doc: PDFKit.PDFDocument, reference: string) {
+  /** The brand's footerLine is the letterhead; `LEGAL_ENTITY.name` appended is the actual contracting party. */
+  private footer(doc: PDFKit.PDFDocument, reference: string, brand: DocumentBrand) {
     const bottom = doc.page.height - 62;
     doc.strokeColor(LINE).moveTo(50, bottom - 12).lineTo(545, bottom - 12).stroke();
-    doc.fillColor(MUTE).font('Helvetica').fontSize(7).text(LEGAL_ENTITY.footerLine, 50, bottom, { width: 350, lineBreak: false });
+    doc.fillColor(MUTE).font('Helvetica').fontSize(7).text(`${brand.footerLine} — ${LEGAL_ENTITY.name}`, 50, bottom, { width: 350, lineBreak: false });
     doc.text(reference, 400, bottom, { width: 145, align: 'right', lineBreak: false });
   }
 

@@ -227,7 +227,7 @@ export class BusinessOperationsService {
   async invoicePdf(id: string) {
     const invoice = await this.invoices.findOne({
       where: { id },
-      relations: { client: true, project: true, contract: true, lines: true },
+      relations: { client: true, project: true, contract: true, lines: true, businessUnit: true },
     });
     if (!invoice) throw new NotFoundException(`Facture business ${id} introuvable`);
     invoice.lines = [...(invoice.lines ?? [])].sort((a, b) => a.position - b.position);
@@ -237,7 +237,7 @@ export class BusinessOperationsService {
   async receiptPdf(id: string) {
     const invoice = await this.invoices.findOne({
       where: { id },
-      relations: { client: true, project: true, contract: true, lines: true },
+      relations: { client: true, project: true, contract: true, lines: true, businessUnit: true },
     });
     if (!invoice) throw new NotFoundException(`Facture business ${id} introuvable`);
     if (!invoice.receiptNumber) {
