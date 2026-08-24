@@ -1,4 +1,8 @@
 import { test, expect, describe, mock } from 'bun:test';
+mock.module('jose', () => ({
+  createRemoteJWKSet: () => () => {},
+  jwtVerify: async () => ({ payload: {} }),
+}));
 mock.module('@nola-hq/nola-sdk', () => ({
   NolaCommandsService: class {},
   NolaClientService: class {},

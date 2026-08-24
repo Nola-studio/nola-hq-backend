@@ -32,7 +32,6 @@ export class TenantsController {
   }
 
   @Get('recovery')
-  @HqRoles(HqRole.Owner)
   recovery() {
     return this.svc.recoveryList();
   }

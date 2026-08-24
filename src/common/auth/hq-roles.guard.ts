@@ -32,6 +32,15 @@ export class HqRolesGuard implements CanActivate {
     ]);
     if (isPublic) return true;
 
+    // GET /auth/me is the session discovery endpoint. Any authenticated session
+    // must reach it to discover its own roles and derive HQ capabilities.
+    if (
+      context.getClass().name === 'AuthController' &&
+      context.getHandler().name === 'me'
+    ) {
+      return true;
+    }
+
     const required = this.reflector.getAllAndOverride<HqRole[] | undefined>(
       HQ_ROLES_KEY,
       [context.getHandler(), context.getClass()],

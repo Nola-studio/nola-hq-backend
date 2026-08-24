@@ -32,7 +32,6 @@ export class BusinessController {
   }
 
   @Get('project-profitability')
-  @HqRoles(HqRole.Owner)
   projectProfitability() {
     return this.svc.projectProfitability();
   }

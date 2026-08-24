@@ -37,11 +37,14 @@ describe('hasHqRole', () => {
 });
 
 /** Minimal ExecutionContext double — only what canActivate() reads. */
-function makeContext(userRoles: string[] | undefined): ExecutionContext {
+function makeContext(
+  userRoles: string[] | undefined,
+  target?: { class?: string; handler?: string },
+): ExecutionContext {
   const req = { user: userRoles ? { roles: userRoles } : undefined };
   return {
-    getHandler: () => ({}),
-    getClass: () => ({}),
+    getHandler: () => ({ name: target?.handler ?? 'handler' }),
+    getClass: () => ({ name: target?.class ?? 'Controller' }),
     switchToHttp: () => ({
       getRequest: () => req,
     }),
@@ -64,6 +67,20 @@ describe('HqRolesGuard.canActivate (fail-closed)', () => {
     const guard = new HqRolesGuard(makeReflector({ isPublic: true, required: undefined }));
     expect(guard.canActivate(makeContext([]))).toBe(true);
     expect(guard.canActivate(makeContext(undefined))).toBe(true);
+  });
+
+  test('GET /auth/me (AuthController.me) is allowed through without roles for session discovery', () => {
+    const guard = new HqRolesGuard(makeReflector({ isPublic: false, required: undefined }));
+    expect(
+      guard.canActivate(
+        makeContext([], { class: 'AuthController', handler: 'me' }),
+      ),
+    ).toBe(true);
+    expect(
+      guard.canActivate(
+        makeContext(['school_admin'], { class: 'AuthController', handler: 'me' }),
+      ),
+    ).toBe(true);
   });
 
   test('a route with NO @HqRoles and NOT @Public fails closed with 403 missing_hq_roles_guard', () => {
@@ -219,11 +236,18 @@ describe('Exhaustive Route Gating Audit', () => {
               if (isRoute) {
                 const effectiveRoles = methodHqRoles || classHqRoles;
                 const isPublic = methodIsPublic || classIsPublic;
+                const relPath = path.relative(srcDir, filePath).replace(/\\/g, '/');
+                const methodName = member.name.getText(sourceFile);
+                const isAuthDiscoveryException =
+                  relPath.endsWith('auth/auth.controller.ts') && methodName === 'me';
 
-                if (!isPublic && (!effectiveRoles || effectiveRoles.length === 0)) {
+                if (
+                  !isPublic &&
+                  !isAuthDiscoveryException &&
+                  (!effectiveRoles || effectiveRoles.length === 0)
+                ) {
                   const { line } = sourceFile.getLineAndCharacterOfPosition(member.getStart(sourceFile));
-                  const relPath = path.relative(srcDir, filePath).replace(/\\/g, '/');
-                  unprotectedRoutes.push(`${relPath}:${line + 1} (${member.name.getText(sourceFile)})`);
+                  unprotectedRoutes.push(`${relPath}:${line + 1} (${methodName})`);
                 }
               }
             }
