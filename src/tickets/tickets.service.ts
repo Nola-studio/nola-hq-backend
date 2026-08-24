@@ -1,6 +1,6 @@
 import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { Ticket, TicketStatus } from './ticket.entity';
 import {
   AddReplyDto,
@@ -38,10 +38,15 @@ export class TicketsService {
     private readonly businessUnits: BusinessUnitResolverService,
   ) {}
 
-  async list(query: TicketsListQuery): Promise<PaginatedResult<TicketResponse>> {
+  async list(query: TicketsListQuery, roles?: string[]): Promise<PaginatedResult<TicketResponse>> {
     const page = query.page ?? 1;
     const limit = query.limit ?? 50;
+    const allowedUnitIds = await this.businessUnits.resolveAllowedUnits(roles);
+    if (allowedUnitIds.length === 0) {
+      return { items: [], total: 0, page, limit };
+    }
     const qb = this.repo.createQueryBuilder('t').leftJoinAndSelect('t.businessUnit', 'businessUnit');
+    qb.andWhere('t.businessUnitId IN (:...allowedUnitIds)', { allowedUnitIds });
     if (query.tenant) qb.andWhere('t.tenant = :tenant', { tenant: query.tenant });
     if (query.status) qb.andWhere('t.status = :status', { status: query.status });
     if (query.assignee)
@@ -62,8 +67,15 @@ export class TicketsService {
     return { items: items.map(toTicketResponse), total, page, limit };
   }
 
-  async findOne(id: number): Promise<TicketResponse> {
-    const t = await this.repo.findOne({ where: { id }, relations: ['businessUnit'] });
+  async findOne(id: number, roles?: string[]): Promise<TicketResponse> {
+    const allowedUnitIds = await this.businessUnits.resolveAllowedUnits(roles);
+    if (allowedUnitIds.length === 0) {
+      throw new NotFoundException(`Ticket ${id} introuvable`);
+    }
+    const t = await this.repo.findOne({
+      where: { id, businessUnitId: In(allowedUnitIds) },
+      relations: ['businessUnit'],
+    });
     if (!t) throw new NotFoundException(`Ticket ${id} introuvable`);
     return toTicketResponse(t);
   }
@@ -114,8 +126,8 @@ export class TicketsService {
     return saved;
   }
 
-  async addReply(id: number, dto: AddReplyDto) {
-    const ticket = await this.findOne(id);
+  async addReply(id: number, dto: AddReplyDto, roles?: string[]) {
+    const ticket = await this.findOne(id, roles);
     ticket.replies = [
       ...(ticket.replies ?? []),
       { from: dto.from, t: dto.t ?? 'à l’instant', text: dto.text, visibility: dto.visibility ?? 'internal' },
@@ -124,8 +136,8 @@ export class TicketsService {
     return this.repo.save(ticket);
   }
 
-  async setStatus(id: number, status: TicketStatus) {
-    const ticket = await this.findOne(id);
+  async setStatus(id: number, status: TicketStatus, roles?: string[]) {
+    const ticket = await this.findOne(id, roles);
     // No Owner/admin override — a closed ticket is not reopenable by
     // anyone, matching WorkItem.assertMutable()'s posture. Narrower than
     // WorkItem's guard: this only blocks further *status* changes, not
@@ -139,8 +151,8 @@ export class TicketsService {
     return this.repo.save(ticket);
   }
 
-  async assign(id: number, assignee: string) {
-    const ticket = await this.findOne(id);
+  async assign(id: number, assignee: string, roles?: string[]) {
+    const ticket = await this.findOne(id, roles);
     ticket.assignee = assignee;
     ticket.assigned = assignee;
     ticket.updatedAt = new Date();
@@ -155,8 +167,19 @@ export class TicketsService {
     return saved;
   }
 
-  async summary() {
-    const all = await this.repo.find();
+  async summary(roles?: string[]) {
+    const allowedUnitIds = await this.businessUnits.resolveAllowedUnits(roles);
+    if (allowedUnitIds.length === 0) {
+      return {
+        total: 0,
+        open: 0,
+        pending: 0,
+        resolved: 0,
+        closed: 0,
+        p1_open: 0,
+      };
+    }
+    const all = await this.repo.find({ where: { businessUnitId: In(allowedUnitIds) } });
     const count = (s: TicketStatus) => all.filter((t) => t.status === s).length;
     return {
       total: all.length,

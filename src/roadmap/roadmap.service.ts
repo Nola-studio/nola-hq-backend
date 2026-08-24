@@ -158,17 +158,39 @@ export class RoadmapService {
    * pickers need durable products too); Roadmap's own board passes
    * `scope: 'initiative'` to see only bounded work.
    */
-  async board(scope?: RoadmapInitiativeScope): Promise<RoadmapBoardColumn<RoadmapInitiativeView>[]> {
+  async board(
+    scope?: RoadmapInitiativeScope,
+    roles?: string[],
+  ): Promise<RoadmapBoardColumn<RoadmapInitiativeView>[]> {
+    const allowedUnitIds = await this.businessUnits.resolveAllowedUnits(roles);
+    if (allowedUnitIds.length === 0) {
+      return buildBoard([]);
+    }
+    const where: FindOptionsWhere<RoadmapInitiative> = {
+      ...(scope ? { scope } : {}),
+      businessUnitId: In(allowedUnitIds),
+    };
     const views = await this.withProgress(
-      await this.initiatives.find({ where: scope ? { scope } : {}, relations: ['businessUnit'] }),
+      await this.initiatives.find({ where, relations: ['businessUnit'] }),
     );
     return buildBoard(views);
   }
 
   /** Bucketed by quarter, unscheduled ones last. Same opt-in `scope` as `board()`. */
-  async timeline(scope?: RoadmapInitiativeScope): Promise<RoadmapTimelineBucket<RoadmapInitiativeView>[]> {
+  async timeline(
+    scope?: RoadmapInitiativeScope,
+    roles?: string[],
+  ): Promise<RoadmapTimelineBucket<RoadmapInitiativeView>[]> {
+    const allowedUnitIds = await this.businessUnits.resolveAllowedUnits(roles);
+    if (allowedUnitIds.length === 0) {
+      return buildTimeline([]);
+    }
+    const where: FindOptionsWhere<RoadmapInitiative> = {
+      ...(scope ? { scope } : {}),
+      businessUnitId: In(allowedUnitIds),
+    };
     const views = await this.withProgress(
-      await this.initiatives.find({ where: scope ? { scope } : {}, relations: ['businessUnit'] }),
+      await this.initiatives.find({ where, relations: ['businessUnit'] }),
     );
     return buildTimeline(views);
   }
@@ -466,10 +488,18 @@ export class RoadmapService {
 
   async listInitiatives(
     filter: ListInitiativesDto = {},
+    roles?: string[],
   ): Promise<RoadmapInitiativeView[]> {
+    const allowedUnitIds = await this.businessUnits.resolveAllowedUnits(roles);
+    if (allowedUnitIds.length === 0) {
+      return [];
+    }
     // Always 'initiative' — durable products (scope: 'project') are
     // `/projects`' rows, never `/roadmap`'s, so this is not client-toggleable.
-    const where: FindOptionsWhere<RoadmapInitiative> = { scope: 'initiative' };
+    const where: FindOptionsWhere<RoadmapInitiative> = {
+      scope: 'initiative',
+      businessUnitId: In(allowedUnitIds),
+    };
     if (filter.status) where.status = filter.status;
     if (filter.quarter) where.quarter = filter.quarter;
     if (filter.objectiveId) where.objectiveId = filter.objectiveId;
@@ -486,9 +516,13 @@ export class RoadmapService {
   }
 
   /** Single initiative, hydrated with its milestones (checklist order). A durable product's id 404s here — it's `/projects`' row, not `/roadmap`'s. */
-  async findInitiative(id: string): Promise<RoadmapInitiativeView> {
+  async findInitiative(id: string, roles?: string[]): Promise<RoadmapInitiativeView> {
+    const allowedUnitIds = await this.businessUnits.resolveAllowedUnits(roles);
+    if (allowedUnitIds.length === 0) {
+      throw new NotFoundException(`Initiative ${id} introuvable`);
+    }
     const initiative = await this.initiatives.findOne({
-      where: { id, scope: 'initiative' },
+      where: { id, scope: 'initiative', businessUnitId: In(allowedUnitIds) },
       relations: ['businessUnit'],
     });
     if (!initiative) throw new NotFoundException(`Initiative ${id} introuvable`);
@@ -569,8 +603,13 @@ export class RoadmapService {
   async updateInitiative(
     id: string,
     dto: UpdateInitiativeDto,
+    roles?: string[],
   ): Promise<RoadmapInitiativeView> {
-    const initiative = await this.initiatives.findOne({ where: { id, scope: 'initiative' } });
+    const allowedUnitIds = await this.businessUnits.resolveAllowedUnits(roles);
+    if (allowedUnitIds.length === 0) throw new NotFoundException(`Initiative ${id} introuvable`);
+    const initiative = await this.initiatives.findOne({
+      where: { id, scope: 'initiative', businessUnitId: In(allowedUnitIds) },
+    });
     if (!initiative) throw new NotFoundException(`Initiative ${id} introuvable`);
     if (dto.objectiveId) await this.assertObjectiveExists(dto.objectiveId);
 
@@ -613,8 +652,16 @@ export class RoadmapService {
    * exists would silently orphan that task's reference from its project's
    * current identifier.
    */
-  async updateKeyPrefix(id: string, dto: UpdateKeyPrefixDto): Promise<RoadmapInitiativeView> {
-    const initiative = await this.initiatives.findOne({ where: { id, scope: 'initiative' } });
+  async updateKeyPrefix(
+    id: string,
+    dto: UpdateKeyPrefixDto,
+    roles?: string[],
+  ): Promise<RoadmapInitiativeView> {
+    const allowedUnitIds = await this.businessUnits.resolveAllowedUnits(roles);
+    if (allowedUnitIds.length === 0) throw new NotFoundException(`Initiative ${id} introuvable`);
+    const initiative = await this.initiatives.findOne({
+      where: { id, scope: 'initiative', businessUnitId: In(allowedUnitIds) },
+    });
     if (!initiative) throw new NotFoundException(`Initiative ${id} introuvable`);
 
     if (initiative.keyPrefix === dto.keyPrefix) {
@@ -648,8 +695,12 @@ export class RoadmapService {
    * (unlike every other initiative method here), since its whole job is
    * crossing the scope boundary those methods enforce.
    */
-  async updateScope(id: string, dto: UpdateScopeDto): Promise<RoadmapInitiativeView> {
-    const initiative = await this.initiatives.findOne({ where: { id } });
+  async updateScope(id: string, dto: UpdateScopeDto, roles?: string[]): Promise<RoadmapInitiativeView> {
+    const allowedUnitIds = await this.businessUnits.resolveAllowedUnits(roles);
+    if (allowedUnitIds.length === 0) throw new NotFoundException(`Initiative ${id} introuvable`);
+    const initiative = await this.initiatives.findOne({
+      where: { id, businessUnitId: In(allowedUnitIds) },
+    });
     if (!initiative) throw new NotFoundException(`Initiative ${id} introuvable`);
 
     if (initiative.scope === dto.scope) {
@@ -669,15 +720,23 @@ export class RoadmapService {
    * which TypeORM wraps in a single transaction — the board can never be
    * left with duplicate or gapped ranks.
    */
-  async move(id: string, dto: MoveInitiativeDto): Promise<RoadmapInitiativeView> {
-    const initiative = await this.initiatives.findOne({ where: { id, scope: 'initiative' } });
+  async move(id: string, dto: MoveInitiativeDto, roles?: string[]): Promise<RoadmapInitiativeView> {
+    const allowedUnitIds = await this.businessUnits.resolveAllowedUnits(roles);
+    if (allowedUnitIds.length === 0) throw new NotFoundException(`Initiative ${id} introuvable`);
+    const initiative = await this.initiatives.findOne({
+      where: { id, scope: 'initiative', businessUnitId: In(allowedUnitIds) },
+    });
     if (!initiative) throw new NotFoundException(`Initiative ${id} introuvable`);
 
     // Only the two columns involved can change — no need to load the board.
     // scope-qualified: a project can share a status value with an initiative
     // (both reuse the same status enum) and must never be swept into the reorder.
     const columns = await this.initiatives.find({
-      where: { status: In([initiative.status, dto.status]), scope: 'initiative' },
+      where: {
+        status: In([initiative.status, dto.status]),
+        scope: 'initiative',
+        businessUnitId: In(allowedUnitIds),
+      },
     });
     const placements = planMove(columns, id, dto.status, dto.position ?? 0);
 
@@ -703,8 +762,12 @@ export class RoadmapService {
   }
 
   /** Deletes an initiative; its milestones go with it (FK ON DELETE CASCADE). */
-  async removeInitiative(id: string) {
-    const initiative = await this.initiatives.findOne({ where: { id, scope: 'initiative' } });
+  async removeInitiative(id: string, roles?: string[]) {
+    const allowedUnitIds = await this.businessUnits.resolveAllowedUnits(roles);
+    if (allowedUnitIds.length === 0) throw new NotFoundException(`Initiative ${id} introuvable`);
+    const initiative = await this.initiatives.findOne({
+      where: { id, scope: 'initiative', businessUnitId: In(allowedUnitIds) },
+    });
     if (!initiative) throw new NotFoundException(`Initiative ${id} introuvable`);
     await this.initiatives.remove(initiative);
     return { ok: true };
