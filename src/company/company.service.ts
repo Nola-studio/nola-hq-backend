@@ -1,9 +1,20 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { FindOptionsWhere, Repository } from 'typeorm';
 import { BusinessUnit } from './business-unit.entity';
 import { LegalEntity } from './legal-entity.entity';
 import { Product } from './product.entity';
+import { PROVISIONABLE_PRODUCT_CODES } from './company.constants';
+
+export interface ProductSummary {
+  id: string;
+  code: string;
+  name: string;
+  businessUnitId: string;
+  businessUnit: { id: string; code: string; name: string };
+  isInternal: boolean;
+  provisionable: boolean;
+}
 
 export interface BusinessUnitSummary {
   id: string;
@@ -60,6 +71,31 @@ export class CompanyService {
       jurisdiction: e.jurisdiction,
       taxRegime: e.taxRegime,
       registrationNumber: e.registrationNumber,
+    }));
+  }
+
+  async listProducts(filter?: { isInternal?: boolean }): Promise<ProductSummary[]> {
+    const where: FindOptionsWhere<Product> = {};
+    if (filter?.isInternal !== undefined) {
+      where.isInternal = filter.isInternal;
+    }
+    const rows = await this.products.find({
+      where,
+      relations: ['businessUnit'],
+      order: { code: 'ASC' },
+    });
+    return rows.map((p) => ({
+      id: p.id,
+      code: p.code,
+      name: p.name,
+      businessUnitId: p.businessUnitId,
+      businessUnit: {
+        id: p.businessUnit!.id,
+        code: p.businessUnit!.code,
+        name: p.businessUnit!.name,
+      },
+      isInternal: p.isInternal,
+      provisionable: PROVISIONABLE_PRODUCT_CODES.has(p.code),
     }));
   }
 

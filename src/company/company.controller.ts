@@ -1,4 +1,4 @@
-import { Controller, Get, Param } from '@nestjs/common';
+import { Controller, Get, Param, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CompanyService } from './company.service';
 import { HqRoles } from '../common/auth/hq-roles.decorator';
@@ -21,6 +21,13 @@ export class CompanyController {
   @HqRoles(HqRole.Viewer)
   findBusinessUnit(@Param('code') code: string) {
     return this.svc.findBusinessUnit(code);
+  }
+
+  @Get('products')
+  @HqRoles(HqRole.Viewer)
+  listProducts(@Query('isInternal') isInternal?: string) {
+    const filter = isInternal !== undefined ? { isInternal: isInternal === 'true' } : undefined;
+    return this.svc.listProducts(filter);
   }
 
   @Get('legal-entities')
