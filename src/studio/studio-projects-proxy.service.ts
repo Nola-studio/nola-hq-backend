@@ -121,6 +121,7 @@ export class StudioProjectsProxyService {
         targetDate: dto.dueDate,
         status: 'idea',
         country: dto.country,
+        businessUnitCode: dto.businessUnitCode,
       },
       'project',
     );
