@@ -6,6 +6,14 @@ import { BusinessUnitResolverService, DEFAULT_BUSINESS_UNIT_CODE } from '../comp
 import { RoadmapInitiative, type RoadmapInitiativeScope } from '../roadmap/roadmap-initiative.entity';
 import { BusinessClient } from './business-client.entity';
 import { BusinessContract } from './business-contract.entity';
+
+/** `BusinessContract` as the API returns it: `businessUnit` trimmed to `{code, name}` rather than the full joined row. */
+export type BusinessContractResponse = Omit<BusinessContract, 'businessUnit'> & {
+  businessUnit?: { code: string; name: string };
+};
+function toContractResponse(c: BusinessContract): BusinessContractResponse {
+  return { ...c, businessUnit: c.businessUnit ? { code: c.businessUnit.code, name: c.businessUnit.name } : undefined };
+}
 import { BusinessExpense } from './business-expense.entity';
 import { BusinessInvoice, BusinessInvoiceLine, type BusinessInvoiceStatus } from './business-invoice.entity';
 import { BusinessOpportunity } from './business-opportunity.entity';
@@ -214,16 +222,17 @@ export class BusinessService {
     return this.opportunities.save(item);
   }
 
-  listContracts(filters: { clientId?: string; projectId?: string; status?: string }) {
+  async listContracts(filters: { clientId?: string; projectId?: string; status?: string }): Promise<BusinessContractResponse[]> {
     const where: FindOptionsWhere<BusinessContract> = {};
     if (filters.clientId) where.clientId = filters.clientId;
     if (filters.projectId) where.projectId = filters.projectId;
     if (filters.status) where.status = filters.status as BusinessContract['status'];
-    return this.contracts.find({
+    const rows = await this.contracts.find({
       where,
-      relations: { client: true, project: true, opportunity: true },
+      relations: { client: true, project: true, opportunity: true, businessUnit: true },
       order: { updatedAt: 'DESC' },
     });
+    return rows.map(toContractResponse);
   }
 
   async createContract(dto: CreateBusinessContractDto) {
