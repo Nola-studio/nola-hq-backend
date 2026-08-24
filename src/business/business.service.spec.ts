@@ -76,6 +76,7 @@ function makeService(opts: {
     makeRepo(), // documents
     makeRepo(), // reminders
     dataSource,
+    { resolve: mock(async () => 'bu-1') } as any, // businessUnits
   );
   return { svc, invoices, invoiceRepoTx, lineRepoTx };
 }

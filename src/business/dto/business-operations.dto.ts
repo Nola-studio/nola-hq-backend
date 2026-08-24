@@ -54,6 +54,8 @@ export class CreateBusinessQuoteDto {
   @IsOptional() @IsString() @MaxLength(5_000) notes?: string;
   @IsArray() @ArrayMinSize(1) @ArrayMaxSize(100) @ValidateNested({ each: true }) @Type(() => BusinessQuoteLineDto)
   lines!: BusinessQuoteLineDto[];
+  /** BusinessUnit code, e.g. 'khi-lab' — not a UUID. Defaults to 'khi-lab' when omitted. */
+  @IsOptional() @IsString() businessUnitCode?: string;
 }
 
 export class UpdateBusinessQuoteDto extends PartialType(CreateBusinessQuoteDto) {}

@@ -1,6 +1,7 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, FindOptionsWhere, Repository } from 'typeorm';
+import { BusinessUnitResolverService, DEFAULT_BUSINESS_UNIT_CODE } from '../company/business-unit-resolver.service';
 import { RoadmapInitiative } from '../roadmap/roadmap-initiative.entity';
 import { WorkItem } from '../work-items/work-item.entity';
 import { BusinessClient } from './business-client.entity';
@@ -31,6 +32,8 @@ import { addByCurrency, netByCurrency, sumByCurrency, type CurrencyTotals } from
 
 @Injectable()
 export class BusinessOperationsService {
+  private readonly logger = new Logger(BusinessOperationsService.name);
+
   constructor(
     @InjectRepository(BusinessQuote) private readonly quotes: Repository<BusinessQuote>,
     @InjectRepository(BusinessQuoteLine) private readonly quoteLines: Repository<BusinessQuoteLine>,
@@ -47,6 +50,7 @@ export class BusinessOperationsService {
     private readonly dataSource: DataSource,
     private readonly business: BusinessService,
     private readonly pdf: BusinessPdfService,
+    private readonly businessUnits: BusinessUnitResolverService,
   ) {}
 
   private clean(value?: string | null) {
@@ -65,7 +69,7 @@ export class BusinessOperationsService {
   async findQuote(id: string) {
     const quote = await this.quotes.findOne({
       where: { id },
-      relations: { client: true, project: true, opportunity: true, lines: true },
+      relations: { client: true, project: true, opportunity: true, lines: true, businessUnit: true },
     });
     if (!quote) throw new NotFoundException(`Devis ${id} introuvable`);
     quote.lines = [...(quote.lines ?? [])].sort((a, b) => a.position - b.position);
@@ -109,6 +113,10 @@ export class BusinessOperationsService {
     }
     const taxRate = dto.taxRate ?? 0;
     const computed = this.totals(dto.lines, taxRate);
+    if (!dto.businessUnitCode) {
+      this.logger.debug(`createQuote(): no businessUnitCode supplied, defaulting to '${DEFAULT_BUSINESS_UNIT_CODE}'`);
+    }
+    const businessUnitId = await this.businessUnits.resolve(dto.businessUnitCode ?? DEFAULT_BUSINESS_UNIT_CODE);
     const now = new Date();
     const id = await this.dataSource.transaction(async (manager) => {
       const number = dto.number?.trim() || (await nextBusinessNumber(manager, 'DEV'));
@@ -119,6 +127,7 @@ export class BusinessOperationsService {
         clientId: dto.clientId,
         projectId: dto.projectId ?? null,
         opportunityId: dto.opportunityId ?? null,
+        businessUnitId,
         title: dto.title.trim(),
         status: dto.status ?? 'draft',
         issuedOn: dto.issuedOn,
@@ -205,6 +214,7 @@ export class BusinessOperationsService {
       description: `${quote.title} — devis ${quote.number}`,
       lines: lines.length ? lines : undefined,
       taxRate: quote.taxRate,
+      businessUnitCode: quote.businessUnit?.code,
     });
     if (quote.status !== 'accepted') await this.updateQuote(id, { status: 'accepted' });
     return invoice;

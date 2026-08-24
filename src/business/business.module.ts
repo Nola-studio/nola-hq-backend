@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { CompanyModule } from '../company/company.module';
 import { RoadmapInitiative } from '../roadmap/roadmap-initiative.entity';
 import { BusinessClient } from './business-client.entity';
 import { BusinessContract } from './business-contract.entity';
@@ -40,6 +41,7 @@ import { ProjectRisk } from '../work-items/project-risk.entity';
       ProjectTimeEntry,
       ProjectRisk,
     ]),
+    CompanyModule,
   ],
   controllers: [BusinessController, BusinessOperationsController],
   providers: [BusinessService, BusinessOperationsService, BusinessPdfService],
