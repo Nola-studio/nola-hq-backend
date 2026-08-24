@@ -24,6 +24,7 @@ import { HqRole } from '../common/auth/hq-role.enum';
 @ApiBearerAuth()
 @ApiTags('iam')
 @Controller('iam')
+@HqRoles(HqRole.Viewer)
 export class IamController {
   constructor(private readonly iam: IamClientService) {}
 

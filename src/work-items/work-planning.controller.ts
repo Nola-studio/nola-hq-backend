@@ -13,6 +13,7 @@ import { WorkPlanningService } from './work-planning.service';
 @ApiBearerAuth()
 @ApiTags('work-planning')
 @Controller('work-planning')
+@HqRoles(HqRole.Viewer)
 export class WorkPlanningController {
   constructor(private readonly svc: WorkPlanningService) {}
 

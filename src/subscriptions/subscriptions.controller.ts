@@ -19,6 +19,7 @@ import {
 @ApiBearerAuth()
 @ApiTags('subscriptions')
 @Controller('subscriptions')
+@HqRoles(HqRole.Viewer)
 export class SubscriptionsController {
   constructor(private readonly subs: SubscriptionsService) {}
 

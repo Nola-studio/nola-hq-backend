@@ -1,6 +1,8 @@
 import { Controller, Get, NotFoundException, Param } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { KelasiProvisionClient } from '../tenants/kelasi-provision.client';
+import { HqRoles } from '../common/auth/hq-roles.decorator';
+import { HqRole } from '../common/auth/hq-role.enum';
 
 /**
  * Thin server-side proxy to kelasi-gateway's public surface.
@@ -22,6 +24,7 @@ import { KelasiProvisionClient } from '../tenants/kelasi-provision.client';
 // appelant resté sur `kelasi` doit continuer d'être servi. Retirer l'ancien
 // quand plus personne ne l'appelle.
 @Controller(['yekoli', 'kelasi'])
+@HqRoles(HqRole.Viewer)
 export class KelasiProxyController {
   constructor(private readonly client: KelasiProvisionClient) {}
 

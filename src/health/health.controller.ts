@@ -32,6 +32,7 @@ const VERSION_INFO = (() => {
 @ApiBearerAuth()
 @ApiTags('health')
 @Controller('health')
+@HqRoles(HqRole.Viewer)
 export class HealthController {
   constructor(private readonly svc: HealthService) {}
 

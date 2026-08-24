@@ -7,6 +7,7 @@ import { HqRole } from '../common/auth/hq-role.enum';
 @ApiBearerAuth()
 @ApiTags('plans')
 @Controller('plans')
+@HqRoles(HqRole.Viewer)
 export class PlansController {
   constructor(private readonly plans: PlansService) {}
 

@@ -21,6 +21,7 @@ import {
 @ApiBearerAuth()
 @ApiTags('business-operations')
 @Controller('business')
+@HqRoles(HqRole.Viewer)
 export class BusinessOperationsController {
   constructor(private readonly svc: BusinessOperationsService) {}
 

@@ -1,2 +1,5 @@
 [install.scopes]
 "@nola-studio" = { token = "$GITHUB_TOKEN", url = "https://npm.pkg.github.com/" }
+
+[test]
+preload = ["./test/test-preload.ts"]

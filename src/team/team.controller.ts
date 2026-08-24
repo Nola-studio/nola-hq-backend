@@ -23,6 +23,7 @@ function actor(user?: AuthenticatedUser): string {
 @ApiBearerAuth()
 @ApiTags('team')
 @Controller('team')
+@HqRoles(HqRole.Viewer)
 export class TeamController {
   constructor(private readonly svc: TeamService) {}
 
