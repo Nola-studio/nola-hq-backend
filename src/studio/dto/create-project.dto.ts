@@ -56,4 +56,7 @@ export class CreateProjectDto {
   @IsOptional() @Matches(DATE_PATTERN) dueDate?: string;
   @IsOptional() @IsEmail() @MaxLength(120) leadAssigneeEmail?: string;
   @IsOptional() @IsIn(INITIATIVE_COUNTRIES as unknown as string[]) country?: RoadmapInitiativeCountry;
+
+  /** BusinessUnit code, e.g. 'khi-lab' — not a UUID. Defaults to 'khi-lab' when omitted. */
+  @IsOptional() @IsString() businessUnitCode?: string;
 }
