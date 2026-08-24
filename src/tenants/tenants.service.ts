@@ -23,6 +23,7 @@ import {
   SubscriptionsService,
   type BillingSubscriptionRow,
 } from '../subscriptions/subscriptions.service';
+import { PROVISIONABLE_PRODUCT_CODES } from '../company/company.constants';
 import { PlansService } from '../plans/plans.service';
 import { IamClientService } from '../iam/iam-client.service';
 import type { IamMembershipResponse } from '../iam/iam.types';
@@ -314,12 +315,9 @@ export class TenantsService {
     }
 
     // V1 : seule l'app scolaire expose le point d'entrée hq-provision. Ajouter
-    // une table de routage quand d'autres apps clientes offriront la même
-    // surface. `kelasi` est accepté le temps que les appelants non migrés
-    // disparaissent — l'app s'annonce sous `yekoli` depuis le 2026-08-09.
-    const PROVISIONABLE_APPS = new Set(['yekoli', 'kelasi']);
+    // une table de routage quand d'autres apps clientes offriront la même surface.
     const targetApp = (dto.apps?.[0] ?? '').trim();
-    if (!PROVISIONABLE_APPS.has(targetApp)) {
+    if (!PROVISIONABLE_PRODUCT_CODES.has(targetApp)) {
       throw new BadRequestException(`unsupported_app: ${targetApp || '(none)'}`);
     }
 
