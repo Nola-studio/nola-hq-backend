@@ -710,12 +710,38 @@ describe('RoadmapService (Brand Scope Filtering)', () => {
         'init-1',
         { title: 'New title' },
         ['hq:operator', 'hq:bu:khi-lab'],
+        'initiative',
       );
       expect(updated.id).toBe('init-1');
 
       expect(
-        svc.updateInitiative('init-2', { title: 'New title' }, ['hq:operator', 'hq:bu:khi-lab']),
+        svc.updateInitiative('init-2', { title: 'New title' }, ['hq:operator', 'hq:bu:khi-lab'], 'initiative'),
       ).rejects.toThrow(NotFoundException);
+    });
+
+    test('updating an initiative with scope project 404s and vice versa', async () => {
+      const projectRows = [
+        {
+          id: 'proj-1',
+          scope: 'project' as const,
+          businessUnitId: KHI_LAB_ID,
+          title: 'Project 1',
+        },
+      ];
+      const svc = makeScopeService(projectRows);
+      // Updating proj-1 with scope 'initiative' must 404
+      expect(
+        svc.updateInitiative('proj-1', { title: 'New title' }, ['hq:operator', 'hq:bu:khi-lab'], 'initiative'),
+      ).rejects.toThrow(NotFoundException);
+
+      // Updating proj-1 with scope 'project' succeeds
+      const updated = await svc.updateInitiative(
+        'proj-1',
+        { title: 'Updated Project 1' },
+        ['hq:operator', 'hq:bu:khi-lab'],
+        'project',
+      );
+      expect(updated.id).toBe('proj-1');
     });
 
     test('khi-lab operator can move init-1 but 404s on init-2 (vantelis)', async () => {
@@ -744,7 +770,7 @@ describe('RoadmapService (Brand Scope Filtering)', () => {
     test('unscoped operator 404s on all mutations', async () => {
       const svc = makeScopeService(sampleInitiatives);
       expect(
-        svc.updateInitiative('init-1', { title: 'New' }, ['hq:operator']),
+        svc.updateInitiative('init-1', { title: 'New' }, ['hq:operator'], 'initiative'),
       ).rejects.toThrow(NotFoundException);
       expect(
         svc.move('init-1', { status: 'planned', position: 0 }, ['hq:operator']),

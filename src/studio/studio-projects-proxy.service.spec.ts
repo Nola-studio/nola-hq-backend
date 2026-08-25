@@ -63,8 +63,23 @@ describe('StudioProjectsProxyService (Brand Scope Filtering)', () => {
 
     const teamRepo = {} as any;
     const roadmapMock = {
-      createInitiative: mock(async () => ({})),
-      updateInitiative: mock(async () => ({})),
+      createInitiative: mock(async (dto: any, scope: any) => ({
+        id: 'proj-new',
+        scope,
+        title: dto.title,
+        businessUnit: { code: 'khi-lab', name: 'Khi-Lab' },
+      })),
+      updateInitiative: mock(async (id: string, dto: any, roles: any, scope: any) => {
+        if (scope !== 'project') {
+          throw new NotFoundException(`Initiative ${id} introuvable`);
+        }
+        return {
+          id,
+          scope,
+          title: dto.title,
+          businessUnit: { code: 'khi-lab', name: 'Khi-Lab' },
+        };
+      }),
     } as any;
     const workItemsMock = {} as any;
     const notifyMock = {} as any;
@@ -132,7 +147,9 @@ describe('StudioProjectsProxyService (Brand Scope Filtering)', () => {
   describe('mutations (operator brand isolation)', () => {
     test('khi-lab operator can update proj-1 but 404s on proj-2 (vantelis)', async () => {
       const svc = makeService(sampleProjects);
-      await svc.updateProject('proj-1', { name: 'Renamed' }, ['hq:operator', 'hq:bu:khi-lab']);
+      const res = await svc.updateProject('proj-1', { name: 'Renamed' }, ['hq:operator', 'hq:bu:khi-lab']);
+      expect(res.id).toBe('proj-1');
+      expect(res.name).toBe('Renamed');
 
       expect(
         svc.updateProject('proj-2', { name: 'Renamed' }, ['hq:operator', 'hq:bu:khi-lab']),

@@ -145,6 +145,7 @@ export class StudioProjectsProxyService {
         country: dto.country,
       },
       roles,
+      'project',
     );
     return this.toStudioProject(updated);
   }
