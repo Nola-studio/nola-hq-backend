@@ -213,7 +213,7 @@ export class RoadmapController {
   @Post('initiatives')
   @HqRoles(HqRole.Operator)
   createInitiative(@Body() dto: CreateInitiativeDto) {
-    return this.svc.createInitiative(dto);
+    return this.svc.createInitiative(dto, 'initiative');
   }
 
   @Patch('initiatives/:id')
@@ -223,7 +223,7 @@ export class RoadmapController {
     @Body() dto: UpdateInitiativeDto,
     @CurrentUser() user?: AuthenticatedUser,
   ) {
-    return this.svc.updateInitiative(id, dto, user?.roles);
+    return this.svc.updateInitiative(id, dto, user?.roles, 'initiative');
   }
 
   @Patch('initiatives/:id/key-prefix')

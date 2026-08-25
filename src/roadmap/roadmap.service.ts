@@ -550,13 +550,13 @@ export class RoadmapService {
 
   /**
    * `scope` is never client-supplied — it's forced by which endpoint calls
-   * this: `RoadmapController.createInitiative` (default, 'initiative') or
+   * this: `RoadmapController.createInitiative` ('initiative') or
    * `StudioProjectsProxyService.createProject` ('project'). See
    * `RoadmapInitiativeScope`.
    */
   async createInitiative(
     dto: CreateInitiativeDto,
-    scope: RoadmapInitiativeScope = 'initiative',
+    scope: RoadmapInitiativeScope,
   ): Promise<RoadmapInitiativeView> {
     if (dto.objectiveId) await this.assertObjectiveExists(dto.objectiveId);
     const now = new Date();
@@ -603,12 +603,13 @@ export class RoadmapService {
   async updateInitiative(
     id: string,
     dto: UpdateInitiativeDto,
-    roles?: string[],
+    roles: string[] | undefined,
+    scope: RoadmapInitiativeScope,
   ): Promise<RoadmapInitiativeView> {
     const allowedUnitIds = await this.businessUnits.resolveAllowedUnits(roles);
     if (allowedUnitIds.length === 0) throw new NotFoundException(`Initiative ${id} introuvable`);
     const initiative = await this.initiatives.findOne({
-      where: { id, scope: 'initiative', businessUnitId: In(allowedUnitIds) },
+      where: { id, scope, businessUnitId: In(allowedUnitIds) },
     });
     if (!initiative) throw new NotFoundException(`Initiative ${id} introuvable`);
     if (dto.objectiveId) await this.assertObjectiveExists(dto.objectiveId);
