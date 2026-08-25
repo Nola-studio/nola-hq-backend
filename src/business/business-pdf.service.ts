@@ -4,59 +4,227 @@ import PDFDocument = require('pdfkit');
 import { toBuffer as qrToBuffer } from 'qrcode';
 import { amountInWords } from './amount-in-words';
 import type { BusinessUnit } from '../company/business-unit.entity';
-import { BUSINESS_PAYMENT_METHOD_LABELS, type BusinessInvoice } from './business-invoice.entity';
-import type { BusinessQuote } from './business-quote.entity';
+import { BUSINESS_PAYMENT_METHOD_LABELS, type BusinessInvoice, type BusinessInvoiceStatus } from './business-invoice.entity';
+import type { BusinessQuote, BusinessQuoteStatus } from './business-quote.entity';
 import { LEGAL_ENTITY } from './legal-entity.config';
+import { PDF_NEUTRALS, resolvePdfTheme, type PdfTheme } from './pdf-themes';
+import { registerPdfFonts } from './pdf-fonts';
+import {
+  PAGE,
+  header,
+  metaCards,
+  itemsTableHeader,
+  itemsTableRow,
+  itemRowHeight,
+  itemsTableContainer,
+  paymentBox,
+  totalsBlock,
+  signatureBlock,
+  footer,
+  pageNumberStamp,
+  topAccentBar,
+  type ItemsTableColumns,
+  type ItemRow,
+} from './pdf-primitives';
 
 /**
- * The brand is the letterhead (header banner, tagline, footer line); the
- * legal entity is the contracting party (appended to the footer). Null
- * tagline/footerLine on the business unit fall back to `LEGAL_ENTITY`'s —
- * e.g. `nolaa-corp`, which carries no override.
+ * Pagination rule (proposed in Phase 1, approved with the footer change):
+ * items rows break to a new page once they'd cross this Y — conservative,
+ * leaving room to decide afterward whether the closing block (financial +
+ * signatures) also needs its own page. Continuation pages repeat the top
+ * accent bar and the items-table column header, not the logo/brand header
+ * or meta-cards (those identify the document once, at the top). The footer
+ * renders on the LAST page only; every other page gets a small "Page N / M"
+ * stamp instead — a footer on page 1 of a 2-page document reads as a
+ * finished document that isn't.
  */
+const ITEMS_CONTINUATION_LIMIT = 700;
+/** Conservative reserved height for financial section + gap + signature row — if there isn't this much room left after the items table, the closing block starts its own page instead of crowding the bottom margin. */
+const CLOSING_BLOCK_HEIGHT = 230;
+
+/** The brand as it drives PDF rendering: display strings + resolved color palette. Null tagline/footerLine fall back to `LEGAL_ENTITY`'s (e.g. `nolaa-corp`, which carries no override); null theme falls back to `'indigo'` via `resolvePdfTheme`. */
 interface DocumentBrand {
   name: string;
   tagline: string;
   footerLine: string;
+  theme: PdfTheme;
 }
 
-const GREEN = '#1F4D3A';
-const OCRE = '#D4A053';
-const INK = '#17211D';
-const MUTE = '#66736D';
-const LINE = '#DDE3DF';
+const INVOICE_STATUS_LABELS: Record<BusinessInvoiceStatus, string> = {
+  draft: 'Brouillon',
+  sent: 'Envoyée',
+  partial: 'Partielle',
+  paid: 'Payée',
+  overdue: 'En retard',
+  cancelled: 'Annulée',
+};
+
+const QUOTE_STATUS_LABELS: Record<BusinessQuoteStatus, string> = {
+  draft: 'Brouillon',
+  sent: 'Envoyé',
+  accepted: 'Accepté',
+  rejected: 'Refusé',
+  expired: 'Expiré',
+};
+
+const RECEIPT_COLUMNS: Omit<ItemsTableColumns, 'descWidth' | 'qtyWidth' | 'unitWidth' | 'totalWidth'> = {
+  descLabel: 'Description',
+  qtyLabel: 'Qté',
+  unitLabel: 'Prix unitaire',
+  totalLabel: 'Montant',
+};
+
+const SERVICE_COLUMNS: Omit<ItemsTableColumns, 'descWidth' | 'qtyWidth' | 'unitWidth' | 'totalWidth'> = {
+  descLabel: 'Prestation / Description',
+  qtyLabel: 'Qté',
+  unitLabel: 'Taux unitaire',
+  totalLabel: 'Montant HT',
+};
+
+const TABLE_COLUMN_WIDTHS = { descWidth: 245, qtyWidth: 40, unitWidth: 105, totalWidth: 105 };
 
 @Injectable()
 export class BusinessPdfService {
   constructor(private readonly config: ConfigService) {}
 
-  quote(quote: BusinessQuote) {
+  quote(quote: BusinessQuote): Promise<Buffer> {
     const brand = this.brandOf(quote.businessUnit);
     return this.build(brand, (doc) => {
-      this.header(doc, 'DEVIS', quote.number, quote.issuedOn, brand);
-      this.parties(doc, quote.client?.name ?? 'Client', quote.client?.email, quote.client?.phone);
-      doc.fillColor(INK).font('Helvetica-Bold').fontSize(15).text(quote.title, 50, 225);
-      doc.fillColor(MUTE).font('Helvetica').fontSize(9).text(`Valable jusqu'au ${this.date(quote.validUntil)}`, 50, 248);
-      this.quoteTable(doc, quote);
-      this.notes(doc, quote.paymentTerms, quote.notes);
-      this.footer(doc, quote.number, brand);
+      topAccentBar(doc, brand.theme);
+      header(doc, {
+        monogram: this.monogram(brand.name),
+        brandName: brand.name,
+        brandSub: brand.tagline,
+        badge: 'DEVIS',
+        title: 'DEVIS',
+        number: `N° ${quote.number}`,
+        theme: brand.theme,
+      });
+      metaCards(doc, 108, {
+        card1Label: 'Facturé à / Client',
+        card1Name: quote.client?.name ?? 'Client',
+        card1Detail: this.contactLine(quote.client?.email, quote.client?.phone),
+        card2Label: 'Détails du document',
+        card2Rows: [
+          { label: "Date d'émission :", value: this.date(quote.issuedOn) },
+          { label: "Valable jusqu'au :", value: this.date(quote.validUntil), mono: true },
+          { label: 'Statut :', value: QUOTE_STATUS_LABELS[quote.status] },
+        ],
+        card2StatusPill: { label: QUOTE_STATUS_LABELS[quote.status], theme: brand.theme },
+      });
+
+      const rows: ItemRow[] = (quote.lines ?? []).map((line) => ({
+        description: line.description,
+        qty: String(line.quantity),
+        unitPrice: this.money(line.unitPriceCdf, quote.currency),
+        total: this.money(line.totalCdf, quote.currency),
+      }));
+      const tableBottom = this.drawItemsTable(doc, 200, rows, SERVICE_COLUMNS, brand.theme);
+
+      const financialY = this.ensureClosingSpace(doc, Math.max(325, tableBottom + 20), brand.theme);
+      if (quote.paymentTerms || quote.notes) {
+        paymentBox(doc, {
+          x: 50,
+          y: financialY,
+          width: 260,
+          height: 110,
+          title: 'Modalités & Conditions de Paiement',
+          pills: [],
+          bodyText: [quote.paymentTerms, quote.notes].filter(Boolean).join(' — ') || undefined,
+        });
+      }
+      totalsBlock(doc, {
+        x: 325,
+        y: financialY,
+        width: 220,
+        rows: [
+          { label: 'Sous-total HT :', value: this.money(quote.subtotalCdf, quote.currency) },
+          { label: `Taxe (${quote.taxRate}%) :`, value: this.money(quote.taxCdf, quote.currency) },
+        ],
+        grandLabel: 'Net à Payer',
+        grandValue: this.money(quote.totalCdf, quote.currency),
+        wordsLine: `Arrêté à la somme de : ${amountInWords(quote.totalCdf, quote.currency)}.`,
+        theme: brand.theme,
+      });
+
+      const sigY = financialY + 122;
+      doc.moveTo(50, sigY - 8).lineTo(545, sigY - 8).strokeColor(PDF_NEUTRALS.border).stroke();
+      signatureBlock(doc, sigY, [
+        { width: 240, kind: 'stamp', stampLabel: 'Cachet & Signature', caption: 'Pour le prestataire' },
+        { width: 240, kind: 'stamp', stampLabel: 'Bon pour accord', caption: 'Pour le client' },
+      ]);
     });
   }
 
-  invoice(invoice: BusinessInvoice) {
+  invoice(invoice: BusinessInvoice): Promise<Buffer> {
     const brand = this.brandOf(invoice.businessUnit);
     return this.build(brand, (doc) => {
-      this.header(doc, 'FACTURE', invoice.number, invoice.issuedOn, brand);
-      this.parties(doc, invoice.client?.name ?? 'Client', invoice.client?.email, invoice.client?.phone);
-      doc.fillColor(INK).font('Helvetica-Bold').fontSize(15).text(invoice.description || `Prestations ${brand.name}`, 50, 225);
-      doc.fillColor(MUTE).font('Helvetica').fontSize(9).text(`Projet : ${invoice.project?.title ?? 'Non renseigné'}`, 50, 248);
-      doc.text(`Échéance : ${this.date(invoice.dueOn)}`, 50, 263);
-      const totalsY = (invoice.lines?.length ?? 0) > 0 ? this.invoiceLineTable(doc, invoice) : this.invoiceSingleRow(doc, invoice);
+      topAccentBar(doc, brand.theme);
+      header(doc, {
+        monogram: this.monogram(brand.name),
+        brandName: brand.name,
+        brandSub: brand.tagline,
+        badge: 'FACTURE',
+        title: 'FACTURE',
+        number: `N° ${invoice.number}`,
+        theme: brand.theme,
+      });
+      metaCards(doc, 108, {
+        card1Label: 'Facturé à / Client',
+        card1Name: invoice.client?.name ?? 'Client',
+        card1Detail: this.contactLine(invoice.client?.email, invoice.client?.phone) + (invoice.project?.title ? `  •  Réf : ${invoice.project.title}` : ''),
+        card2Label: 'Détails du document',
+        card2Rows: [
+          { label: "Date d'émission :", value: this.date(invoice.issuedOn) },
+          { label: 'Échéance :', value: this.date(invoice.dueOn), mono: true },
+          { label: 'Statut :', value: INVOICE_STATUS_LABELS[invoice.status] },
+        ],
+        card2StatusPill: { label: INVOICE_STATUS_LABELS[invoice.status], theme: brand.theme },
+      });
+
+      const rows: ItemRow[] =
+        (invoice.lines?.length ?? 0) > 0
+          ? invoice.lines!.map((line) => ({
+              description: line.description,
+              qty: String(line.quantity),
+              unitPrice: this.money(line.unitPriceCdf, invoice.currency),
+              total: this.money(line.totalCdf, invoice.currency),
+            }))
+          : [
+              {
+                description: invoice.description || 'Prestations et services',
+                qty: '1',
+                unitPrice: this.money(invoice.amountCdf - invoice.taxCdf, invoice.currency),
+                total: this.money(invoice.amountCdf - invoice.taxCdf, invoice.currency),
+              },
+            ];
+      const tableBottom = this.drawItemsTable(doc, 200, rows, SERVICE_COLUMNS, brand.theme);
+
+      const financialY = this.ensureClosingSpace(doc, Math.max(325, tableBottom + 20), brand.theme);
+      // Payment box deliberately omitted: BusinessInvoice has no paymentTerms/notes
+      // field, and paymentMethod/paymentReference are null until markPaid() runs —
+      // rendering pills here would mean inventing data. The 260pt column stays blank.
       const subtotal = invoice.amountCdf - invoice.taxCdf;
-      this.totals(doc, subtotal, invoice.taxCdf, invoice.amountCdf, invoice.taxRate, invoice.currency, totalsY, invoice.taxLabel || 'Taxe');
-      doc.fillColor(MUTE).font('Helvetica').fontSize(9).text(`Montant paye : ${this.money(invoice.paidAmountCdf, invoice.currency)}`, 50, totalsY + 83);
-      doc.text(`Solde : ${this.money(Math.max(0, invoice.amountCdf - invoice.paidAmountCdf), invoice.currency)}`, 50, totalsY + 99);
-      this.footer(doc, invoice.number, brand);
+      totalsBlock(doc, {
+        x: 325,
+        y: financialY,
+        width: 220,
+        rows: [
+          { label: 'Sous-total HT :', value: this.money(subtotal, invoice.currency) },
+          { label: `${invoice.taxLabel || 'Taxe'} (${invoice.taxRate}%) :`, value: this.money(invoice.taxCdf, invoice.currency) },
+        ],
+        grandLabel: 'Net à Payer',
+        grandValue: this.money(invoice.amountCdf, invoice.currency),
+        wordsLine: `Arrêté à la somme de : ${amountInWords(invoice.amountCdf, invoice.currency)}.`,
+        theme: brand.theme,
+      });
+
+      const sigY = financialY + 122;
+      doc.moveTo(50, sigY - 8).lineTo(545, sigY - 8).strokeColor(PDF_NEUTRALS.border).stroke();
+      signatureBlock(doc, sigY, [
+        { width: 240, kind: 'stamp', stampLabel: 'Cachet & Signature', caption: 'Pour le prestataire' },
+        { width: 240, kind: 'stamp', stampLabel: 'Bon pour accord', caption: 'Pour le client' },
+      ]);
     });
   }
 
@@ -64,89 +232,143 @@ export class BusinessPdfService {
   async receipt(invoice: BusinessInvoice): Promise<Buffer> {
     const brand = this.brandOf(invoice.businessUnit);
     const verifyUrl = this.verifyUrl(invoice.verificationToken!);
-    const qr = await qrToBuffer(verifyUrl, { width: 110, margin: 1, color: { dark: INK, light: '#FFFFFF' } });
+    const qr = await qrToBuffer(verifyUrl, { width: 200, margin: 1, color: { dark: PDF_NEUTRALS.textMain, light: '#FFFFFF' } });
 
     return this.build(brand, (doc) => {
-      this.header(doc, 'REÇU', invoice.receiptNumber!, (invoice.paidAt ?? new Date()).toISOString().slice(0, 10), brand);
-      this.parties(doc, invoice.client?.name ?? 'Client', invoice.client?.email, invoice.client?.phone);
-      doc.fillColor(MUTE).font('Helvetica').fontSize(9)
-        .text(`Facture : ${invoice.number}`, 50, 222)
-        .text(`Mode de paiement : ${BUSINESS_PAYMENT_METHOD_LABELS[invoice.paymentMethod!]}`, 50, 237)
-        .text(`Référence de paiement : ${invoice.paymentReference ?? '—'}`, 50, 252);
+      topAccentBar(doc, brand.theme);
+      header(doc, {
+        monogram: this.monogram(brand.name),
+        brandName: brand.name,
+        brandSub: brand.tagline,
+        badge: 'REÇU',
+        title: 'REÇU DE PAIEMENT',
+        number: `N° ${invoice.receiptNumber}`,
+        theme: brand.theme,
+      });
+      metaCards(doc, 108, {
+        card1Label: 'Facturé à / Client',
+        card1Name: invoice.client?.name ?? 'Client',
+        card1Detail: this.contactLine(invoice.client?.email, invoice.client?.phone),
+        card2Label: "Détails de l'opération",
+        card2Rows: [
+          { label: 'Date :', value: this.date((invoice.paidAt ?? new Date()).toISOString().slice(0, 10)) },
+          { label: 'Facture associée :', value: invoice.number, mono: true },
+          { label: 'Statut du solde :', value: 'Soldé' },
+        ],
+        card2StatusPill: { label: 'Soldé', theme: brand.theme },
+      });
 
-      const totalsY = (invoice.lines?.length ?? 0) > 0
-        ? this.invoiceLineTable(doc, invoice, 282)
-        : this.invoiceSingleRow(doc, invoice, 300);
-      const subtotal = invoice.amountCdf - invoice.taxCdf;
-      this.totals(doc, subtotal, invoice.taxCdf, invoice.amountCdf, invoice.taxRate, invoice.currency, totalsY, invoice.taxLabel || 'Taxe');
+      const rows: ItemRow[] =
+        (invoice.lines?.length ?? 0) > 0
+          ? invoice.lines!.map((line) => ({
+              description: line.description,
+              qty: String(line.quantity),
+              unitPrice: this.money(line.unitPriceCdf, invoice.currency),
+              total: this.money(line.totalCdf, invoice.currency),
+            }))
+          : [
+              {
+                description: invoice.description || 'Prestations et services',
+                qty: '1',
+                unitPrice: this.money(invoice.amountCdf - invoice.taxCdf, invoice.currency),
+                total: this.money(invoice.amountCdf - invoice.taxCdf, invoice.currency),
+              },
+            ];
+      const tableBottom = this.drawItemsTable(doc, 200, rows, RECEIPT_COLUMNS, brand.theme);
 
-      const paidY = totalsY + 95;
-      doc.fillColor(OCRE).rect(50, paidY, 495, 40).fill();
-      doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(10).text('MONTANT PAYÉ', 62, paidY + 14);
-      doc.fontSize(14).text(this.money(invoice.paidAmountCdf, invoice.currency), 300, paidY + 10, { width: 233, align: 'right' });
-      doc.fillColor(MUTE).font('Helvetica').fontSize(9)
-        .text(`Solde restant : ${this.money(Math.max(0, invoice.amountCdf - invoice.paidAmountCdf), invoice.currency)}`, 50, paidY + 52);
-      doc.fillColor(INK).font('Helvetica-Oblique').fontSize(9)
-        .text(`Arrêté à la somme de : ${amountInWords(invoice.paidAmountCdf, invoice.currency)}.`, 50, paidY + 70, { width: 495 });
+      const financialY = this.ensureClosingSpace(doc, Math.max(325, tableBottom + 20), brand.theme);
+      paymentBox(doc, {
+        x: 50,
+        y: financialY,
+        width: 260,
+        height: 110,
+        title: 'Mode de Règlement',
+        pills: [
+          { label: BUSINESS_PAYMENT_METHOD_LABELS[invoice.paymentMethod!], bg: brand.theme.primaryLight, text: brand.theme.primaryDark },
+          { label: `Réf. ${invoice.paymentReference ?? '—'}`, bg: PDF_NEUTRALS.badgeGrayBg, text: PDF_NEUTRALS.textMain, mono: true },
+        ],
+        bodyText: 'Reçu émis informatiquement via Nolaa HQ. Ce document fait foi de quittance officielle de paiement.',
+      });
+      // No partial payments: paidAmountCdf === amountCdf by the time markPaid() has
+      // run, so "reste à payer" is always 0 — still computed rather than hardcoded,
+      // in case that invariant is ever revisited elsewhere.
+      const balance = Math.max(0, invoice.amountCdf - invoice.paidAmountCdf);
+      totalsBlock(doc, {
+        x: 325,
+        y: financialY,
+        width: 220,
+        rows: [
+          { label: 'Total facture :', value: this.money(invoice.amountCdf, invoice.currency) },
+          { label: 'Déjà versé :', value: this.money(invoice.paidAmountCdf, invoice.currency) },
+          { label: 'Reste à payer :', value: this.money(balance, invoice.currency), color: brand.theme.highlightZero },
+        ],
+        grandLabel: 'Montant Payé',
+        grandValue: this.money(invoice.paidAmountCdf, invoice.currency),
+        wordsLine: `Arrêté à la somme de : ${amountInWords(invoice.paidAmountCdf, invoice.currency)}.`,
+        theme: brand.theme,
+      });
 
-      const qrY = Math.min(660, Math.max(doc.y + 25, paidY + 100));
-      doc.image(qr, 50, qrY, { width: 85 });
-      doc.fillColor(MUTE).font('Helvetica').fontSize(7)
-        .text('Scannez pour vérifier ce reçu, ou consultez :', 150, qrY + 4, { width: 395 })
-        .fillColor(INK).font('Helvetica-Bold').fontSize(8).text(verifyUrl, 150, qrY + 17, { width: 395 })
-        .fillColor(MUTE).font('Helvetica').fontSize(7).text(`Code : ${invoice.receiptNumber}`, 150, qrY + 34, { width: 395 });
-
-      this.signatureBlocks(doc, qrY + 95);
-      this.footer(doc, invoice.receiptNumber!, brand);
+      const sigY = financialY + 122;
+      doc.moveTo(50, sigY - 8).lineTo(545, sigY - 8).strokeColor(PDF_NEUTRALS.border).stroke();
+      signatureBlock(doc, sigY, [
+        { width: 125, kind: 'qr', qrImage: qr, qrCaption: 'Authenticité', qrToken: invoice.receiptNumber!, caption: '' },
+        { width: 170, kind: 'stamp', stampLabel: 'Sceau / Signature', caption: 'Le Caissier' },
+        { width: 170, kind: 'stamp', stampLabel: 'Signature', caption: 'Le Payeur' },
+      ]);
     });
   }
 
-  private signatureBlocks(doc: PDFKit.PDFDocument, y: number) {
-    doc.strokeColor(LINE).moveTo(50, y).lineTo(255, y).stroke();
-    doc.fillColor(MUTE).font('Helvetica').fontSize(8).text('LE CAISSIER', 50, y + 6, { width: 205, align: 'center' });
-    doc.strokeColor(LINE).moveTo(340, y).lineTo(545, y).stroke();
-    doc.fillColor(MUTE).font('Helvetica').fontSize(8).text('LE PAYEUR', 340, y + 6, { width: 205, align: 'center' });
-  }
+  // ── shared composition helpers ──────────────────────────────────────
 
-  private verifyUrl(token: string): string {
-    const base = (this.config.get<string>('PUBLIC_APP_URL') ?? 'http://localhost:5173').replace(/\/$/, '');
-    return `${base}/verify/receipt/${token}`;
-  }
-
-  private invoiceSingleRow(doc: PDFKit.PDFDocument, invoice: BusinessInvoice, startY = 305) {
-    const y = startY;
-    doc.fillColor(GREEN).rect(50, y, 495, 28).fill();
-    doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(9).text('DESCRIPTION', 62, y + 10);
-    doc.text('MONTANT', 430, y + 10, { width: 103, align: 'right' });
-    doc.fillColor(INK).font('Helvetica').fontSize(10).text(invoice.description || 'Prestations et services', 62, y + 44, { width: 335 });
-    doc.font('Helvetica-Bold').text(this.money(invoice.amountCdf, invoice.currency), 430, y + 44, { width: 103, align: 'right' });
-    doc.strokeColor(LINE).moveTo(50, y + 70).lineTo(545, y + 70).stroke();
-    return y + 95;
-  }
-
-  private invoiceLineTable(doc: PDFKit.PDFDocument, invoice: BusinessInvoice, startY = 285) {
-    let y = startY;
-    const header = () => {
-      doc.fillColor(GREEN).rect(50, y, 495, 28).fill();
-      doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(8)
-        .text('DESCRIPTION', 62, y + 10, { width: 230 })
-        .text('QTÉ', 305, y + 10, { width: 45, align: 'right' })
-        .text('PRIX UNITAIRE', 360, y + 10, { width: 80, align: 'right' })
-        .text('TOTAL', 450, y + 10, { width: 83, align: 'right' });
-      y += 38;
-    };
-    header();
-    for (const line of invoice.lines ?? []) {
-      const rowHeight = Math.max(31, doc.heightOfString(line.description, { width: 230 }) + 12);
-      if (y + rowHeight > 690) { doc.addPage(); y = 60; header(); }
-      doc.fillColor(INK).font('Helvetica').fontSize(9).text(line.description, 62, y + 6, { width: 230 });
-      doc.text(String(line.quantity), 305, y + 6, { width: 45, align: 'right' });
-      doc.text(this.money(line.unitPriceCdf, invoice.currency), 360, y + 6, { width: 80, align: 'right' });
-      doc.font('Helvetica-Bold').text(this.money(line.totalCdf, invoice.currency), 450, y + 6, { width: 83, align: 'right' });
-      doc.strokeColor(LINE).moveTo(50, y + rowHeight).lineTo(545, y + rowHeight).stroke();
-      y += rowHeight;
+  /**
+   * Draws the header band + all rows, breaking to a new page (repeating the
+   * top accent bar and the column header, not the logo/brand header or
+   * meta-cards) whenever the next row would cross `ITEMS_CONTINUATION_LIMIT`.
+   * Draws the outer rounded border around each page's portion of the table
+   * once that portion's final height is known. Returns the Y just past the
+   * table on whichever page it ends on.
+   */
+  private drawItemsTable(
+    doc: PDFKit.PDFDocument,
+    startY: number,
+    rows: ItemRow[],
+    labels: Omit<ItemsTableColumns, 'descWidth' | 'qtyWidth' | 'unitWidth' | 'totalWidth'>,
+    theme: PdfTheme,
+  ): number {
+    const cols: ItemsTableColumns = { ...TABLE_COLUMN_WIDTHS, ...labels };
+    let sectionStartY = startY;
+    let y = itemsTableHeader(doc, 50, sectionStartY, cols);
+    for (const item of rows) {
+      const rowHeight = itemRowHeight(doc, cols, item);
+      if (y + rowHeight > ITEMS_CONTINUATION_LIMIT) {
+        itemsTableContainer(doc, 50, sectionStartY, PAGE.contentWidth, y - sectionStartY);
+        doc.addPage();
+        topAccentBar(doc, theme);
+        sectionStartY = 50;
+        y = itemsTableHeader(doc, 50, sectionStartY, cols);
+      }
+      y += itemsTableRow(doc, 50, y, cols, item);
     }
-    return y + 18;
+    itemsTableContainer(doc, 50, sectionStartY, PAGE.contentWidth, y - sectionStartY);
+    return y;
+  }
+
+  /** If the closing block (financial section + signatures) wouldn't fit below `y` on the current page, starts a new page for it and returns the new Y (50); otherwise returns `y` unchanged. */
+  private ensureClosingSpace(doc: PDFKit.PDFDocument, y: number, theme: PdfTheme): number {
+    if (y + CLOSING_BLOCK_HEIGHT > PAGE.height - PAGE.margin) {
+      doc.addPage();
+      topAccentBar(doc, theme);
+      return 50;
+    }
+    return y;
+  }
+
+  private monogram(name: string): string {
+    return name.trim().charAt(0).toUpperCase() || '?';
+  }
+
+  private contactLine(email?: string | null, phone?: string | null): string {
+    return [email, phone].filter(Boolean).join('  •  ') || 'Coordonnées non renseignées';
   }
 
   private brandOf(unit?: BusinessUnit | null): DocumentBrand {
@@ -154,98 +376,60 @@ export class BusinessPdfService {
       name: unit?.name ?? LEGAL_ENTITY.name,
       tagline: unit?.tagline ?? LEGAL_ENTITY.tagline,
       footerLine: unit?.footerLine ?? LEGAL_ENTITY.footerLine,
+      theme: resolvePdfTheme(unit),
     };
   }
 
+  private verifyUrl(token: string): string {
+    const base = (this.config.get<string>('PUBLIC_APP_URL') ?? 'http://localhost:5173').replace(/\/$/, '');
+    return `${base}/verify/receipt/${token}`;
+  }
+
+  /**
+   * `bufferPages: true` + `switchToPage()` is the standard PDFKit technique
+   * for "Page N / M" stamps — the total page count isn't known until every
+   * page has been drawn, so the footer/page-stamp pass runs once at the end,
+   * going back to draw on each already-drawn page rather than needing the
+   * count up front.
+   */
   private build(brand: DocumentBrand, draw: (doc: PDFKit.PDFDocument) => void): Promise<Buffer> {
     return new Promise((resolve, reject) => {
-      const doc = new PDFDocument({ size: 'A4', margin: 50, info: { Author: brand.name } });
+      const doc = new PDFDocument({ size: 'A4', margin: 0, info: { Author: brand.name }, bufferPages: true });
       const chunks: Buffer[] = [];
       doc.on('data', (chunk: Buffer) => chunks.push(chunk));
       doc.on('end', () => resolve(Buffer.concat(chunks)));
       doc.on('error', reject);
+      registerPdfFonts(doc);
       draw(doc);
+
+      const { start, count } = doc.bufferedPageRange();
+      for (let i = 0; i < count; i++) {
+        doc.switchToPage(start + i);
+        if (i === count - 1) {
+          footer(doc, 755, { brandLine: brand.footerLine, monogram: this.monogram(brand.name), theme: brand.theme, rightText: 'Nolaa Studio Inc.' });
+        } else {
+          pageNumberStamp(doc, i + 1, count);
+        }
+      }
+
       doc.end();
     });
   }
 
-  private header(doc: PDFKit.PDFDocument, kind: string, number: string, date: string, brand: DocumentBrand) {
-    doc.fillColor(GREEN).rect(0, 0, 595.28, 150).fill();
-    const [firstWord, ...restWords] = brand.name.toUpperCase().split(' ');
-    doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(25).text(firstWord, 50, 42, { continued: true });
-    doc.fillColor(OCRE).text(restWords.length ? ` ${restWords.join(' ')}` : '');
-    doc.fillColor('#FFFFFF').font('Helvetica').fontSize(9).text(brand.tagline, 50, 76);
-    doc.font('Helvetica-Bold').fontSize(22).text(kind, 390, 39, { width: 155, align: 'right' });
-    doc.font('Helvetica').fontSize(9).text(number, 390, 71, { width: 155, align: 'right' });
-    doc.text(this.date(date), 390, 87, { width: 155, align: 'right' });
-  }
-
-  private parties(doc: PDFKit.PDFDocument, name: string, email?: string | null, phone?: string | null) {
-    doc.fillColor(MUTE).font('Helvetica-Bold').fontSize(8).text('ADRESSÉE À', 50, 172);
-    doc.fillColor(INK).fontSize(11).text(name, 50, 187);
-    doc.fillColor(MUTE).font('Helvetica').fontSize(9).text([email, phone].filter(Boolean).join('  |  ') || 'Coordonnées non renseignées', 50, 204);
-  }
-
-  private quoteTable(doc: PDFKit.PDFDocument, quote: BusinessQuote) {
-    let y = 285;
-    const header = () => {
-      doc.fillColor(GREEN).rect(50, y, 495, 28).fill();
-      doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(8)
-        .text('DESCRIPTION', 62, y + 10, { width: 230 })
-        .text('QTÉ', 305, y + 10, { width: 45, align: 'right' })
-        .text('PRIX UNITAIRE', 360, y + 10, { width: 80, align: 'right' })
-        .text('TOTAL', 450, y + 10, { width: 83, align: 'right' });
-      y += 38;
-    };
-    header();
-    for (const line of quote.lines ?? []) {
-      const rowHeight = Math.max(31, doc.heightOfString(line.description, { width: 230 }) + 12);
-      if (y + rowHeight > 690) { doc.addPage(); y = 60; header(); }
-      doc.fillColor(INK).font('Helvetica').fontSize(9).text(line.description, 62, y + 6, { width: 230 });
-      doc.text(String(line.quantity), 305, y + 6, { width: 45, align: 'right' });
-      doc.text(this.money(line.unitPriceCdf, quote.currency), 360, y + 6, { width: 80, align: 'right' });
-      doc.font('Helvetica-Bold').text(this.money(line.totalCdf, quote.currency), 450, y + 6, { width: 83, align: 'right' });
-      doc.strokeColor(LINE).moveTo(50, y + rowHeight).lineTo(545, y + rowHeight).stroke();
-      y += rowHeight;
-    }
-    this.totals(doc, quote.subtotalCdf, quote.taxCdf, quote.totalCdf, quote.taxRate, quote.currency, y + 18);
-  }
-
-  private totals(doc: PDFKit.PDFDocument, subtotal: number, tax: number, total: number, taxRate: number, currency: string, y = 520, label = 'Taxe') {
-    doc.fillColor(MUTE).font('Helvetica').fontSize(9).text('Sous-total', 350, y, { width: 90 });
-    doc.fillColor(INK).text(this.money(subtotal, currency), 450, y, { width: 83, align: 'right' });
-    doc.fillColor(MUTE).text(`${label} (${taxRate}%)`, 350, y + 19, { width: 90 });
-    doc.fillColor(INK).text(this.money(tax, currency), 450, y + 19, { width: 83, align: 'right' });
-    doc.fillColor(GREEN).rect(340, y + 42, 205, 34).fill();
-    doc.fillColor('#FFFFFF').font('Helvetica-Bold').fontSize(10).text('TOTAL', 352, y + 54);
-    doc.text(this.money(total, currency), 435, y + 54, { width: 98, align: 'right' });
-  }
-
-  private notes(doc: PDFKit.PDFDocument, terms?: string | null, notes?: string | null) {
-    const y = Math.min(690, Math.max(doc.y + 35, 635));
-    if (terms) {
-      doc.fillColor(MUTE).font('Helvetica-Bold').fontSize(8).text('CONDITIONS DE PAIEMENT', 50, y);
-      doc.fillColor(INK).font('Helvetica').fontSize(8).text(terms, 50, y + 14, { width: 250 });
-    }
-    if (notes) {
-      doc.fillColor(MUTE).font('Helvetica-Bold').fontSize(8).text('NOTES', 50, y + 44);
-      doc.fillColor(INK).font('Helvetica').fontSize(8).text(notes, 50, y + 58, { width: 400 });
-    }
-  }
-
-  /** The brand's footerLine is the letterhead; `LEGAL_ENTITY.name` appended is the actual contracting party. */
-  private footer(doc: PDFKit.PDFDocument, reference: string, brand: DocumentBrand) {
-    const bottom = doc.page.height - 62;
-    doc.strokeColor(LINE).moveTo(50, bottom - 12).lineTo(545, bottom - 12).stroke();
-    doc.fillColor(MUTE).font('Helvetica').fontSize(7).text(`${brand.footerLine} — ${LEGAL_ENTITY.name}`, 50, bottom, { width: 350, lineBreak: false });
-    doc.text(reference, 400, bottom, { width: 145, align: 'right', lineBreak: false });
-  }
-
   private money(value: number, currency: string) {
-    return `${new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(value).replace(/[\u202f\u00a0]/g, ' ')} ${currency}`;
+    return `${new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 0 }).format(value).replace(/[  ]/g, ' ')} ${currency}`;
   }
 
+  /**
+   * DD/MM/AAAA — matches the reference mockups' own `[JJ / MM / AAAA]`
+   * placeholder format exactly. Every date on this design lives in a narrow
+   * mono-font value column (meta-card key-value rows); a spelled-out long
+   * format ("18 septembre 2026") overflows that column and wraps into the
+   * row below it — confirmed by rendering and visually inspecting a sample
+   * PDF before settling on this format.
+   */
   private date(value: string) {
-    return new Intl.DateTimeFormat('fr-CA', { dateStyle: 'long', timeZone: 'UTC' }).format(new Date(`${value}T00:00:00Z`));
+    const [year, month, day] = value.split('-');
+    return `${day}/${month}/${year}`;
   }
 }
