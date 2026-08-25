@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Facture / Devis B2B — Nolaa Studio</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Plus Jakarta Sans', system-ui, sans-serif; background: #E5E7EB; padding: 20px 0; }
+    
+    /* 595pt Exact A4 Container (50pt margins, 495pt content) */
+    .page-a4 {
+      width: 595px; height: 842px; margin: 0 auto; background: #FFFFFF;
+      position: relative; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    }
+    .content-area { width: 495px; margin: 50px 50px 0 50px; }
+    .top-bar { position: absolute; top: 0; left: 0; width: 595px; height: 5px; background: linear-gradient(90deg, #0F172A 0%, #334155 100%); }
+
+    .header-tbl { width: 495px; border-collapse: collapse; margin-bottom: 12px; }
+    .header-tbl td { vertical-align: top; }
+    .logo-box { width: 40px; height: 40px; background: #0F172A; color: #FFF; border-radius: 8px; font-weight: 800; font-size: 20px; line-height: 40px; text-align: center; }
+    .inst-title { font-size: 16px; font-weight: 800; color: #1E293B; line-height: 1.2; }
+    .inst-sub { font-size: 10.5px; color: #64748B; margin-top: 2px; }
+    .meta-badge { display: inline-block; background: #F1F5F9; color: #0F172A; font-size: 9px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; padding: 3px 7px; border-radius: 4px; margin-bottom: 3px; }
+    .doc-title { font-size: 15px; font-weight: 800; color: #1E293B; }
+    .doc-num { font-family: 'Space Mono', monospace; font-size: 10.5px; font-weight: 700; color: #64748B; margin-top: 2px; }
+    .divider { width: 495px; height: 1px; background: #E2E8F0; margin-bottom: 12px; }
+
+    .cards-tbl { width: 495px; border-collapse: collapse; margin-bottom: 14px; }
+    .cards-tbl td { vertical-align: top; }
+    .card { background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 10px 12px; height: 80px; }
+    .card-lbl { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: #64748B; margin-bottom: 4px; }
+    .client-name { font-size: 13.5px; font-weight: 700; color: #1E293B; margin-bottom: 3px; }
+    .client-detail { font-size: 10.5px; color: #64748B; }
+    .client-detail strong { color: #1E293B; font-family: 'Space Mono', monospace; font-size: 9.5px; }
+    
+    .meta-kv { width: 100%; border-collapse: collapse; font-size: 10.5px; }
+    .meta-kv td { padding: 1px 0; }
+    .meta-kv .k { color: #64748B; }
+    .meta-kv .v { font-weight: 600; color: #1E293B; text-align: right; }
+    .meta-kv .v.mono { font-family: 'Space Mono', monospace; font-size: 9.5px; }
+    .status-pill { display: inline-block; background: #DBEAFE; color: #1E40AF; font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 10px; text-transform: uppercase; }
+
+    .tbl-wrap { width: 495px; border: 1px solid #E2E8F0; border-radius: 8px; overflow: hidden; margin-bottom: 14px; }
+    .items-tbl { width: 495px; border-collapse: collapse; font-size: 11px; }
+    .items-tbl th { background: #F8FAFC; color: #64748B; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; padding: 7px 10px; border-bottom: 1px solid #E2E8F0; }
+    .items-tbl td { padding: 9px 10px; color: #1E293B; border-bottom: 1px solid #E2E8F0; }
+    .items-tbl tr:last-child td { border-bottom: none; }
+    .col-num { text-align: right; font-family: 'Space Mono', monospace; font-size: 10.5px; font-weight: 600; }
+
+    .fin-tbl { width: 495px; border-collapse: collapse; margin-bottom: 14px; }
+    .fin-tbl td { vertical-align: top; }
+    .pay-box { width: 260px; height: 110px; background: #FAFAFA; border: 1px dashed #CBD5E1; border-radius: 8px; padding: 10px 12px; }
+    .pay-title { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: #64748B; margin-bottom: 6px; }
+    .badge-pill { display: inline-block; padding: 3px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; margin-right: 3px; }
+    .pill-slate { background: #F1F5F9; color: #020617; }
+    .pill-gray { background: #EEF2F6; color: #1E293B; font-family: 'Space Mono', monospace; font-size: 9px; }
+    .legal-txt { font-size: 9.5px; color: #64748B; line-height: 1.35; margin-top: 6px; }
+
+    .totals-tbl { width: 220px; border-collapse: collapse; font-size: 10.5px; }
+    .totals-tbl td { padding: 2px 0; color: #64748B; }
+    .totals-tbl .val { text-align: right; font-family: 'Space Mono', monospace; font-weight: 600; color: #1E293B; }
+
+    .grand-box { width: 220px; height: 38px; background: #0F172A; border-radius: 6px; padding: 0 10px; margin-top: 6px; }
+    .grand-tbl { width: 100%; height: 38px; border-collapse: collapse; color: #FFF; }
+    .grand-tbl td { vertical-align: middle; }
+    .grand-lbl { font-size: 10.5px; font-weight: 600; }
+    .grand-amt { text-align: right; font-family: 'Space Mono', monospace; font-size: 14.5px; font-weight: 700; }
+    .in-words { font-size: 9.5px; color: #64748B; text-align: right; font-style: italic; margin-top: 4px; }
+
+    /* Signatures: 2 widened columns (240pt + 15pt gap + 240pt = 495pt) */
+    .sig-tbl { width: 495px; border-collapse: collapse; }
+    .sig-tbl td { vertical-align: bottom; }
+    .sig-card { width: 240px; height: 90px; text-align: center; }
+    .sig-stamp { display: inline-block; font-size: 8.5px; color: #94A3B8; border: 1px dashed #CBD5E1; border-radius: 4px; padding: 3px 10px; margin-bottom: 22px; }
+    .sig-line { border-top: 1px solid #CBD5E1; padding-top: 3px; font-size: 8.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: #64748B; }
+
+    .footer-bar { position: absolute; bottom: 30px; left: 50px; width: 495px; border-top: 1px solid #E2E8F0; padding-top: 8px; }
+    .footer-tbl { width: 495px; border-collapse: collapse; font-size: 9.5px; color: #64748B; }
+    .brand-tag { background: #0F172A; color: #FFF; font-size: 7.5px; font-weight: 800; width: 13px; height: 13px; display: inline-block; text-align: center; line-height: 13px; border-radius: 2px; margin-right: 3px; }
+  </style>
+</head>
+<body>
+
+  <div class="page-a4">
+    <div class="top-bar"></div>
+    <div class="content-area">
+      <!-- 1. Header (495pt) -->
+      <table class="header-tbl">
+        <tr>
+          <td style="width: 315px;">
+            <table style="border-collapse: collapse;">
+              <tr>
+                <td style="width: 40px;"><div class="logo-box">[N]</div></td>
+                <td style="padding-left: 12px; width: 263px;">
+                  <div class="inst-title">[Nom de la Marque / BU]</div>
+                  <div class="inst-sub">[Ligne descriptive de service]</div>
+                </td>
+              </tr>
+            </table>
+          </td>
+          <td style="width: 180px; text-align: right;">
+            <div class="meta-badge">[FACTURE | DEVIS]</div>
+            <div class="doc-title">[TITRE DOCUMENT]</div>
+            <div class="doc-num">N° [RÉFÉRENCE]</div>
+          </td>
+        </tr>
+      </table>
+      <div class="divider"></div>
+
+      <!-- 2. Meta Cards (285pt + 15pt + 195pt = 495pt) -->
+      <table class="cards-tbl">
+        <tr>
+          <td style="width: 285px;">
+            <div class="card">
+              <div class="card-lbl">Facturé à / Client</div>
+              <div class="client-name">[Nom du Client / Entreprise]</div>
+              <div class="client-detail">Contact : <strong>[email@client.com]</strong> &nbsp;•&nbsp; Réf : <strong>[RÉF-PROJET]</strong></div>
+            </div>
+          </td>
+          <td style="width: 15px;"></td>
+          <td style="width: 195px;">
+            <div class="card">
+              <div class="card-lbl">Détails du document</div>
+              <table class="meta-kv">
+                <tr><td class="k">Date d'émission :</td><td class="v">[JJ / MM / AAAA]</td></tr>
+                <tr><td class="k">Échéance :</td><td class="v mono">[JJ / MM / AAAA]</td></tr>
+                <tr><td class="k">Statut :</td><td class="v"><span class="status-pill">● [Statut]</span></td></tr>
+              </table>
+            </div>
+          </td>
+        </tr>
+      </table>
+
+      <!-- 3. Table (245 + 40 + 105 + 105 = 495pt) -->
+      <div class="tbl-wrap">
+        <table class="items-tbl">
+          <thead>
+            <tr>
+              <th style="width: 245px;">Prestation / Description</th>
+              <th style="width: 40px; text-align: center;">Qté</th>
+              <th class="col-num" style="width: 105px;">Taux unitaire</th>
+              <th class="col-num" style="width: 105px;">Montant HT</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="width: 245px;">
+                <strong>[Intitulé de la prestation / livrable]</strong><br>
+                <span style="color: #64748B; font-size: 9.5px;">[Description détaillée des travaux réalisés]</span>
+              </td>
+              <td style="width: 40px; text-align: center; font-weight: 600;">[Qté]</td>
+              <td class="col-num" style="width: 105px;">[0,00 DEV]</td>
+              <td class="col-num" style="width: 105px;">[0,00 DEV]</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- 4. Financial (260pt + 15pt + 220pt = 495pt) -->
+      <table class="fin-tbl">
+        <tr>
+          <td style="width: 260px;">
+            <div class="pay-box">
+              <div class="pay-title">Modalités & Conditions de Paiement</div>
+              <div>
+                <span class="badge-pill pill-slate">[Mode de règlement]</span>
+                <span class="badge-pill pill-gray">[Réf. Transaction / Compte]</span>
+              </div>
+              <div class="legal-txt">
+                [Conditions de paiement applicables : échéance, pénalités de retard applicables ou coordonnées bancaires].
+              </div>
+            </div>
+          </td>
+          <td style="width: 15px;"></td>
+          <td style="width: 220px;">
+            <table class="totals-tbl">
+              <tr><td>Sous-total HT :</td><td class="val">[0,00 DEV]</td></tr>
+              <tr><td>[Taxes / TVA] :</td><td class="val">[0,00 DEV]</td></tr>
+            </table>
+            <div class="grand-box">
+              <table class="grand-tbl">
+                <tr><td class="grand-lbl">Net à Payer</td><td class="grand-amt">[0,00 DEV]</td></tr>
+              </table>
+            </div>
+            <div class="in-words">Arrêté à la somme de : <strong>[Montant en toutes lettres]</strong></div>
+          </td>
+        </tr>
+      </table>
+
+      <!-- 5. Signatures (240pt + 15pt + 240pt = 495pt) -->
+      <div class="divider" style="margin-top: 8px;"></div>
+      <table class="sig-tbl">
+        <tr>
+          <td style="width: 240px;">
+            <div class="sig-card">
+              <span class="sig-stamp">Cachet & Signature</span>
+              <div class="sig-line">Pour le prestataire</div>
+            </div>
+          </td>
+          <td style="width: 15px;"></td>
+          <td style="width: 240px;">
+            <div class="sig-card">
+              <span class="sig-stamp">Bon pour accord</span>
+              <div class="sig-line">Pour le client</div>
+            </div>
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- 6. Footer (Brand Left, Contracting Entity Right) -->
+    <div class="footer-bar">
+      <table class="footer-tbl">
+        <tr>
+          <td style="width: 300px;"><span class="brand-tag">[B]</span> <strong>[Nom de la Marque]</strong></td>
+          <td style="width: 195px; text-align: right;">Nolaa Studio Inc. [NEQ]</td>
+        </tr>
+      </table>
+    </div>
+  </div>
+
+</body>
+</html>
