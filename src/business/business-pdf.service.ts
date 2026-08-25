@@ -15,6 +15,7 @@ import {
   metaCards,
   itemsTableHeader,
   itemsTableRow,
+  itemRowHeight,
   itemsTableContainer,
   paymentBox,
   totalsBlock,
@@ -25,6 +26,21 @@ import {
   type ItemsTableColumns,
   type ItemRow,
 } from './pdf-primitives';
+
+/**
+ * Pagination rule (proposed in Phase 1, approved with the footer change):
+ * items rows break to a new page once they'd cross this Y — conservative,
+ * leaving room to decide afterward whether the closing block (financial +
+ * signatures) also needs its own page. Continuation pages repeat the top
+ * accent bar and the items-table column header, not the logo/brand header
+ * or meta-cards (those identify the document once, at the top). The footer
+ * renders on the LAST page only; every other page gets a small "Page N / M"
+ * stamp instead — a footer on page 1 of a 2-page document reads as a
+ * finished document that isn't.
+ */
+const ITEMS_CONTINUATION_LIMIT = 700;
+/** Conservative reserved height for financial section + gap + signature row — if there isn't this much room left after the items table, the closing block starts its own page instead of crowding the bottom margin. */
+const CLOSING_BLOCK_HEIGHT = 230;
 
 /** The brand as it drives PDF rendering: display strings + resolved color palette. Null tagline/footerLine fall back to `LEGAL_ENTITY`'s (e.g. `nolaa-corp`, which carries no override); null theme falls back to `'indigo'` via `resolvePdfTheme`. */
 interface DocumentBrand {
@@ -103,9 +119,9 @@ export class BusinessPdfService {
         unitPrice: this.money(line.unitPriceCdf, quote.currency),
         total: this.money(line.totalCdf, quote.currency),
       }));
-      const tableBottom = this.drawItemsTable(doc, 200, rows, SERVICE_COLUMNS);
+      const tableBottom = this.drawItemsTable(doc, 200, rows, SERVICE_COLUMNS, brand.theme);
 
-      const financialY = Math.max(325, tableBottom + 20);
+      const financialY = this.ensureClosingSpace(doc, Math.max(325, tableBottom + 20), brand.theme);
       if (quote.paymentTerms || quote.notes) {
         paymentBox(doc, {
           x: 50,
@@ -137,8 +153,6 @@ export class BusinessPdfService {
         { width: 240, kind: 'stamp', stampLabel: 'Cachet & Signature', caption: 'Pour le prestataire' },
         { width: 240, kind: 'stamp', stampLabel: 'Bon pour accord', caption: 'Pour le client' },
       ]);
-
-      this.drawFooter(doc, brand, 1, 1);
     });
   }
 
@@ -184,9 +198,9 @@ export class BusinessPdfService {
                 total: this.money(invoice.amountCdf - invoice.taxCdf, invoice.currency),
               },
             ];
-      const tableBottom = this.drawItemsTable(doc, 200, rows, SERVICE_COLUMNS);
+      const tableBottom = this.drawItemsTable(doc, 200, rows, SERVICE_COLUMNS, brand.theme);
 
-      const financialY = Math.max(325, tableBottom + 20);
+      const financialY = this.ensureClosingSpace(doc, Math.max(325, tableBottom + 20), brand.theme);
       // Payment box deliberately omitted: BusinessInvoice has no paymentTerms/notes
       // field, and paymentMethod/paymentReference are null until markPaid() runs —
       // rendering pills here would mean inventing data. The 260pt column stays blank.
@@ -211,8 +225,6 @@ export class BusinessPdfService {
         { width: 240, kind: 'stamp', stampLabel: 'Cachet & Signature', caption: 'Pour le prestataire' },
         { width: 240, kind: 'stamp', stampLabel: 'Bon pour accord', caption: 'Pour le client' },
       ]);
-
-      this.drawFooter(doc, brand, 1, 1);
     });
   }
 
@@ -262,9 +274,9 @@ export class BusinessPdfService {
                 total: this.money(invoice.amountCdf - invoice.taxCdf, invoice.currency),
               },
             ];
-      const tableBottom = this.drawItemsTable(doc, 200, rows, RECEIPT_COLUMNS);
+      const tableBottom = this.drawItemsTable(doc, 200, rows, RECEIPT_COLUMNS, brand.theme);
 
-      const financialY = Math.max(325, tableBottom + 20);
+      const financialY = this.ensureClosingSpace(doc, Math.max(325, tableBottom + 20), brand.theme);
       paymentBox(doc, {
         x: 50,
         y: financialY,
@@ -303,30 +315,52 @@ export class BusinessPdfService {
         { width: 170, kind: 'stamp', stampLabel: 'Sceau / Signature', caption: 'Le Caissier' },
         { width: 170, kind: 'stamp', stampLabel: 'Signature', caption: 'Le Payeur' },
       ]);
-
-      this.drawFooter(doc, brand, 1, 1);
     });
   }
 
   // ── shared composition helpers ──────────────────────────────────────
 
-  /** Draws the header band + all rows (single page — pagination wraps this in a later change) and the outer rounded border once the total height is known. Returns the Y just past the table. */
-  private drawItemsTable(doc: PDFKit.PDFDocument, startY: number, rows: ItemRow[], labels: Omit<ItemsTableColumns, 'descWidth' | 'qtyWidth' | 'unitWidth' | 'totalWidth'>): number {
+  /**
+   * Draws the header band + all rows, breaking to a new page (repeating the
+   * top accent bar and the column header, not the logo/brand header or
+   * meta-cards) whenever the next row would cross `ITEMS_CONTINUATION_LIMIT`.
+   * Draws the outer rounded border around each page's portion of the table
+   * once that portion's final height is known. Returns the Y just past the
+   * table on whichever page it ends on.
+   */
+  private drawItemsTable(
+    doc: PDFKit.PDFDocument,
+    startY: number,
+    rows: ItemRow[],
+    labels: Omit<ItemsTableColumns, 'descWidth' | 'qtyWidth' | 'unitWidth' | 'totalWidth'>,
+    theme: PdfTheme,
+  ): number {
     const cols: ItemsTableColumns = { ...TABLE_COLUMN_WIDTHS, ...labels };
-    let y = itemsTableHeader(doc, 50, startY, cols);
+    let sectionStartY = startY;
+    let y = itemsTableHeader(doc, 50, sectionStartY, cols);
     for (const item of rows) {
+      const rowHeight = itemRowHeight(doc, cols, item);
+      if (y + rowHeight > ITEMS_CONTINUATION_LIMIT) {
+        itemsTableContainer(doc, 50, sectionStartY, PAGE.contentWidth, y - sectionStartY);
+        doc.addPage();
+        topAccentBar(doc, theme);
+        sectionStartY = 50;
+        y = itemsTableHeader(doc, 50, sectionStartY, cols);
+      }
       y += itemsTableRow(doc, 50, y, cols, item);
     }
-    itemsTableContainer(doc, 50, startY, PAGE.contentWidth, y - startY);
+    itemsTableContainer(doc, 50, sectionStartY, PAGE.contentWidth, y - sectionStartY);
     return y;
   }
 
-  private drawFooter(doc: PDFKit.PDFDocument, brand: DocumentBrand, page: number, totalPages: number): void {
-    if (page === totalPages) {
-      footer(doc, 755, { brandLine: brand.footerLine, monogram: this.monogram(brand.name), theme: brand.theme, rightText: 'Nolaa Studio Inc.' });
-    } else {
-      pageNumberStamp(doc, page, totalPages);
+  /** If the closing block (financial section + signatures) wouldn't fit below `y` on the current page, starts a new page for it and returns the new Y (50); otherwise returns `y` unchanged. */
+  private ensureClosingSpace(doc: PDFKit.PDFDocument, y: number, theme: PdfTheme): number {
+    if (y + CLOSING_BLOCK_HEIGHT > PAGE.height - PAGE.margin) {
+      doc.addPage();
+      topAccentBar(doc, theme);
+      return 50;
     }
+    return y;
   }
 
   private monogram(name: string): string {
@@ -351,15 +385,33 @@ export class BusinessPdfService {
     return `${base}/verify/receipt/${token}`;
   }
 
+  /**
+   * `bufferPages: true` + `switchToPage()` is the standard PDFKit technique
+   * for "Page N / M" stamps — the total page count isn't known until every
+   * page has been drawn, so the footer/page-stamp pass runs once at the end,
+   * going back to draw on each already-drawn page rather than needing the
+   * count up front.
+   */
   private build(brand: DocumentBrand, draw: (doc: PDFKit.PDFDocument) => void): Promise<Buffer> {
     return new Promise((resolve, reject) => {
-      const doc = new PDFDocument({ size: 'A4', margin: 0, info: { Author: brand.name } });
+      const doc = new PDFDocument({ size: 'A4', margin: 0, info: { Author: brand.name }, bufferPages: true });
       const chunks: Buffer[] = [];
       doc.on('data', (chunk: Buffer) => chunks.push(chunk));
       doc.on('end', () => resolve(Buffer.concat(chunks)));
       doc.on('error', reject);
       registerPdfFonts(doc);
       draw(doc);
+
+      const { start, count } = doc.bufferedPageRange();
+      for (let i = 0; i < count; i++) {
+        doc.switchToPage(start + i);
+        if (i === count - 1) {
+          footer(doc, 755, { brandLine: brand.footerLine, monogram: this.monogram(brand.name), theme: brand.theme, rightText: 'Nolaa Studio Inc.' });
+        } else {
+          pageNumberStamp(doc, i + 1, count);
+        }
+      }
+
       doc.end();
     });
   }

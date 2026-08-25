@@ -164,11 +164,16 @@ export function itemsTableHeader(doc: Doc, x: number, y: number, cols: ItemsTabl
   return y + 26;
 }
 
-/** One item row. Returns the row's height so the caller can advance its cursor (and, in the pagination-aware caller, decide whether to break). Description is single-line (`fitText`); `sub` is intentionally the one field allowed to wrap (its rendered height is measured beforehand and folded into rowHeight). */
+/** Measures a row's height without drawing it — lets a paginating caller decide whether the row fits on the current page before committing to draw it. */
+export function itemRowHeight(doc: Doc, cols: ItemsTableColumns, item: ItemRow): number {
+  const subLines = item.sub ? doc.font(PDF_FONTS.regular).fontSize(9.5).heightOfString(item.sub, { width: cols.descWidth - 20 }) : 0;
+  return Math.max(30, 14 + subLines + 8);
+}
+
+/** One item row. Returns the row's height so the caller can advance its cursor (and, in the pagination-aware caller, decide whether to break). Description is single-line (`fitText`); `sub` is intentionally the one field allowed to wrap (its rendered height is measured beforehand and folded into rowHeight via `itemRowHeight`). */
 export function itemsTableRow(doc: Doc, x: number, y: number, cols: ItemsTableColumns, item: ItemRow): number {
   const width = cols.descWidth + cols.qtyWidth + cols.unitWidth + cols.totalWidth;
-  const subLines = item.sub ? doc.font(PDF_FONTS.regular).fontSize(9.5).heightOfString(item.sub, { width: cols.descWidth - 20 }) : 0;
-  const rowHeight = Math.max(30, 14 + subLines + 8);
+  const rowHeight = itemRowHeight(doc, cols, item);
 
   doc.font(PDF_FONTS.semibold).fontSize(11).fillColor(PDF_NEUTRALS.textMain);
   fitText(doc, item.description, x + 10, y + 8, cols.descWidth - 20);
