@@ -170,6 +170,7 @@ export class StudioRequestsService {
     request.status = 'acceptee';
     request.updatedAt = new Date();
     const saved = await this.requests.save(request);
+    void this.notifyAuthorPush(saved, actorEmail);
     return { request: saved, task };
   }
 }
