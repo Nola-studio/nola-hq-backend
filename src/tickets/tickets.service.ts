@@ -10,6 +10,7 @@ import { PaginationDto, type PaginatedResult } from '../common/dto/pagination.dt
 import { PushService } from '../push/push.service';
 import { TicketsNotifyService } from './tickets-notify.service';
 import { BusinessUnitResolverService, DEFAULT_BUSINESS_UNIT_CODE } from '../company/business-unit-resolver.service';
+import { TeamMember } from '../team/team-member.entity';
 
 export interface TicketsListQuery extends PaginationDto {
   tenant?: string;
@@ -33,6 +34,7 @@ export class TicketsService {
 
   constructor(
     @InjectRepository(Ticket) private readonly repo: Repository<Ticket>,
+    @InjectRepository(TeamMember) private readonly team: Repository<TeamMember>,
     private readonly push: PushService,
     private readonly notify: TicketsNotifyService,
     private readonly businessUnits: BusinessUnitResolverService,
@@ -151,7 +153,7 @@ export class TicketsService {
     return this.repo.save(ticket);
   }
 
-  async assign(id: number, assignee: string, roles?: string[]) {
+  async assign(id: number, assignee: string, roles?: string[], actor?: string) {
     const ticket = await this.findOne(id, roles);
     ticket.assignee = assignee;
     ticket.assigned = assignee;
@@ -164,7 +166,20 @@ export class TicketsService {
       tenant: saved.tenant,
       assigneeId: assignee,
     });
+    void this.notifyAssigneePush(saved, assignee, actor);
     return saved;
+  }
+
+  /** Mirrors WorkItemsService.notifyAssignee: skip when self-assigning, never fail the assignment. */
+  private async notifyAssigneePush(ticket: Ticket, assignee: string, actor?: string) {
+    const member = await this.team.findOne({ where: { id: assignee } });
+    if (!member || (actor && member.email.toLowerCase() === actor.toLowerCase())) return;
+    await this.push.sendTo(member.notifyEmail ?? member.email, {
+      title: 'Ticket assigné',
+      body: ticket.subject.slice(0, 180),
+      url: '/tickets',
+      tag: `ticket-${ticket.id}`,
+    });
   }
 
   async summary(roles?: string[]) {
