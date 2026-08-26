@@ -11,6 +11,7 @@ import { StudioDomain } from './studio-domain.entity';
 import { StudioRecurring } from './studio-recurring.entity';
 import { StudioNotificationDedup } from './studio-notification-dedup.entity';
 import { TeamMember } from '../team/team-member.entity';
+import { PushModule } from '../push/push.module';
 import { StudioProjectsProxyService } from './studio-projects-proxy.service';
 import { StudioProjectsProxyController } from './studio-projects-proxy.controller';
 import { StudioExpensesService } from './studio-expenses.service';
@@ -46,6 +47,7 @@ import { StudioRequestsController } from './studio-requests.controller';
     RoadmapModule,
     WorkItemsModule,
     CompanyModule,
+    PushModule,
   ],
   controllers: [
     StudioProjectsProxyController,

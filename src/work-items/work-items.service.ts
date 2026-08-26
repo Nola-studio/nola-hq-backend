@@ -272,8 +272,16 @@ export class WorkItemsService implements OnModuleInit {
       return row;
     });
     const saved = await this.repo.save(rows);
-    if (from !== status) await this.record(id, actor, 'moved', { from, to: status });
-    return saved.find((row) => row.id === id)!;
+    const movedItem = saved.find((row) => row.id === id)!;
+    if (from !== status) {
+      await this.record(id, actor, 'moved', { from, to: status });
+      // Assignee only, not the reporter — the reporter is one of several
+      // people looking at the same board; the assignee is the one whose
+      // work someone else just moved. Reuses notifyAssignee's self-actor
+      // guard: moving your own card notifies nobody.
+      void this.notifyAssignee(movedItem, actor, 'Statut du ticket modifié', movedItem.title);
+    }
+    return movedItem;
   }
 
   /**
