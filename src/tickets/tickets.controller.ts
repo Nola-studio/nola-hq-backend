@@ -44,8 +44,8 @@ export class TicketsController {
 
   @Post()
   @HqRoles(HqRole.Operator)
-  create(@Body() dto: CreateTicketDto) {
-    return this.svc.create(dto);
+  create(@Body() dto: CreateTicketDto, @CurrentUser() user?: AuthenticatedUser) {
+    return this.svc.create(dto, actor(user));
   }
 
   @Post(':id/replies')
