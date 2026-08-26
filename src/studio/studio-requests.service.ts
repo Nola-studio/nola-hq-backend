@@ -79,6 +79,9 @@ export class StudioRequestsService {
 
   async updateStatus(id: string, dto: UpdateStudioRequestStatusDto): Promise<StudioRequest> {
     const request = await this.findOne(id);
+    // Idempotent no-op: nothing is mutated, so nothing to guard — mirrors
+    // TicketsService.setStatus()'s ordering (before the terminal check).
+    if (request.status === dto.status) return request;
     this.assertStatusMutable(request);
     request.status = dto.status;
     request.updatedAt = new Date();

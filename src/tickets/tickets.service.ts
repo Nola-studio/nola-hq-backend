@@ -140,6 +140,10 @@ export class TicketsService {
 
   async setStatus(id: number, status: TicketStatus, roles?: string[]) {
     const ticket = await this.findOne(id, roles);
+    // Idempotent no-op: nothing is mutated, so nothing to guard — this
+    // must come before the closed check below (re-submitting a closed
+    // ticket's already-closed status isn't a reopen attempt).
+    if (ticket.status === status) return ticket;
     // No Owner/admin override — a closed ticket is not reopenable by
     // anyone, matching WorkItem.assertMutable()'s posture. Narrower than
     // WorkItem's guard: this only blocks further *status* changes, not
