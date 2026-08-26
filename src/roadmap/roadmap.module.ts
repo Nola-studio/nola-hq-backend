@@ -9,9 +9,11 @@ import { MetricSnapshot } from '../analytics/metric-snapshot.entity';
 import { WorkItem } from '../work-items/work-item.entity';
 import { RoadmapController } from './roadmap.controller';
 import { RoadmapService } from './roadmap.service';
+import { CompanyModule } from '../company/company.module';
 
 @Module({
   imports: [
+    CompanyModule,
     TypeOrmModule.forFeature([
       RoadmapObjective,
       RoadmapInitiative,

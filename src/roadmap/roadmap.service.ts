@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -51,15 +52,20 @@ import {
   ListInitiativesDto,
   ListObjectivesDto,
 } from './dto/list-roadmap.dto';
+import { BusinessUnitResolverService, DEFAULT_BUSINESS_UNIT_CODE } from '../company/business-unit-resolver.service';
 
 /**
  * An initiative as the API returns it: the stored row plus the **effective**
  * progress (derived from its milestones when it has any) and the checklist
- * counters the UI renders.
+ * counters the UI renders. `businessUnit` is trimmed to `{code, name}` and
+ * only present on the endpoints that eager-load the relation (board,
+ * timeline, listInitiatives, findInitiative) — create/update paths don't
+ * reload it, so the key is simply absent there rather than stale/wrong.
  */
-export interface RoadmapInitiativeView extends RoadmapInitiative {
+export interface RoadmapInitiativeView extends Omit<RoadmapInitiative, 'businessUnit'> {
   milestoneCount: number;
   milestonesDone: number;
+  businessUnit?: { code: string; name: string };
   /** Only hydrated by `findInitiative` — the list views stay light. */
   milestones?: RoadmapMilestone[];
 }
@@ -124,6 +130,8 @@ interface ObjectiveContext {
  */
 @Injectable()
 export class RoadmapService {
+  private readonly logger = new Logger(RoadmapService.name);
+
   constructor(
     @InjectRepository(RoadmapObjective)
     private readonly objectives: Repository<RoadmapObjective>,
@@ -139,6 +147,7 @@ export class RoadmapService {
     private readonly snapshots: Repository<MetricSnapshot>,
     @InjectRepository(WorkItem)
     private readonly workItems: Repository<WorkItem>,
+    private readonly businessUnits: BusinessUnitResolverService,
   ) {}
 
   // ── board & timeline ─────────────────────────────────────────────
@@ -149,14 +158,40 @@ export class RoadmapService {
    * pickers need durable products too); Roadmap's own board passes
    * `scope: 'initiative'` to see only bounded work.
    */
-  async board(scope?: RoadmapInitiativeScope): Promise<RoadmapBoardColumn<RoadmapInitiativeView>[]> {
-    const views = await this.withProgress(await this.initiatives.find({ where: scope ? { scope } : {} }));
+  async board(
+    scope?: RoadmapInitiativeScope,
+    roles?: string[],
+  ): Promise<RoadmapBoardColumn<RoadmapInitiativeView>[]> {
+    const allowedUnitIds = await this.businessUnits.resolveAllowedUnits(roles);
+    if (allowedUnitIds.length === 0) {
+      return buildBoard([]);
+    }
+    const where: FindOptionsWhere<RoadmapInitiative> = {
+      ...(scope ? { scope } : {}),
+      businessUnitId: In(allowedUnitIds),
+    };
+    const views = await this.withProgress(
+      await this.initiatives.find({ where, relations: ['businessUnit'] }),
+    );
     return buildBoard(views);
   }
 
   /** Bucketed by quarter, unscheduled ones last. Same opt-in `scope` as `board()`. */
-  async timeline(scope?: RoadmapInitiativeScope): Promise<RoadmapTimelineBucket<RoadmapInitiativeView>[]> {
-    const views = await this.withProgress(await this.initiatives.find({ where: scope ? { scope } : {} }));
+  async timeline(
+    scope?: RoadmapInitiativeScope,
+    roles?: string[],
+  ): Promise<RoadmapTimelineBucket<RoadmapInitiativeView>[]> {
+    const allowedUnitIds = await this.businessUnits.resolveAllowedUnits(roles);
+    if (allowedUnitIds.length === 0) {
+      return buildTimeline([]);
+    }
+    const where: FindOptionsWhere<RoadmapInitiative> = {
+      ...(scope ? { scope } : {}),
+      businessUnitId: In(allowedUnitIds),
+    };
+    const views = await this.withProgress(
+      await this.initiatives.find({ where, relations: ['businessUnit'] }),
+    );
     return buildTimeline(views);
   }
 
@@ -453,10 +488,18 @@ export class RoadmapService {
 
   async listInitiatives(
     filter: ListInitiativesDto = {},
+    roles?: string[],
   ): Promise<RoadmapInitiativeView[]> {
+    const allowedUnitIds = await this.businessUnits.resolveAllowedUnits(roles);
+    if (allowedUnitIds.length === 0) {
+      return [];
+    }
     // Always 'initiative' — durable products (scope: 'project') are
     // `/projects`' rows, never `/roadmap`'s, so this is not client-toggleable.
-    const where: FindOptionsWhere<RoadmapInitiative> = { scope: 'initiative' };
+    const where: FindOptionsWhere<RoadmapInitiative> = {
+      scope: 'initiative',
+      businessUnitId: In(allowedUnitIds),
+    };
     if (filter.status) where.status = filter.status;
     if (filter.quarter) where.quarter = filter.quarter;
     if (filter.objectiveId) where.objectiveId = filter.objectiveId;
@@ -467,13 +510,21 @@ export class RoadmapService {
     const rows = await this.initiatives.find({
       where,
       order: { position: 'ASC', createdAt: 'ASC' },
+      relations: ['businessUnit'],
     });
     return this.withProgress(rows);
   }
 
   /** Single initiative, hydrated with its milestones (checklist order). A durable product's id 404s here — it's `/projects`' row, not `/roadmap`'s. */
-  async findInitiative(id: string): Promise<RoadmapInitiativeView> {
-    const initiative = await this.initiatives.findOne({ where: { id, scope: 'initiative' } });
+  async findInitiative(id: string, roles?: string[]): Promise<RoadmapInitiativeView> {
+    const allowedUnitIds = await this.businessUnits.resolveAllowedUnits(roles);
+    if (allowedUnitIds.length === 0) {
+      throw new NotFoundException(`Initiative ${id} introuvable`);
+    }
+    const initiative = await this.initiatives.findOne({
+      where: { id, scope: 'initiative', businessUnitId: In(allowedUnitIds) },
+      relations: ['businessUnit'],
+    });
     if (!initiative) throw new NotFoundException(`Initiative ${id} introuvable`);
     const milestones = await this.milestones.find({
       where: { initiativeId: id },
@@ -499,17 +550,23 @@ export class RoadmapService {
 
   /**
    * `scope` is never client-supplied — it's forced by which endpoint calls
-   * this: `RoadmapController.createInitiative` (default, 'initiative') or
+   * this: `RoadmapController.createInitiative` ('initiative') or
    * `StudioProjectsProxyService.createProject` ('project'). See
    * `RoadmapInitiativeScope`.
    */
   async createInitiative(
     dto: CreateInitiativeDto,
-    scope: RoadmapInitiativeScope = 'initiative',
+    scope: RoadmapInitiativeScope,
   ): Promise<RoadmapInitiativeView> {
     if (dto.objectiveId) await this.assertObjectiveExists(dto.objectiveId);
     const now = new Date();
     const status = dto.status ?? 'idea';
+    if (!dto.businessUnitCode) {
+      this.logger.debug(
+        `createInitiative(): no businessUnitCode supplied, defaulting to '${DEFAULT_BUSINESS_UNIT_CODE}'`,
+      );
+    }
+    const businessUnitId = await this.businessUnits.resolve(dto.businessUnitCode ?? DEFAULT_BUSINESS_UNIT_CODE);
     const initiative = this.initiatives.create({
       objectiveId: dto.objectiveId ?? null,
       title: dto.title,
@@ -530,6 +587,8 @@ export class RoadmapService {
       tenantId: dto.tenantId ?? null,
       progress: dto.progress ?? 0,
       country: dto.country ?? null,
+      businessUnitId,
+      isInternal: dto.isInternal ?? false,
       // Lands at the bottom of its column — a new card never jumps the queue.
       // Counted within its own scope: a project's "position" (unused by any
       // UI today) must not be perturbed by how many initiatives share its status.
@@ -544,8 +603,14 @@ export class RoadmapService {
   async updateInitiative(
     id: string,
     dto: UpdateInitiativeDto,
+    roles: string[] | undefined,
+    scope: RoadmapInitiativeScope,
   ): Promise<RoadmapInitiativeView> {
-    const initiative = await this.initiatives.findOne({ where: { id, scope: 'initiative' } });
+    const allowedUnitIds = await this.businessUnits.resolveAllowedUnits(roles);
+    if (allowedUnitIds.length === 0) throw new NotFoundException(`Initiative ${id} introuvable`);
+    const initiative = await this.initiatives.findOne({
+      where: { id, scope, businessUnitId: In(allowedUnitIds) },
+    });
     if (!initiative) throw new NotFoundException(`Initiative ${id} introuvable`);
     if (dto.objectiveId) await this.assertObjectiveExists(dto.objectiveId);
 
@@ -588,8 +653,16 @@ export class RoadmapService {
    * exists would silently orphan that task's reference from its project's
    * current identifier.
    */
-  async updateKeyPrefix(id: string, dto: UpdateKeyPrefixDto): Promise<RoadmapInitiativeView> {
-    const initiative = await this.initiatives.findOne({ where: { id, scope: 'initiative' } });
+  async updateKeyPrefix(
+    id: string,
+    dto: UpdateKeyPrefixDto,
+    roles?: string[],
+  ): Promise<RoadmapInitiativeView> {
+    const allowedUnitIds = await this.businessUnits.resolveAllowedUnits(roles);
+    if (allowedUnitIds.length === 0) throw new NotFoundException(`Initiative ${id} introuvable`);
+    const initiative = await this.initiatives.findOne({
+      where: { id, scope: 'initiative', businessUnitId: In(allowedUnitIds) },
+    });
     if (!initiative) throw new NotFoundException(`Initiative ${id} introuvable`);
 
     if (initiative.keyPrefix === dto.keyPrefix) {
@@ -623,8 +696,12 @@ export class RoadmapService {
    * (unlike every other initiative method here), since its whole job is
    * crossing the scope boundary those methods enforce.
    */
-  async updateScope(id: string, dto: UpdateScopeDto): Promise<RoadmapInitiativeView> {
-    const initiative = await this.initiatives.findOne({ where: { id } });
+  async updateScope(id: string, dto: UpdateScopeDto, roles?: string[]): Promise<RoadmapInitiativeView> {
+    const allowedUnitIds = await this.businessUnits.resolveAllowedUnits(roles);
+    if (allowedUnitIds.length === 0) throw new NotFoundException(`Initiative ${id} introuvable`);
+    const initiative = await this.initiatives.findOne({
+      where: { id, businessUnitId: In(allowedUnitIds) },
+    });
     if (!initiative) throw new NotFoundException(`Initiative ${id} introuvable`);
 
     if (initiative.scope === dto.scope) {
@@ -644,15 +721,23 @@ export class RoadmapService {
    * which TypeORM wraps in a single transaction — the board can never be
    * left with duplicate or gapped ranks.
    */
-  async move(id: string, dto: MoveInitiativeDto): Promise<RoadmapInitiativeView> {
-    const initiative = await this.initiatives.findOne({ where: { id, scope: 'initiative' } });
+  async move(id: string, dto: MoveInitiativeDto, roles?: string[]): Promise<RoadmapInitiativeView> {
+    const allowedUnitIds = await this.businessUnits.resolveAllowedUnits(roles);
+    if (allowedUnitIds.length === 0) throw new NotFoundException(`Initiative ${id} introuvable`);
+    const initiative = await this.initiatives.findOne({
+      where: { id, scope: 'initiative', businessUnitId: In(allowedUnitIds) },
+    });
     if (!initiative) throw new NotFoundException(`Initiative ${id} introuvable`);
 
     // Only the two columns involved can change — no need to load the board.
     // scope-qualified: a project can share a status value with an initiative
     // (both reuse the same status enum) and must never be swept into the reorder.
     const columns = await this.initiatives.find({
-      where: { status: In([initiative.status, dto.status]), scope: 'initiative' },
+      where: {
+        status: In([initiative.status, dto.status]),
+        scope: 'initiative',
+        businessUnitId: In(allowedUnitIds),
+      },
     });
     const placements = planMove(columns, id, dto.status, dto.position ?? 0);
 
@@ -678,8 +763,12 @@ export class RoadmapService {
   }
 
   /** Deletes an initiative; its milestones go with it (FK ON DELETE CASCADE). */
-  async removeInitiative(id: string) {
-    const initiative = await this.initiatives.findOne({ where: { id, scope: 'initiative' } });
+  async removeInitiative(id: string, roles?: string[]) {
+    const allowedUnitIds = await this.businessUnits.resolveAllowedUnits(roles);
+    if (allowedUnitIds.length === 0) throw new NotFoundException(`Initiative ${id} introuvable`);
+    const initiative = await this.initiatives.findOne({
+      where: { id, scope: 'initiative', businessUnitId: In(allowedUnitIds) },
+    });
     if (!initiative) throw new NotFoundException(`Initiative ${id} introuvable`);
     await this.initiatives.remove(initiative);
     return { ok: true };
@@ -925,6 +1014,9 @@ export class RoadmapService {
       progress: deriveInitiativeProgress(initiative.progress, milestones),
       milestoneCount: milestones.length,
       milestonesDone: milestones.filter((m) => m.done).length,
+      businessUnit: initiative.businessUnit
+        ? { code: initiative.businessUnit.code, name: initiative.businessUnit.name }
+        : undefined,
     };
   }
 }

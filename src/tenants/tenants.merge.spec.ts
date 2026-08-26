@@ -1,5 +1,14 @@
 import { test, expect, describe, mock } from 'bun:test';
-import { TenantsService } from './tenants.service';
+mock.module('jose', () => ({
+  createRemoteJWKSet: () => () => {},
+  jwtVerify: async () => ({ payload: {} }),
+}));
+mock.module('@nola-hq/nola-sdk', () => ({
+  NolaCommandsService: class {},
+  NolaClientService: class {},
+  NolaAuthService: class {},
+}));
+const { TenantsService } = await import('./tenants.service');
 import type { Repository } from 'typeorm';
 import type { TenantCrm } from './tenant-crm.entity';
 import type { Invoice } from '../invoices/invoice.entity';
@@ -62,13 +71,13 @@ function makeService(opts: {
     crm,
     {} as Repository<Invoice>,
     {} as Repository<MomoEntry>,
-    {} as Repository<Ticket>,
     {} as Repository<ActivityEvent>,
     commands,
     {} as KelasiProvisionClient,
     {} as SubscriptionsService,
     {} as PlansService,
     iam,
+    {} as any,
   );
   return { service, iam };
 }

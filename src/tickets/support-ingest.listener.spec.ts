@@ -15,6 +15,10 @@ import { test, expect, describe, mock } from 'bun:test';
  * on n'a besoin que du symbole `NolaClientService` pour instancier.
  */
 mock.module('@nola-hq/nola-sdk', () => ({ NolaClientService: class {} }));
+mock.module('jose', () => ({
+  createRemoteJWKSet: () => () => {},
+  jwtVerify: async () => ({ payload: {} }),
+}));
 const { SupportIngestListener } = await import('./support-ingest.listener');
 
 describe('SupportIngestListener.SOURCES (double-écoute kelasi/yekoli)', () => {

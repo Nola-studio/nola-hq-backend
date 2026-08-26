@@ -39,6 +39,7 @@ function makeService(quote: any, createInvoice: ReturnType<typeof mock>) {
     {} as any, // dataSource (unused on this path — quote is already 'accepted')
     business,
     {} as any, // pdf
+    { resolve: mock(async () => 'bu-1') } as any, // businessUnits
   );
   return svc;
 }
@@ -124,6 +125,7 @@ function makeReceiptPdfService(invoice: any) {
     {} as any, // dataSource
     {} as any, // business
     { receipt: mock(async () => Buffer.from('pdf')) } as any, // pdf
+    { resolve: mock(async () => 'bu-1') } as any, // businessUnits
   );
   return svc;
 }

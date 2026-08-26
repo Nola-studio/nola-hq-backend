@@ -1,5 +1,6 @@
 import { Column, Entity, Index, JoinColumn, ManyToOne, OneToMany, PrimaryGeneratedColumn } from 'typeorm';
 import { RoadmapInitiative } from '../roadmap/roadmap-initiative.entity';
+import { BusinessUnit } from '../company/business-unit.entity';
 import { BusinessClient } from './business-client.entity';
 import { BusinessContract } from './business-contract.entity';
 import { moneyTransformer } from './business-money';
@@ -58,6 +59,15 @@ export class BusinessInvoice {
   @ManyToOne(() => BusinessContract, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'contract_id' })
   contract?: BusinessContract | null;
+
+  /** Snapshotted at issuance — never derived live via `project`, so reassigning a project's brand later doesn't reprint this invoice. */
+  @Column({ type: 'uuid', name: 'business_unit_id' })
+  @Index()
+  businessUnitId!: string;
+
+  @ManyToOne(() => BusinessUnit, { onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'business_unit_id' })
+  businessUnit?: BusinessUnit;
 
   @Column({ type: 'bigint', name: 'amount_cdf', default: 0, transformer: moneyTransformer })
   amountCdf!: number;

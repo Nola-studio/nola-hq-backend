@@ -10,7 +10,7 @@ import {
   type NolaClientOptions,
   type RegistrationResult,
 } from '@nola-studio/sdk';
-import { NOLA_CONFIG, NolaConfig } from './nola.config';
+import { NOLA_CONFIG, type NolaConfig } from './nola.config';
 
 // Phase 1 retry schedule. Total ≈ 22s before ready() unblocks even if
 // every attempt fails — keeps Railway's 30s healthcheck window safe.

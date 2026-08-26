@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { CompanyModule } from '../company/company.module';
 import { RoadmapModule } from '../roadmap/roadmap.module';
 import { RoadmapInitiative } from '../roadmap/roadmap-initiative.entity';
 import { WorkItemsModule } from '../work-items/work-items.module';
@@ -44,6 +45,7 @@ import { StudioRequestsController } from './studio-requests.controller';
     ]),
     RoadmapModule,
     WorkItemsModule,
+    CompanyModule,
   ],
   controllers: [
     StudioProjectsProxyController,

@@ -6,7 +6,7 @@ import {
   type JWTVerifyGetKey,
 } from 'jose';
 import type { NolaJwtPayload } from '@nola-studio/sdk';
-import { NOLA_CONFIG, NolaConfig } from '../nola.config';
+import { NOLA_CONFIG, type NolaConfig } from '../nola.config';
 import { NolaClientService } from '../nola-client.service';
 
 export interface SilentLoginRequest {

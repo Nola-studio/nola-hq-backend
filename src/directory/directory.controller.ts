@@ -2,10 +2,13 @@ import { Controller, Get, Param, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { DirectoryService } from './directory.service';
 import { ListDirectoryDto } from './dto/list-directory.dto';
+import { HqRoles } from '../common/auth/hq-roles.decorator';
+import { HqRole } from '../common/auth/hq-role.enum';
 
 @ApiBearerAuth()
 @ApiTags('directory')
 @Controller()
+@HqRoles(HqRole.Viewer)
 export class DirectoryController {
   constructor(private readonly svc: DirectoryService) {}
 

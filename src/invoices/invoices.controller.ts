@@ -26,6 +26,7 @@ class UpdateInvoiceStatusDto {
 @ApiBearerAuth()
 @ApiTags('invoices')
 @Controller('invoices')
+@HqRoles(HqRole.Viewer)
 export class InvoicesController {
   constructor(private readonly svc: InvoicesService) {}
 

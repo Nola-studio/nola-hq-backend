@@ -1,5 +1,5 @@
 import { DynamicModule, Module, Provider, Type } from '@nestjs/common';
-import { NolaConfig, NOLA_CONFIG } from './nola.config';
+import { type NolaConfig, NOLA_CONFIG } from './nola.config';
 import { NolaClientService } from './nola-client.service';
 import { NolaAuthService } from './auth/nola-auth.service';
 import { NolaCommandsService } from './commands/nola-commands.service';

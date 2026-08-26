@@ -19,6 +19,7 @@ import {
 } from 'class-validator';
 
 import { PushService } from './push.service';
+import { AllowAuthenticated } from '../common/auth/allow-authenticated.decorator';
 
 class PushKeysDto {
   @IsString()
@@ -66,6 +67,7 @@ interface AuthedRequest {
 @ApiBearerAuth()
 @ApiTags('notifications')
 @Controller('notifications/push')
+@AllowAuthenticated()
 export class PushController {
   constructor(private readonly push: PushService) {}
 

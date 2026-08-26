@@ -16,13 +16,14 @@ import { ListTenantsDto } from './dto/list-tenants.dto';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { KelasiProvisionClient } from './kelasi-provision.client';
 import { MomoEntry } from '../momo/momo-entry.entity';
-import { Ticket } from '../tickets/ticket.entity';
+import { TicketsService } from '../tickets/tickets.service';
 import { ActivityEvent } from '../activity/activity.entity';
 import { Invoice } from '../invoices/invoice.entity';
 import {
   SubscriptionsService,
   type BillingSubscriptionRow,
 } from '../subscriptions/subscriptions.service';
+import { PROVISIONABLE_PRODUCT_CODES } from '../company/company.constants';
 import { PlansService } from '../plans/plans.service';
 import { IamClientService } from '../iam/iam-client.service';
 import type { IamMembershipResponse } from '../iam/iam.types';
@@ -119,7 +120,6 @@ export class TenantsService {
     @InjectRepository(TenantCrm) private readonly crm: Repository<TenantCrm>,
     @InjectRepository(Invoice) private readonly invoices: Repository<Invoice>,
     @InjectRepository(MomoEntry) private readonly momo: Repository<MomoEntry>,
-    @InjectRepository(Ticket) private readonly tickets: Repository<Ticket>,
     @InjectRepository(ActivityEvent)
     private readonly activity: Repository<ActivityEvent>,
     private readonly commands: NolaCommandsService,
@@ -127,6 +127,7 @@ export class TenantsService {
     private readonly subscriptions: SubscriptionsService,
     private readonly plans: PlansService,
     private readonly iam: IamClientService,
+    private readonly ticketsService: TicketsService,
   ) {}
 
   // ─── Reads (merge nola-billing canonical + local CRM) ────────────
@@ -213,15 +214,15 @@ export class TenantsService {
 
   async detail(id: string) {
     const tenant = await this.findOne(id);
-    const [invoices, payments, tickets, activity] = await Promise.all([
+    const [invoices, payments, ticketsPage, activity] = await Promise.all([
       // TODO Phase 2b: fetch invoices via nola.commands.billing.admin.invoice.list
       this.invoices.find({ where: { tenant: id }, order: { issued: 'DESC' }, take: 12 }),
       // TODO Phase 2b: fetch payments via nola.commands.billing.admin.payment.list
       this.momo.find({ where: { tenant: id }, order: { ts: 'DESC' }, take: 12 }),
-      this.tickets.find({ where: { tenant: id }, order: { createdAt: 'DESC' }, take: 8 }),
+      this.ticketsService.list({ tenant: id, limit: 8, page: 1 }),
       this.activity.find({ where: { ref: id }, order: { createdAt: 'DESC' }, take: 12 }),
     ]);
-    return { tenant, invoices, payments, tickets, activity };
+    return { tenant, invoices, payments, tickets: ticketsPage.items, activity };
   }
 
   async recoveryList(): Promise<TenantView[]> {
@@ -314,12 +315,9 @@ export class TenantsService {
     }
 
     // V1 : seule l'app scolaire expose le point d'entrée hq-provision. Ajouter
-    // une table de routage quand d'autres apps clientes offriront la même
-    // surface. `kelasi` est accepté le temps que les appelants non migrés
-    // disparaissent — l'app s'annonce sous `yekoli` depuis le 2026-08-09.
-    const PROVISIONABLE_APPS = new Set(['yekoli', 'kelasi']);
+    // une table de routage quand d'autres apps clientes offriront la même surface.
     const targetApp = (dto.apps?.[0] ?? '').trim();
-    if (!PROVISIONABLE_APPS.has(targetApp)) {
+    if (!PROVISIONABLE_PRODUCT_CODES.has(targetApp)) {
       throw new BadRequestException(`unsupported_app: ${targetApp || '(none)'}`);
     }
 

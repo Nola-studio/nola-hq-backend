@@ -18,26 +18,28 @@ import {
 } from './dto/create-ticket.dto';
 import { HqRoles } from '../common/auth/hq-roles.decorator';
 import { HqRole } from '../common/auth/hq-role.enum';
+import { CurrentUser, type AuthenticatedUser } from '../common/auth/current-user.decorator';
 
 @ApiBearerAuth()
 @ApiTags('tickets')
 @Controller('tickets')
+@HqRoles(HqRole.Viewer)
 export class TicketsController {
   constructor(private readonly svc: TicketsService) {}
 
   @Get()
-  list(@Query() query: TicketsListQuery) {
-    return this.svc.list(query);
+  list(@Query() query: TicketsListQuery, @CurrentUser() user?: AuthenticatedUser) {
+    return this.svc.list(query, user?.roles);
   }
 
   @Get('summary')
-  summary() {
-    return this.svc.summary();
+  summary(@CurrentUser() user?: AuthenticatedUser) {
+    return this.svc.summary(user?.roles);
   }
 
   @Get(':id')
-  findOne(@Param('id', ParseIntPipe) id: number) {
-    return this.svc.findOne(id);
+  findOne(@Param('id', ParseIntPipe) id: number, @CurrentUser() user?: AuthenticatedUser) {
+    return this.svc.findOne(id, user?.roles);
   }
 
   @Post()
@@ -48,8 +50,12 @@ export class TicketsController {
 
   @Post(':id/replies')
   @HqRoles(HqRole.Operator)
-  reply(@Param('id', ParseIntPipe) id: number, @Body() dto: AddReplyDto) {
-    return this.svc.addReply(id, dto);
+  reply(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: AddReplyDto,
+    @CurrentUser() user?: AuthenticatedUser,
+  ) {
+    return this.svc.addReply(id, dto, user?.roles);
   }
 
   @Patch(':id/status')
@@ -57,8 +63,9 @@ export class TicketsController {
   setStatus(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateTicketStatusDto,
+    @CurrentUser() user?: AuthenticatedUser,
   ) {
-    return this.svc.setStatus(id, dto.status);
+    return this.svc.setStatus(id, dto.status, user?.roles);
   }
 
   @Patch(':id/assign')
@@ -66,7 +73,8 @@ export class TicketsController {
   assign(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: AssignTicketDto,
+    @CurrentUser() user?: AuthenticatedUser,
   ) {
-    return this.svc.assign(id, dto.assignee);
+    return this.svc.assign(id, dto.assignee, user?.roles);
   }
 }

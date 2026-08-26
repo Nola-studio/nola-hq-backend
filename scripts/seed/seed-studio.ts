@@ -5,6 +5,8 @@ import AppDataSource from '../../src/data-source';
 import { readWorkbook, excelSerialToIsoDate } from './xlsx-reader';
 import { RoadmapInitiative } from '../../src/roadmap/roadmap-initiative.entity';
 import { slugifyProjectName } from '../../src/roadmap/roadmap-identifier';
+import { BusinessUnit } from '../../src/company/business-unit.entity';
+import { DEFAULT_BUSINESS_UNIT_CODE } from '../../src/company/business-unit-resolver.service';
 import { StudioDomain } from '../../src/studio/studio-domain.entity';
 import { StudioRecurring } from '../../src/studio/studio-recurring.entity';
 import { StudioExpense } from '../../src/studio/studio-expense.entity';
@@ -155,6 +157,13 @@ async function main() {
     console.log(`Assignees read from sheet: ${[...assigneeEmailByName.keys()].join(', ')}`);
 
     // ── Projects → roadmap_initiatives ──
+    const businessUnitRepo = ds.getRepository(BusinessUnit);
+    const defaultBusinessUnit = await businessUnitRepo.findOne({ where: { code: DEFAULT_BUSINESS_UNIT_CODE } });
+    if (!defaultBusinessUnit) {
+      throw new Error(
+        `business_units row '${DEFAULT_BUSINESS_UNIT_CODE}' not found — run the company-brand-schema migration first.`,
+      );
+    }
     const projectRepo = ds.getRepository(RoadmapInitiative);
     const projectIdByName = new Map<string, string>();
     const projectRows = wb.sheet('Projects');
@@ -204,6 +213,11 @@ async function main() {
           progress: 0,
           position: 0,
           archived: false,
+          businessUnitId: defaultBusinessUnit.id,
+          // Only Nolaa HQ is internal-only work — every other seeded project
+          // (K-River, Yekoli, Butterfly, Mycvmatcher) is a client-facing product,
+          // matching the 'nolaa-hq' row's is_internal=true in `products`.
+          isInternal: name === 'Nolaa HQ',
           createdAt: now,
           updatedAt: now,
         }),

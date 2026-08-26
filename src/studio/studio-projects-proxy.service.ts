@@ -6,9 +6,10 @@ import {
   type RoadmapInitiativePriority,
   type RoadmapInitiativeScope,
 } from '../roadmap/roadmap-initiative.entity';
-import { RoadmapService } from '../roadmap/roadmap.service';
+import { RoadmapService, type RoadmapInitiativeView } from '../roadmap/roadmap.service';
 import { TeamMember } from '../team/team-member.entity';
 import { StudioNotifyService } from './studio-notify.service';
+import { BusinessUnitResolverService } from '../company/business-unit-resolver.service';
 import { WorkItem, type WorkItemStatus } from '../work-items/work-item.entity';
 import { WorkItemsService } from '../work-items/work-items.service';
 import {
@@ -76,23 +77,34 @@ export class StudioProjectsProxyService {
     private readonly roadmap: RoadmapService,
     private readonly workItems: WorkItemsService,
     private readonly notify: StudioNotifyService,
+    private readonly businessUnits: BusinessUnitResolverService,
   ) {}
 
   // ── projects ─────────────────────────────────────────────────────
 
-  async listProjects(filter: ListStudioProjectsDto = {}) {
+  async listProjects(filter: ListStudioProjectsDto = {}, roles?: string[]) {
     // `title` as a tiebreaker: `keyPrefix` can be null on a row that
     // predates auto-generated identifiers and hasn't been backfilled yet.
     // No `scope` filter by default — the task composer's picker needs both,
     // grouped client-side; the /projects screen passes `scope=project`.
-    const where: FindOptionsWhere<RoadmapInitiative> = {};
+    const allowedUnitIds = await this.businessUnits.resolveAllowedUnits(roles);
+    if (allowedUnitIds.length === 0) {
+      return [];
+    }
+    const where: FindOptionsWhere<RoadmapInitiative> = {
+      businessUnitId: In(allowedUnitIds),
+    };
     if (filter.scope) where.scope = filter.scope;
-    const rows = await this.projects.find({ where, order: { keyPrefix: 'ASC', title: 'ASC' } });
+    const rows = await this.projects.find({
+      where,
+      order: { keyPrefix: 'ASC', title: 'ASC' },
+      relations: ['businessUnit'],
+    });
     return rows.map((p) => this.toStudioProject(p));
   }
 
-  async findProject(id: string) {
-    return this.toStudioProject(await this.findInitiative(id, 'project'));
+  async findProject(id: string, roles?: string[]) {
+    return this.toStudioProject(await this.findInitiative(id, 'project', roles));
   }
 
   async createProject(dto: CreateProjectDto) {
@@ -109,26 +121,32 @@ export class StudioProjectsProxyService {
         targetDate: dto.dueDate,
         status: 'idea',
         country: dto.country,
+        businessUnitCode: dto.businessUnitCode,
       },
       'project',
     );
     return this.toStudioProject(created);
   }
 
-  async updateProject(id: string, dto: UpdateProjectDto) {
-    await this.findInitiative(id, 'project');
-    const updated = await this.roadmap.updateInitiative(id, {
-      title: dto.name,
-      summary: dto.description,
-      color: dto.color,
-      healthStatus: dto.healthStatus ?? undefined,
-      type: dto.type ?? undefined,
-      priority: dto.priority ? PROJECT_PRIORITY_TO_ROADMAP[dto.priority] : undefined,
-      owner: dto.ownerEmail,
-      startDate: dto.startDate ?? undefined,
-      targetDate: dto.dueDate ?? undefined,
-      country: dto.country,
-    });
+  async updateProject(id: string, dto: UpdateProjectDto, roles?: string[]) {
+    await this.findInitiative(id, 'project', roles);
+    const updated = await this.roadmap.updateInitiative(
+      id,
+      {
+        title: dto.name,
+        summary: dto.description,
+        color: dto.color,
+        healthStatus: dto.healthStatus ?? undefined,
+        type: dto.type ?? undefined,
+        priority: dto.priority ? PROJECT_PRIORITY_TO_ROADMAP[dto.priority] : undefined,
+        owner: dto.ownerEmail,
+        startDate: dto.startDate ?? undefined,
+        targetDate: dto.dueDate ?? undefined,
+        country: dto.country,
+      },
+      roles,
+      'project',
+    );
     return this.toStudioProject(updated);
   }
 
@@ -138,8 +156,8 @@ export class StudioProjectsProxyService {
    * has open (non-`done`) work would silently strand those tasks with no
    * way to route new ones alongside them.
    */
-  async archiveProject(id: string) {
-    const project = await this.findInitiative(id, 'project');
+  async archiveProject(id: string, roles?: string[]) {
+    const project = await this.findInitiative(id, 'project', roles);
     if (project.archived) return this.toStudioProject(project);
 
     const openCount = await this.tasks.count({
@@ -155,8 +173,8 @@ export class StudioProjectsProxyService {
     return this.toStudioProject(await this.projects.save(project));
   }
 
-  async unarchiveProject(id: string) {
-    const project = await this.findInitiative(id, 'project');
+  async unarchiveProject(id: string, roles?: string[]) {
+    const project = await this.findInitiative(id, 'project', roles);
     project.archived = false;
     return this.toStudioProject(await this.projects.save(project));
   }
@@ -166,13 +184,24 @@ export class StudioProjectsProxyService {
    * table: an initiative's id 404s here just as a project's id 404s on
    * `RoadmapService`'s own methods — each screen only ever sees its own rows.
    */
-  private async findInitiative(id: string, expectedScope: RoadmapInitiativeScope): Promise<RoadmapInitiative> {
-    const project = await this.projects.findOne({ where: { id, scope: expectedScope } });
+  private async findInitiative(
+    id: string,
+    expectedScope: RoadmapInitiativeScope,
+    roles?: string[],
+  ): Promise<RoadmapInitiative> {
+    const allowedUnitIds = await this.businessUnits.resolveAllowedUnits(roles);
+    if (allowedUnitIds.length === 0) {
+      throw new NotFoundException(`Projet ${id} introuvable`);
+    }
+    const project = await this.projects.findOne({
+      where: { id, scope: expectedScope, businessUnitId: In(allowedUnitIds) },
+      relations: ['businessUnit'],
+    });
     if (!project) throw new NotFoundException(`Projet ${id} introuvable`);
     return project;
   }
 
-  private toStudioProject(p: RoadmapInitiative) {
+  private toStudioProject(p: RoadmapInitiative | RoadmapInitiativeView) {
     return {
       id: p.id,
       scope: p.scope,
@@ -180,6 +209,8 @@ export class StudioProjectsProxyService {
       key: p.keyPrefix,
       description: p.summary,
       status: p.archived ? 'archived' : 'active',
+      businessUnit: p.businessUnit ? { code: p.businessUnit.code, name: p.businessUnit.name } : undefined,
+      isInternal: p.isInternal,
       color: p.color,
       ownerEmail: p.owner,
       type: p.type,

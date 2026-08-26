@@ -16,6 +16,7 @@ class IngestLogDto {
 @ApiBearerAuth()
 @ApiTags('logs')
 @Controller('logs')
+@HqRoles(HqRole.Viewer)
 export class LogsController {
   constructor(private readonly svc: LogsService) {}
 

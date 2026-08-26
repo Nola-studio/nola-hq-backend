@@ -31,6 +31,7 @@ import {
 } from './dto/list-roadmap.dto';
 import { HqRoles } from '../common/auth/hq-roles.decorator';
 import { HqRole } from '../common/auth/hq-role.enum';
+import { CurrentUser, type AuthenticatedUser } from '../common/auth/current-user.decorator';
 
 /**
  * Nola Studio's internal roadmap: staged **objectives** (annual → quarterly)
@@ -55,16 +56,16 @@ export class RoadmapController {
   @HqRoles(HqRole.Viewer)
   @ApiOperation({ summary: 'Kanban columns, ordered by position. Omit scope for every row; Roadmap itself passes scope=initiative.' })
   @ApiQuery({ name: 'scope', required: false, enum: ['project', 'initiative'] })
-  board(@Query() query: BoardQueryDto) {
-    return this.svc.board(query.scope);
+  board(@Query() query: BoardQueryDto, @CurrentUser() user?: AuthenticatedUser) {
+    return this.svc.board(query.scope, user?.roles);
   }
 
   @Get('timeline')
   @HqRoles(HqRole.Viewer)
   @ApiOperation({ summary: 'Bucketed by quarter (unscheduled last). Omit scope for every row; Roadmap itself passes scope=initiative.' })
   @ApiQuery({ name: 'scope', required: false, enum: ['project', 'initiative'] })
-  timeline(@Query() query: BoardQueryDto) {
-    return this.svc.timeline(query.scope);
+  timeline(@Query() query: BoardQueryDto, @CurrentUser() user?: AuthenticatedUser) {
+    return this.svc.timeline(query.scope, user?.roles);
   }
 
   @Get('metrics')
@@ -198,27 +199,31 @@ export class RoadmapController {
   @ApiQuery({ name: 'appId', required: false, type: String })
   @ApiQuery({ name: 'kind', required: false, type: String })
   @ApiQuery({ name: 'owner', required: false, type: String })
-  listInitiatives(@Query() query: ListInitiativesDto) {
-    return this.svc.listInitiatives(query);
+  listInitiatives(@Query() query: ListInitiativesDto, @CurrentUser() user?: AuthenticatedUser) {
+    return this.svc.listInitiatives(query, user?.roles);
   }
 
   @Get('initiatives/:id')
   @HqRoles(HqRole.Viewer)
   @ApiOperation({ summary: 'One initiative with its milestones' })
-  findInitiative(@Param('id') id: string) {
-    return this.svc.findInitiative(id);
+  findInitiative(@Param('id') id: string, @CurrentUser() user?: AuthenticatedUser) {
+    return this.svc.findInitiative(id, user?.roles);
   }
 
   @Post('initiatives')
   @HqRoles(HqRole.Operator)
   createInitiative(@Body() dto: CreateInitiativeDto) {
-    return this.svc.createInitiative(dto);
+    return this.svc.createInitiative(dto, 'initiative');
   }
 
   @Patch('initiatives/:id')
   @HqRoles(HqRole.Operator)
-  updateInitiative(@Param('id') id: string, @Body() dto: UpdateInitiativeDto) {
-    return this.svc.updateInitiative(id, dto);
+  updateInitiative(
+    @Param('id') id: string,
+    @Body() dto: UpdateInitiativeDto,
+    @CurrentUser() user?: AuthenticatedUser,
+  ) {
+    return this.svc.updateInitiative(id, dto, user?.roles, 'initiative');
   }
 
   @Patch('initiatives/:id/key-prefix')
@@ -227,8 +232,12 @@ export class RoadmapController {
     summary:
       'Owner-only: change an initiative\'s auto-generated keyPrefix. Blocked once any task references it.',
   })
-  updateKeyPrefix(@Param('id') id: string, @Body() dto: UpdateKeyPrefixDto) {
-    return this.svc.updateKeyPrefix(id, dto);
+  updateKeyPrefix(
+    @Param('id') id: string,
+    @Body() dto: UpdateKeyPrefixDto,
+    @CurrentUser() user?: AuthenticatedUser,
+  ) {
+    return this.svc.updateKeyPrefix(id, dto, user?.roles);
   }
 
   @Patch('initiatives/:id/scope')
@@ -237,22 +246,30 @@ export class RoadmapController {
     summary:
       "Owner-only: reclassify between 'project' (durable product) and 'initiative' (bounded work). Works regardless of the row's current scope.",
   })
-  updateScope(@Param('id') id: string, @Body() dto: UpdateScopeDto) {
-    return this.svc.updateScope(id, dto);
+  updateScope(
+    @Param('id') id: string,
+    @Body() dto: UpdateScopeDto,
+    @CurrentUser() user?: AuthenticatedUser,
+  ) {
+    return this.svc.updateScope(id, dto, user?.roles);
   }
 
   @Post('initiatives/:id/move')
   @HqRoles(HqRole.Operator)
   @ApiOperation({ summary: 'Move an initiative to a column/position (reorders it)' })
-  move(@Param('id') id: string, @Body() dto: MoveInitiativeDto) {
-    return this.svc.move(id, dto);
+  move(
+    @Param('id') id: string,
+    @Body() dto: MoveInitiativeDto,
+    @CurrentUser() user?: AuthenticatedUser,
+  ) {
+    return this.svc.move(id, dto, user?.roles);
   }
 
   @Delete('initiatives/:id')
   @HttpCode(204)
   @HqRoles(HqRole.Operator)
-  async removeInitiative(@Param('id') id: string) {
-    await this.svc.removeInitiative(id);
+  async removeInitiative(@Param('id') id: string, @CurrentUser() user?: AuthenticatedUser) {
+    await this.svc.removeInitiative(id, user?.roles);
   }
 
   // ── milestones ───────────────────────────────────────────────────

@@ -1,10 +1,19 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomBytes } from 'node:crypto';
 import { DataSource, FindOptionsWhere, Repository } from 'typeorm';
+import { BusinessUnitResolverService, DEFAULT_BUSINESS_UNIT_CODE } from '../company/business-unit-resolver.service';
 import { RoadmapInitiative, type RoadmapInitiativeScope } from '../roadmap/roadmap-initiative.entity';
 import { BusinessClient } from './business-client.entity';
 import { BusinessContract } from './business-contract.entity';
+
+/** `BusinessContract` as the API returns it: `businessUnit` trimmed to `{code, name}` rather than the full joined row. */
+export type BusinessContractResponse = Omit<BusinessContract, 'businessUnit'> & {
+  businessUnit?: { code: string; name: string };
+};
+function toContractResponse(c: BusinessContract): BusinessContractResponse {
+  return { ...c, businessUnit: c.businessUnit ? { code: c.businessUnit.code, name: c.businessUnit.name } : undefined };
+}
 import { BusinessExpense } from './business-expense.entity';
 import { BusinessInvoice, BusinessInvoiceLine, type BusinessInvoiceStatus } from './business-invoice.entity';
 import { BusinessOpportunity } from './business-opportunity.entity';
@@ -42,6 +51,8 @@ import {
 
 @Injectable()
 export class BusinessService {
+  private readonly logger = new Logger(BusinessService.name);
+
   constructor(
     @InjectRepository(BusinessClient) private readonly clients: Repository<BusinessClient>,
     @InjectRepository(BusinessOpportunity) private readonly opportunities: Repository<BusinessOpportunity>,
@@ -57,6 +68,7 @@ export class BusinessService {
     @InjectRepository(BusinessDocument) private readonly documents: Repository<BusinessDocument>,
     @InjectRepository(BusinessReminder) private readonly reminders: Repository<BusinessReminder>,
     private readonly dataSource: DataSource,
+    private readonly businessUnits: BusinessUnitResolverService,
   ) {}
 
   private clean(value?: string | null) {
@@ -210,16 +222,17 @@ export class BusinessService {
     return this.opportunities.save(item);
   }
 
-  listContracts(filters: { clientId?: string; projectId?: string; status?: string }) {
+  async listContracts(filters: { clientId?: string; projectId?: string; status?: string }): Promise<BusinessContractResponse[]> {
     const where: FindOptionsWhere<BusinessContract> = {};
     if (filters.clientId) where.clientId = filters.clientId;
     if (filters.projectId) where.projectId = filters.projectId;
     if (filters.status) where.status = filters.status as BusinessContract['status'];
-    return this.contracts.find({
+    const rows = await this.contracts.find({
       where,
-      relations: { client: true, project: true, opportunity: true },
+      relations: { client: true, project: true, opportunity: true, businessUnit: true },
       order: { updatedAt: 'DESC' },
     });
+    return rows.map(toContractResponse);
   }
 
   async createContract(dto: CreateBusinessContractDto) {
@@ -229,12 +242,17 @@ export class BusinessService {
     this.assertDates(dto.startDate, dto.endDate);
     const number = dto.number?.trim() || (await nextBusinessNumber(this.dataSource.manager, 'CTR'));
     if (await this.contracts.findOne({ where: { number } })) throw new ConflictException(`Le contrat ${number} existe déjà.`);
+    if (!dto.businessUnitCode) {
+      this.logger.debug(`createContract(): no businessUnitCode supplied, defaulting to '${DEFAULT_BUSINESS_UNIT_CODE}'`);
+    }
+    const businessUnitId = await this.businessUnits.resolve(dto.businessUnitCode ?? DEFAULT_BUSINESS_UNIT_CODE);
     const now = new Date();
     return this.contracts.save(this.contracts.create({
       number,
       clientId: dto.clientId,
       projectId: dto.projectId ?? null,
       opportunityId: dto.opportunityId ?? null,
+      businessUnitId,
       title: dto.title.trim(),
       status: dto.status ?? 'draft',
       valueCdf: dto.valueCdf,
@@ -383,6 +401,10 @@ export class BusinessService {
     if (dto.number?.trim() && await this.invoices.findOne({ where: { number: dto.number.trim() } })) {
       throw new ConflictException(`La facture ${dto.number.trim()} existe déjà.`);
     }
+    if (!dto.businessUnitCode) {
+      this.logger.debug(`createInvoice(): no businessUnitCode supplied, defaulting to '${DEFAULT_BUSINESS_UNIT_CODE}'`);
+    }
+    const businessUnitId = await this.businessUnits.resolve(dto.businessUnitCode ?? DEFAULT_BUSINESS_UNIT_CODE);
     const now = new Date();
     const status = this.paymentStatus(dto.status ?? 'draft', dto.amountCdf, paid);
     const id = await this.dataSource.transaction(async (manager) => {
@@ -394,6 +416,7 @@ export class BusinessService {
         clientId: dto.clientId,
         projectId: dto.projectId,
         contractId: dto.contractId ?? null,
+        businessUnitId,
         amountCdf: dto.amountCdf,
         paidAmountCdf: paid,
         taxRate,
