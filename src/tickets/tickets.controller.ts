@@ -75,6 +75,10 @@ export class TicketsController {
     @Body() dto: AssignTicketDto,
     @CurrentUser() user?: AuthenticatedUser,
   ) {
-    return this.svc.assign(id, dto.assignee, user?.roles);
+    return this.svc.assign(id, dto.assignee, user?.roles, actor(user));
   }
+}
+
+function actor(user?: AuthenticatedUser): string {
+  return user?.email ?? user?.sub ?? 'unknown';
 }
