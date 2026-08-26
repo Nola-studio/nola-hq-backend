@@ -77,7 +77,7 @@ export class StudioRequestsService {
     return this.requests.save(request);
   }
 
-  async updateStatus(id: string, dto: UpdateStudioRequestStatusDto): Promise<StudioRequest> {
+  async updateStatus(id: string, dto: UpdateStudioRequestStatusDto, actor?: string): Promise<StudioRequest> {
     const request = await this.findOne(id);
     // Idempotent no-op: nothing is mutated, so nothing to guard — mirrors
     // TicketsService.setStatus()'s ordering (before the terminal check).

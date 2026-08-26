@@ -56,8 +56,12 @@ export class StudioRequestsController {
   @Post(':id/status')
   @HqRoles(HqRole.Operator)
   @ApiOperation({ summary: 'The only way to move a request through its lifecycle' })
-  updateStatus(@Param('id') id: string, @Body() dto: UpdateStudioRequestStatusDto) {
-    return this.svc.updateStatus(id, dto);
+  updateStatus(
+    @Param('id') id: string,
+    @Body() dto: UpdateStudioRequestStatusDto,
+    @CurrentUser() user?: AuthenticatedUser,
+  ) {
+    return this.svc.updateStatus(id, dto, actor(user));
   }
 
   @Post(':id/convert')
@@ -73,4 +77,8 @@ export class StudioRequestsController {
   async remove(@Param('id') id: string) {
     await this.svc.remove(id);
   }
+}
+
+function actor(user?: AuthenticatedUser): string {
+  return user?.email ?? user?.sub ?? 'unknown';
 }
