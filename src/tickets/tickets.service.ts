@@ -138,7 +138,7 @@ export class TicketsService {
     return this.repo.save(ticket);
   }
 
-  async setStatus(id: number, status: TicketStatus, roles?: string[]) {
+  async setStatus(id: number, status: TicketStatus, roles?: string[], actor?: string) {
     const ticket = await this.findOne(id, roles);
     // Idempotent no-op: nothing is mutated, so nothing to guard — this
     // must come before the closed check below (re-submitting a closed
@@ -154,7 +154,21 @@ export class TicketsService {
     }
     ticket.status = status;
     ticket.updatedAt = new Date();
-    return this.repo.save(ticket);
+    const saved = await this.repo.save(ticket);
+    void this.notifyStatusPush(saved, actor);
+    return saved;
+  }
+
+  /** Mirrors notifyAssigneePush: same recipient (assignee), same self-actor guard, push only. */
+  private async notifyStatusPush(ticket: Ticket, actor?: string) {
+    const member = await this.team.findOne({ where: { id: ticket.assignee } });
+    if (!member || (actor && member.email.toLowerCase() === actor.toLowerCase())) return;
+    await this.push.sendTo(member.notifyEmail ?? member.email, {
+      title: 'Statut du ticket modifié',
+      body: ticket.subject.slice(0, 180),
+      url: '/tickets',
+      tag: `ticket-${ticket.id}`,
+    });
   }
 
   async assign(id: number, assignee: string, roles?: string[], actor?: string) {

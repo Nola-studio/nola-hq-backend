@@ -65,7 +65,7 @@ export class TicketsController {
     @Body() dto: UpdateTicketStatusDto,
     @CurrentUser() user?: AuthenticatedUser,
   ) {
-    return this.svc.setStatus(id, dto.status, user?.roles);
+    return this.svc.setStatus(id, dto.status, user?.roles, actor(user));
   }
 
   @Patch(':id/assign')
