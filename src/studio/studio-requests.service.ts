@@ -9,6 +9,8 @@ import { ListStudioRequestsDto } from './dto/list-studio-requests.dto';
 import { ConvertStudioRequestDto } from './dto/convert-studio-request.dto';
 import { StudioProjectsProxyService } from './studio-projects-proxy.service';
 import type { StudioTaskPriority } from '../work-items/work-item-studio-mapping';
+import { TeamMember } from '../team/team-member.entity';
+import { PushService } from '../push/push.service';
 
 const TERMINAL_STATUSES = ['rejetee', 'fermee'];
 
@@ -25,6 +27,9 @@ export class StudioRequestsService {
   constructor(
     @InjectRepository(StudioRequest)
     private readonly requests: Repository<StudioRequest>,
+    @InjectRepository(TeamMember)
+    private readonly team: Repository<TeamMember>,
+    private readonly push: PushService,
     private readonly tasksProxy: StudioProjectsProxyService,
   ) {}
 
@@ -86,7 +91,26 @@ export class StudioRequestsService {
     request.status = dto.status;
     request.updatedAt = new Date();
     request.closedAt = TERMINAL_STATUSES.includes(dto.status) ? request.updatedAt : null;
-    return this.requests.save(request);
+    const saved = await this.requests.save(request);
+    void this.notifyAuthorPush(saved, actor);
+    return saved;
+  }
+
+  /**
+   * Push-only, same shape as TicketsService.notifyStatusPush — except the
+   * recipient is the author (the requester), resolved by email like
+   * `StudioRequest.author` itself is documented to be, not by id like
+   * `Ticket.assignee`/`WorkItem.assignee`.
+   */
+  private async notifyAuthorPush(request: StudioRequest, actor?: string) {
+    const member = await this.team.findOne({ where: { email: request.author } });
+    if (!member || (actor && member.email.toLowerCase() === actor.toLowerCase())) return;
+    await this.push.sendTo(member.notifyEmail ?? member.email, {
+      title: 'Statut de votre demande modifié',
+      body: request.title.slice(0, 180),
+      url: '/studio/requests',
+      tag: `studio-request-${request.id}`,
+    });
   }
 
   /**
