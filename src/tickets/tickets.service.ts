@@ -2,6 +2,7 @@ import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nest
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Ticket, TicketStatus } from './ticket.entity';
+import { TicketEvent, type TicketEventAction } from './ticket-event.entity';
 import {
   AddReplyDto,
   CreateTicketDto,
@@ -34,6 +35,7 @@ export class TicketsService {
 
   constructor(
     @InjectRepository(Ticket) private readonly repo: Repository<Ticket>,
+    @InjectRepository(TicketEvent) private readonly events: Repository<TicketEvent>,
     @InjectRepository(TeamMember) private readonly team: Repository<TeamMember>,
     private readonly push: PushService,
     private readonly notify: TicketsNotifyService,
@@ -82,7 +84,7 @@ export class TicketsService {
     return toTicketResponse(t);
   }
 
-  async create(dto: CreateTicketDto) {
+  async create(dto: CreateTicketDto, actor?: string) {
     const now = new Date();
     if (!dto.businessUnitCode) {
       this.logger.debug(
@@ -125,17 +127,23 @@ export class TicketsService {
       tenant: saved.tenant,
       priority: saved.priority,
     });
+    void this.record(saved.id, actor ?? 'system', 'created', { toStatus: saved.status });
     return saved;
   }
 
   async addReply(id: number, dto: AddReplyDto, roles?: string[]) {
     const ticket = await this.findOne(id, roles);
+    const visibility = dto.visibility ?? 'internal';
     ticket.replies = [
       ...(ticket.replies ?? []),
-      { from: dto.from, t: dto.t ?? 'à l’instant', text: dto.text, visibility: dto.visibility ?? 'internal' },
+      { from: dto.from, t: dto.t ?? 'à l’instant', text: dto.text, visibility },
     ];
     ticket.updatedAt = new Date();
-    return this.repo.save(ticket);
+    const saved = await this.repo.save(ticket);
+    // An internal note and a client-visible reply are different events —
+    // that distinction matters once the portal reads tickets.
+    void this.record(saved.id, dto.from, 'replied', { meta: { visibility } });
+    return saved;
   }
 
   async setStatus(id: number, status: TicketStatus, roles?: string[], actor?: string) {
@@ -152,10 +160,12 @@ export class TicketsService {
     if (ticket.status === 'closed') {
       throw new ForbiddenException(`Ticket #${ticket.id} est fermé et ne peut plus changer de statut.`);
     }
+    const fromStatus = ticket.status;
     ticket.status = status;
     ticket.updatedAt = new Date();
     const saved = await this.repo.save(ticket);
     void this.notifyStatusPush(saved, actor);
+    void this.record(saved.id, actor ?? 'unknown', 'status_changed', { fromStatus, toStatus: status });
     return saved;
   }
 
@@ -173,6 +183,7 @@ export class TicketsService {
 
   async assign(id: number, assignee: string, roles?: string[], actor?: string) {
     const ticket = await this.findOne(id, roles);
+    const previousAssignee = ticket.assignee;
     ticket.assignee = assignee;
     ticket.assigned = assignee;
     ticket.updatedAt = new Date();
@@ -185,7 +196,42 @@ export class TicketsService {
       assigneeId: assignee,
     });
     void this.notifyAssigneePush(saved, assignee, actor);
+    void this.record(saved.id, actor ?? 'unknown', 'assigned', {
+      meta: { fromAssignee: previousAssignee, toAssignee: assignee },
+    });
     return saved;
+  }
+
+  /**
+   * Write-only audit trail — no read endpoint yet, mirrors how
+   * WorkItemEvent's own `history` sits unused by any timeline UI today.
+   * fromStatus/toStatus/reason are first-class columns, unlike
+   * WorkItemEvent's `record()`, which buries transitions like `moved`'s
+   * `{ from, to }` inside `meta` where they can't be filtered or indexed.
+   */
+  private record(
+    ticketId: number,
+    actor: string,
+    action: TicketEventAction,
+    opts: {
+      fromStatus?: TicketStatus | null;
+      toStatus?: TicketStatus | null;
+      reason?: string | null;
+      meta?: Record<string, unknown>;
+    } = {},
+  ) {
+    return this.events.save(
+      this.events.create({
+        ticketId,
+        actor,
+        action,
+        fromStatus: opts.fromStatus ?? null,
+        toStatus: opts.toStatus ?? null,
+        reason: opts.reason ?? null,
+        meta: opts.meta ?? {},
+        createdAt: new Date(),
+      }),
+    );
   }
 
   /** Mirrors WorkItemsService.notifyAssignee: skip when self-assigning, never fail the assignment. */
