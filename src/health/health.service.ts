@@ -26,18 +26,18 @@ export interface HealthRow {
    *  "heartbeat lost on the bus but HTTP still up". */
   httpReachable: boolean | null;
   uptime: number; // 0-100
-  p50: number;
-  p99: number;
+  p50: number | null;
+  p99: number | null;
   errors24h: number;
   status: HealthStatus;
   /** 24 hourly buckets, oldest → newest. 0-100 wellness score per bucket. */
   series: number[];
   /**
    * 24 hourly buckets of the worst-case p99 latency observed in each
-   * hour, in milliseconds. 0 means no metrics received yet for that
-   * hour. Drives the cross-service latency chart on the Health page.
+   * hour, in milliseconds. `null` when no metrics received yet for the service.
+   * Drives the cross-service latency chart on the Health page.
    */
-  p99Series: number[];
+  p99Series: number[] | null;
 }
 
 export interface HealthIncident {
@@ -521,13 +521,12 @@ export class HealthService
       : (metrics?.errorCount ?? 0);
 
     const latencyRing = this.latencyRings.get(app.id);
-    const p99Series: number[] = [];
+    let p99Series: number[] | null = null;
     if (latencyRing) {
+      p99Series = [];
       for (let i = 1; i <= BUCKETS_24H; i += 1) {
         p99Series.push(latencyRing.buckets[(latencyRing.cursor + i) % BUCKETS_24H]);
       }
-    } else {
-      for (let i = 0; i < BUCKETS_24H; i += 1) p99Series.push(0);
     }
 
     return {
@@ -536,8 +535,8 @@ export class HealthService
       kind: app.kind,
       httpReachable: app.httpReachable,
       uptime: Number(uptime.toFixed(2)),
-      p50: Math.round(metrics?.p50Ms ?? 0),
-      p99: Math.round(metrics?.p99Ms ?? 0),
+      p50: metrics ? Math.round(metrics.p50Ms) : null,
+      p99: metrics ? Math.round(metrics.p99Ms) : null,
       errors24h,
       status: statusFromRegistry(app.status),
       series: ordered,

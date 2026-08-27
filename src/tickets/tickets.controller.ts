@@ -44,8 +44,8 @@ export class TicketsController {
 
   @Post()
   @HqRoles(HqRole.Operator)
-  create(@Body() dto: CreateTicketDto) {
-    return this.svc.create(dto);
+  create(@Body() dto: CreateTicketDto, @CurrentUser() user?: AuthenticatedUser) {
+    return this.svc.create(dto, actor(user));
   }
 
   @Post(':id/replies')
@@ -65,7 +65,7 @@ export class TicketsController {
     @Body() dto: UpdateTicketStatusDto,
     @CurrentUser() user?: AuthenticatedUser,
   ) {
-    return this.svc.setStatus(id, dto.status, user?.roles);
+    return this.svc.setStatus(id, dto.status, user?.roles, actor(user));
   }
 
   @Patch(':id/assign')
@@ -75,6 +75,10 @@ export class TicketsController {
     @Body() dto: AssignTicketDto,
     @CurrentUser() user?: AuthenticatedUser,
   ) {
-    return this.svc.assign(id, dto.assignee, user?.roles);
+    return this.svc.assign(id, dto.assignee, user?.roles, actor(user));
   }
+}
+
+function actor(user?: AuthenticatedUser): string {
+  return user?.email ?? user?.sub ?? 'unknown';
 }
