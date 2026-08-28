@@ -14,6 +14,7 @@ import {
   AddReplyDto,
   AssignTicketDto,
   CreateTicketDto,
+  UpdateTicketDto,
   UpdateTicketStatusDto,
 } from './dto/create-ticket.dto';
 import { HqRoles } from '../common/auth/hq-roles.decorator';
@@ -84,6 +85,16 @@ export class TicketsController {
     @CurrentUser() user?: AuthenticatedUser,
   ) {
     return this.svc.assign(id, dto.assignee, user?.roles, actor(user));
+  }
+
+  @Patch(':id')
+  @HqRoles(HqRole.Operator)
+  update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateTicketDto,
+    @CurrentUser() user?: AuthenticatedUser,
+  ) {
+    return this.svc.update(id, dto, user?.roles, actor(user));
   }
 }
 

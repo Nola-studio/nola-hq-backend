@@ -1,7 +1,7 @@
 import { Column, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
 import { Ticket, type TicketStatus } from './ticket.entity';
 
-export type TicketEventAction = 'created' | 'status_changed' | 'assigned' | 'replied';
+export type TicketEventAction = 'created' | 'status_changed' | 'assigned' | 'replied' | 'updated';
 
 /**
  * First-class fromStatus/toStatus/reason columns, deliberately unlike

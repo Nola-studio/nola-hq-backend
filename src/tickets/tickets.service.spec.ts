@@ -202,6 +202,13 @@ describe('TicketsService (Brand Scope Filtering)', () => {
       ).rejects.toThrow(NotFoundException);
     });
 
+    test('khi-lab operator can update category and priority on ticket 1', async () => {
+      const svc = makeService(sampleTickets);
+      const res = await svc.update(1, { priority: 'P2', category: 'billing' }, ['hq:operator', 'hq:bu:khi-lab']);
+      expect(res.priority).toBe('P2');
+      expect(res.category).toBe('billing');
+    });
+
     test('unscoped operator is denied (404) on all mutations', async () => {
       const svc = makeService(sampleTickets);
       expect(
@@ -212,6 +219,9 @@ describe('TicketsService (Brand Scope Filtering)', () => {
       ).rejects.toThrow(NotFoundException);
       expect(
         svc.assign(1, 'usr-1', ['hq:operator']),
+      ).rejects.toThrow(NotFoundException);
+      expect(
+        svc.update(1, { priority: 'P2' }, ['hq:operator']),
       ).rejects.toThrow(NotFoundException);
     });
   });
