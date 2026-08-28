@@ -80,12 +80,6 @@ export class Ticket {
   @Column()
   sla!: string;
 
-  @Column()
-  age!: string;
-
-  @Column()
-  ago!: string;
-
   /** What the request is about — drives HQ triage. Nullable: legacy + manually
    * created tickets have no category. */
   @Column({ type: 'varchar', nullable: true })

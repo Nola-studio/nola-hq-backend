@@ -135,8 +135,6 @@ export class TicketsService {
       source: dto.source ?? null,
       dueAt: dto.dueAt ? new Date(dto.dueAt) : null,
       businessUnitId,
-      age: '0 min',
-      ago: '0 min',
       replies: [],
       createdAt: now,
       updatedAt: now,
