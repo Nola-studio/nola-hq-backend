@@ -77,10 +77,20 @@ describe('TicketsService (Brand Scope Filtering)', () => {
       save: mock(async (t: any) => t),
     } as any;
 
+    const eventsMock = {
+      find: mock(async ({ where }: any) => {
+        return [{ id: 'evt-1', ticketId: where.ticketId, action: 'created', createdAt: new Date() }];
+      }),
+      create: mock((e: any) => e),
+      save: mock(async (e: any) => e),
+    } as any;
+    const teamMock = {
+      findOne: mock(async () => null),
+    } as any;
     const pushMock = { broadcast: mock(async () => {}) } as any;
     const notifyMock = { ticketCreated: mock(() => {}), ticketAssigned: mock(() => {}) } as any;
 
-    return new TicketsService(repoMock, pushMock, notifyMock, businessUnitsMock);
+    return new TicketsService(repoMock, eventsMock, teamMock, pushMock, notifyMock, businessUnitsMock);
   }
 
   describe('list', () => {
@@ -202,6 +212,22 @@ describe('TicketsService (Brand Scope Filtering)', () => {
       ).rejects.toThrow(NotFoundException);
       expect(
         svc.assign(1, 'usr-1', ['hq:operator']),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('getEvents (brand isolation)', () => {
+    test('khi-lab viewer can read events for ticket 1', async () => {
+      const svc = makeService(sampleTickets);
+      const events = await svc.getEvents(1, ['hq:viewer', 'hq:bu:khi-lab']);
+      expect(events.length).toBe(1);
+      expect(events[0].ticketId).toBe(1);
+    });
+
+    test('khi-lab viewer cannot read events for ticket 2 (vantelis) -> 404', async () => {
+      const svc = makeService(sampleTickets);
+      expect(
+        svc.getEvents(2, ['hq:viewer', 'hq:bu:khi-lab']),
       ).rejects.toThrow(NotFoundException);
     });
   });

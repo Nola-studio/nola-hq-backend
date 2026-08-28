@@ -1,5 +1,5 @@
 import { Column, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
-import { Ticket, TicketStatus } from './ticket.entity';
+import { Ticket, type TicketStatus } from './ticket.entity';
 
 export type TicketEventAction = 'created' | 'status_changed' | 'assigned' | 'replied';
 

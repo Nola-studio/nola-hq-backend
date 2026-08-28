@@ -42,6 +42,14 @@ export class TicketsController {
     return this.svc.findOne(id, user?.roles);
   }
 
+  @Get(':id/events')
+  getEvents(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user?: AuthenticatedUser,
+  ) {
+    return this.svc.getEvents(id, user?.roles);
+  }
+
   @Post()
   @HqRoles(HqRole.Operator)
   create(@Body() dto: CreateTicketDto, @CurrentUser() user?: AuthenticatedUser) {

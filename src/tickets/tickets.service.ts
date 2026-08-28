@@ -1,7 +1,7 @@
 import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
-import { Ticket, TicketStatus } from './ticket.entity';
+import { Ticket, type TicketStatus } from './ticket.entity';
 import { TicketEvent, type TicketEventAction } from './ticket-event.entity';
 import {
   AddReplyDto,
@@ -82,6 +82,14 @@ export class TicketsService {
     });
     if (!t) throw new NotFoundException(`Ticket ${id} introuvable`);
     return toTicketResponse(t);
+  }
+
+  async getEvents(id: number, roles?: string[]): Promise<TicketEvent[]> {
+    await this.findOne(id, roles);
+    return this.events.find({
+      where: { ticketId: id },
+      order: { createdAt: 'ASC' },
+    });
   }
 
   async create(dto: CreateTicketDto, actor?: string) {

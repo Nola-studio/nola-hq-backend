@@ -30,6 +30,7 @@ import { TeamMember } from './team/team-member.entity';
 import { Tenant } from './tenants/tenant.entity';
 import { TenantCrm } from './tenants/tenant-crm.entity';
 import { Ticket } from './tickets/ticket.entity';
+import { TicketEvent } from './tickets/ticket-event.entity';
 import { WorkItem } from './work-items/work-item.entity';
 import { WorkItemAttachment } from './work-items/work-item-attachment.entity';
 import { WorkItemComment } from './work-items/work-item-comment.entity';
@@ -97,6 +98,7 @@ export const entities = [
   Tenant,
   TenantCrm,
   Ticket,
+  TicketEvent,
   WorkItem,
   WorkItemAttachment,
   WorkItemComment,
