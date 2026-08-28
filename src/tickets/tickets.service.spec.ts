@@ -106,6 +106,7 @@ describe('TicketsService (Brand Scope Filtering)', () => {
     const pushMock = { broadcast: mock(async () => {}), sendTo: mock(async () => {}) } as any;
     const notifyMock = { ticketCreated: mock(() => {}), ticketAssigned: mock(() => {}) } as any;
 
+    lastEventsMock = eventsMock;
     return new TicketsService(
       repoMock,
       eventsMock,
@@ -115,6 +116,15 @@ describe('TicketsService (Brand Scope Filtering)', () => {
       notifyMock,
       businessUnitsMock,
     );
+  }
+
+  /** Set by `makeService()` on each call — lets a test inspect what got
+   * written to `ticket_events` without changing `makeService`'s return shape. */
+  let lastEventsMock: any;
+
+  function makeServiceWithEventsRepo(rows: Ticket[], slaPolicyRows: any[] = []) {
+    const svc = makeService(rows, slaPolicyRows);
+    return { svc, eventsRepo: lastEventsMock };
   }
 
   describe('list', () => {
@@ -234,6 +244,18 @@ describe('TicketsService (Brand Scope Filtering)', () => {
       sampleTickets[0].status = 'open';
       const res = await svc.setStatus(1, 'pending', ['hq:operator', 'hq:bu:khi-lab'], undefined, 'vendor');
       expect(res.pendingReason).toBe('vendor');
+    });
+
+    test('status_changed event records pendingReason in meta, not just the ticket row', async () => {
+      // The elapsed-time walk (sla-elapsed.ts) needs the reason attached to
+      // each historical pending spell, not just the ticket's current value —
+      // that's why this lives in the event's own meta.
+      const { svc, eventsRepo } = makeServiceWithEventsRepo(sampleTickets);
+      sampleTickets[0].status = 'open';
+      await svc.setStatus(1, 'pending', ['hq:operator', 'hq:bu:khi-lab'], undefined, 'vendor');
+      const created = eventsRepo.create.mock.calls.at(-1)?.[0] as any;
+      expect(created.action).toBe('status_changed');
+      expect(created.meta).toEqual({ pendingReason: 'vendor' });
     });
 
     test('leaving pending clears pendingReason', async () => {
