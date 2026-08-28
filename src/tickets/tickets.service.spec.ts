@@ -41,9 +41,14 @@ describe('TicketsService (Brand Scope Filtering)', () => {
       if (roles.includes('hq:bu:vantelis-it')) return [VANTELIS_ID];
       return [];
     }),
+    resolve: mock(async (code: string) => {
+      if (code === 'khi-lab') return KHI_LAB_ID;
+      if (code === 'vantelis-it') return VANTELIS_ID;
+      throw new Error(`Unknown business unit code '${code}'`);
+    }),
   } as any;
 
-  function makeService(rows: Ticket[]) {
+  function makeService(rows: Ticket[], slaPolicyRows: any[] = []) {
     const qbMock: any = {
       leftJoinAndSelect: mock(() => qbMock),
       andWhere: mock((clause: string, params: any) => {
@@ -74,6 +79,7 @@ describe('TicketsService (Brand Scope Filtering)', () => {
         if (!buIn) return rows;
         return rows.filter((r) => buIn.includes(r.businessUnitId));
       }),
+      create: mock((t: any) => t),
       save: mock(async (t: any) => t),
     } as any;
 
@@ -91,10 +97,24 @@ describe('TicketsService (Brand Scope Filtering)', () => {
     const teamMock = {
       findOne: mock(async ({ where }: any) => teamMembers.find((m) => m.id === where.id) ?? null),
     } as any;
+    const slaPoliciesMock = {
+      findOne: mock(async ({ where }: any) =>
+        slaPolicyRows.find((p) => p.businessUnitId === where.businessUnitId && p.priority === where.priority) ??
+        null,
+      ),
+    } as any;
     const pushMock = { broadcast: mock(async () => {}), sendTo: mock(async () => {}) } as any;
     const notifyMock = { ticketCreated: mock(() => {}), ticketAssigned: mock(() => {}) } as any;
 
-    return new TicketsService(repoMock, eventsMock, teamMock, pushMock, notifyMock, businessUnitsMock);
+    return new TicketsService(
+      repoMock,
+      eventsMock,
+      teamMock,
+      slaPoliciesMock,
+      pushMock,
+      notifyMock,
+      businessUnitsMock,
+    );
   }
 
   describe('list', () => {
@@ -196,6 +216,34 @@ describe('TicketsService (Brand Scope Filtering)', () => {
       ).rejects.toThrow(NotFoundException);
     });
 
+    // `findOne()` hands `setStatus` a spread copy (`toTicketResponse`), so a
+    // mutation from one `svc.setStatus()` call never round-trips back into
+    // `sampleTickets` for a later call in the same test to observe — the
+    // mock's `save` just returns whatever copy it was given. Set the
+    // fixture's status directly rather than chaining calls through the
+    // service to establish a starting state.
+    test('pending defaults pendingReason to null (behaves as client)', async () => {
+      const svc = makeService(sampleTickets);
+      sampleTickets[0].status = 'open';
+      const res = await svc.setStatus(1, 'pending', ['hq:operator', 'hq:bu:khi-lab']);
+      expect(res.pendingReason).toBeNull();
+    });
+
+    test('pending with an explicit reason stores it', async () => {
+      const svc = makeService(sampleTickets);
+      sampleTickets[0].status = 'open';
+      const res = await svc.setStatus(1, 'pending', ['hq:operator', 'hq:bu:khi-lab'], undefined, 'vendor');
+      expect(res.pendingReason).toBe('vendor');
+    });
+
+    test('leaving pending clears pendingReason', async () => {
+      const svc = makeService(sampleTickets);
+      sampleTickets[0].status = 'pending';
+      sampleTickets[0].pendingReason = 'vendor';
+      const res = await svc.setStatus(1, 'open', ['hq:operator', 'hq:bu:khi-lab']);
+      expect(res.pendingReason).toBeNull();
+    });
+
     test('khi-lab operator can assign ticket 1 but 404s on ticket 2 (vantelis)', async () => {
       const svc = makeService(sampleTickets);
       const res = await svc.assign(1, 'usr-1', ['hq:operator', 'hq:bu:khi-lab']);
@@ -256,6 +304,65 @@ describe('TicketsService (Brand Scope Filtering)', () => {
       expect(
         svc.getEvents(2, ['hq:viewer', 'hq:bu:khi-lab']),
       ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('create (sla derivation)', () => {
+    const baseDto = {
+      tenant: 'tenant-1',
+      subject: 'Aide',
+      body: 'Bonjour',
+      contact: 'owner@example.com',
+      priority: 'P1' as const,
+      assignee: 'unassigned',
+      businessUnitCode: 'vantelis-it',
+    };
+
+    test('no sla_policies row -> blank sla, not a default', async () => {
+      const svc = makeService([], []);
+      const t = await svc.create(baseDto);
+      expect(t.sla).toBe('');
+    });
+
+    test('row exists but target unconfigured (null) -> blank sla', async () => {
+      const svc = makeService([], [
+        { businessUnitId: VANTELIS_ID, priority: 'P1', resolutionTargetMinutes: null },
+      ]);
+      const t = await svc.create(baseDto);
+      expect(t.sla).toBe('');
+    });
+
+    test('configured target under an hour -> "N min"', async () => {
+      const svc = makeService([], [
+        { businessUnitId: VANTELIS_ID, priority: 'P1', resolutionTargetMinutes: 15 },
+      ]);
+      const t = await svc.create(baseDto);
+      expect(t.sla).toBe('15 min');
+    });
+
+    test('configured target on the hour -> "Nh"', async () => {
+      const svc = makeService([], [
+        { businessUnitId: VANTELIS_ID, priority: 'P1', resolutionTargetMinutes: 240 },
+      ]);
+      const t = await svc.create(baseDto);
+      expect(t.sla).toBe('4h');
+    });
+
+    test('configured target with a remainder -> "NhMM"', async () => {
+      const svc = makeService([], [
+        { businessUnitId: VANTELIS_ID, priority: 'P1', resolutionTargetMinutes: 90 },
+      ]);
+      const t = await svc.create(baseDto);
+      expect(t.sla).toBe('1h30');
+    });
+
+    test('policy is looked up by priority too, not just brand', async () => {
+      const svc = makeService([], [
+        { businessUnitId: VANTELIS_ID, priority: 'P1', resolutionTargetMinutes: 15 },
+        { businessUnitId: VANTELIS_ID, priority: 'P3', resolutionTargetMinutes: 1440 },
+      ]);
+      const t = await svc.create({ ...baseDto, priority: 'P3' });
+      expect(t.sla).toBe('24h');
     });
   });
 });

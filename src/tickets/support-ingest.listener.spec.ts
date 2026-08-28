@@ -139,6 +139,8 @@ describe('SupportIngestListener.handle (même handler pour tous les sujets)', ()
           meta: {
             orgName: 'Lemieux & Associés',
             orgNumber: '0147',
+            slaTarget: '15 min',
+            dueAt: '2026-08-28T15:15:00.000Z',
           },
         },
         metadata: { correlationId: '', source: '', emittedAt: '' },
@@ -157,6 +159,29 @@ describe('SupportIngestListener.handle (même handler pour tous les sujets)', ()
     expect(arg.businessUnitCode).toBe('vantelis-it');
     // Le pied de contexte de HQ vient s'ajouter à celui du producteur.
     expect(String(arg.body)).toContain('Organisation : Lemieux & Associés');
+    // L'engagement amont de Vantelis atterrit dans le corps — contexte
+    // seulement, jamais la source de vérité SLA de HQ (sla_policies).
+    expect(String(arg.body)).toContain('Engagement fournisseur : 15 min');
+    expect(String(arg.body)).toContain('Échéance fournisseur : 2026-08-28T15:15:00.000Z');
+    // ... et dueAt atterrit aussi comme colonne réelle, pour un futur usage
+    // sans reparser le corps du ticket.
+    expect(arg.dueAt).toBe('2026-08-28T15:15:00.000Z');
+  });
+
+  test('kelasi/yekoli sans slaTarget/dueAt : pas de ligne fournisseur, dueAt absent', async () => {
+    const { handle, create } = makeListener();
+    await handle(
+      {
+        event: 'nola.events.kelasi.support.requested',
+        payload,
+        metadata: { correlationId: '', source: '', emittedAt: '' },
+      },
+      'khi-lab',
+    );
+    const arg = create.mock.calls[0][0] as Record<string, unknown>;
+    expect(String(arg.body)).not.toContain('Engagement fournisseur');
+    expect(String(arg.body)).not.toContain('Échéance fournisseur');
+    expect(arg.dueAt).toBeUndefined();
   });
 
   test('droppe (ack) un payload malformé sans créer de ticket', async () => {

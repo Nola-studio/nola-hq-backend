@@ -10,6 +10,10 @@ import { CreateBusinessUnitDto } from './dto/create-business-unit.dto';
 import { UpdateBusinessUnitDto } from './dto/update-business-unit.dto';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
+import { SlaPolicy } from '../sla/sla-policy.entity';
+import type { TicketPriority } from '../tickets/ticket.entity';
+
+const SLA_PRIORITIES: TicketPriority[] = ['P1', 'P2', 'P3'];
 
 export interface ProductSummary {
   id: string;
@@ -54,6 +58,7 @@ export class CompanyService {
     @InjectRepository(BusinessUnit) private readonly businessUnits: Repository<BusinessUnit>,
     @InjectRepository(LegalEntity) private readonly legalEntities: Repository<LegalEntity>,
     @InjectRepository(Product) private readonly products: Repository<Product>,
+    @InjectRepository(SlaPolicy) private readonly slaPolicies: Repository<SlaPolicy>,
     private readonly businessUnitResolver: BusinessUnitResolverService,
   ) {}
 
@@ -93,7 +98,29 @@ export class CompanyService {
     });
     await this.businessUnits.save(unit);
     this.businessUnitResolver.invalidateCache();
+    await this.seedSlaPolicies(unit.id, now);
     return this.findBusinessUnit(dto.code);
+  }
+
+  /**
+   * Every brand gets a P1/P2/P3 row with null targets at creation — so
+   * "no SLA policy row" (a data-integrity gap) and "SLA tracked but not
+   * yet configured" (the normal state for a brand nobody's set numbers
+   * for yet) stay visibly distinguishable at read time.
+   */
+  private async seedSlaPolicies(businessUnitId: string, now: Date): Promise<void> {
+    await this.slaPolicies.save(
+      SLA_PRIORITIES.map((priority) =>
+        this.slaPolicies.create({
+          businessUnitId,
+          priority,
+          responseTargetMinutes: null,
+          resolutionTargetMinutes: null,
+          createdAt: now,
+          updatedAt: now,
+        }),
+      ),
+    );
   }
 
   async updateBusinessUnit(code: string, dto: UpdateBusinessUnitDto): Promise<BusinessUnitDetail> {

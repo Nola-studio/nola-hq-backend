@@ -59,6 +59,11 @@ describe('CompanyService', () => {
     },
   ];
 
+  /** Reset and repopulated by `makeService()` on each call — lets a test
+   * inspect what `createBusinessUnit()` seeded without changing `makeService`'s
+   * return shape (13 existing call sites just want `svc`). */
+  let capturedSlaPolicies: any[] = [];
+
   function makeService(initialProducts = sampleProducts, initialBusinessUnits: any[] = [KHI_LAB_BU]) {
     const businessUnits = [...initialBusinessUnits];
     const products = [...initialProducts];
@@ -129,7 +134,17 @@ describe('CompanyService', () => {
       invalidateCache: mock(() => undefined),
     } as any;
 
-    return new CompanyService(businessUnitsRepo, legalEntitiesRepo, productsRepo, businessUnitResolver);
+    capturedSlaPolicies = [];
+    const slaPoliciesRepo = {
+      create: mock((data: any) => ({ ...data })),
+      save: mock(async (rows: any) => {
+        const arr = Array.isArray(rows) ? rows : [rows];
+        capturedSlaPolicies.push(...arr);
+        return rows;
+      }),
+    } as any;
+
+    return new CompanyService(businessUnitsRepo, legalEntitiesRepo, productsRepo, slaPoliciesRepo, businessUnitResolver);
   }
 
   describe('listProducts', () => {
@@ -191,6 +206,18 @@ describe('CompanyService', () => {
       expect(res.code).toBe('roy-marketing');
       expect(res.isActive).toBe(true);
       expect(res.legalEntity.code).toBe('nolaa-studio');
+    });
+
+    test('seeds a P1/P2/P3 sla_policies row with null targets', async () => {
+      const svc = makeService();
+      await svc.createBusinessUnit({
+        code: 'roy-marketing',
+        name: 'Roy Marketing',
+        legalEntityCode: 'nolaa-studio',
+      });
+      expect(capturedSlaPolicies.map((p: any) => p.priority).sort()).toEqual(['P1', 'P2', 'P3']);
+      expect(capturedSlaPolicies.every((p: any) => p.responseTargetMinutes === null)).toBe(true);
+      expect(capturedSlaPolicies.every((p: any) => p.resolutionTargetMinutes === null)).toBe(true);
     });
 
     test('rejects an unknown legal entity code', async () => {

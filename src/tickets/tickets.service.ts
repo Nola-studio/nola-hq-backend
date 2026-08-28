@@ -1,7 +1,7 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
-import { Ticket, type TicketStatus } from './ticket.entity';
+import { Ticket, type TicketStatus, type TicketPendingReason, type TicketPriority } from './ticket.entity';
 import { TicketEvent, type TicketEventAction } from './ticket-event.entity';
 import {
   AddReplyDto,
@@ -13,10 +13,19 @@ import { PushService } from '../push/push.service';
 import { TicketsNotifyService } from './tickets-notify.service';
 import { BusinessUnitResolverService, DEFAULT_BUSINESS_UNIT_CODE } from '../company/business-unit-resolver.service';
 import { TeamMember } from '../team/team-member.entity';
+import { SlaPolicy } from '../sla/sla-policy.entity';
 
 /** Reserved sentinel for "nobody yet" — the ingest listener creates tickets
  * this way. The only `assignee` value exempt from the team_members check. */
 const UNASSIGNED = 'unassigned';
+
+/** e.g. 15 -> '15 min', 240 -> '4h', 90 -> '1h30'. Matches the shape the
+ * hardcoded '24h' default always had — this just makes it true. */
+function formatSlaMinutes(minutes: number): string {
+  if (minutes < 60) return `${minutes} min`;
+  if (minutes % 60 === 0) return `${minutes / 60}h`;
+  return `${Math.floor(minutes / 60)}h${minutes % 60}`;
+}
 
 export interface TicketsListQuery extends PaginationDto {
   tenant?: string;
@@ -43,6 +52,7 @@ export class TicketsService {
     @InjectRepository(Ticket) private readonly repo: Repository<Ticket>,
     @InjectRepository(TicketEvent) private readonly events: Repository<TicketEvent>,
     @InjectRepository(TeamMember) private readonly team: Repository<TeamMember>,
+    @InjectRepository(SlaPolicy) private readonly slaPolicies: Repository<SlaPolicy>,
     private readonly push: PushService,
     private readonly notify: TicketsNotifyService,
     private readonly businessUnits: BusinessUnitResolverService,
@@ -109,6 +119,7 @@ export class TicketsService {
       );
     }
     const businessUnitId = await this.businessUnits.resolve(dto.businessUnitCode ?? DEFAULT_BUSINESS_UNIT_CODE);
+    const sla = await this.deriveSla(businessUnitId, dto.priority);
     const ticket = this.repo.create({
       tenant: dto.tenant,
       subject: dto.subject,
@@ -119,9 +130,10 @@ export class TicketsService {
       status: dto.status ?? 'open',
       assignee: dto.assignee,
       assigned: dto.assignee,
-      sla: dto.sla ?? '24h',
+      sla,
       category: dto.category ?? null,
       source: dto.source ?? null,
+      dueAt: dto.dueAt ? new Date(dto.dueAt) : null,
       businessUnitId,
       age: '0 min',
       ago: '0 min',
@@ -163,7 +175,13 @@ export class TicketsService {
     return saved;
   }
 
-  async setStatus(id: number, status: TicketStatus, roles?: string[], actor?: string) {
+  async setStatus(
+    id: number,
+    status: TicketStatus,
+    roles?: string[],
+    actor?: string,
+    pendingReason?: TicketPendingReason,
+  ) {
     const ticket = await this.findOne(id, roles);
     // Idempotent no-op: nothing is mutated, so nothing to guard — this
     // must come before the closed check below (re-submitting a closed
@@ -179,6 +197,10 @@ export class TicketsService {
     }
     const fromStatus = ticket.status;
     ticket.status = status;
+    // Only meaningful while pending — null (never specified, or explicitly
+    // 'client') is the SLA-pausing default; any other transition clears it
+    // so a stale reason can't linger into a future, different pending spell.
+    ticket.pendingReason = status === 'pending' ? pendingReason ?? null : null;
     ticket.updatedAt = new Date();
     const saved = await this.repo.save(ticket);
     void this.notifyStatusPush(saved, actor);
@@ -294,6 +316,24 @@ export class TicketsService {
     if (!member) {
       throw new BadRequestException(`Assignee '${assignee}' n'est pas un membre de l'équipe connu.`);
     }
+  }
+
+  /**
+   * Computed once at creation from `sla_policies` (business unit × priority)
+   * — like every other field on `Ticket`, this is written once and left, not
+   * recomputed live on every read. A policy changed after the fact won't
+   * retroactively update already-created tickets' displayed SLA; that's a
+   * deliberate scope cut, not an oversight — this fixes the "always says
+   * 24h" lie, it doesn't promise a live-updating figure.
+   *
+   * No policy row, or a row with no resolution target configured yet, both
+   * mean the same thing here: nothing to show. Blank, never a fallback
+   * default — the whole point was to stop displaying a number nobody set.
+   */
+  private async deriveSla(businessUnitId: string, priority: TicketPriority): Promise<string> {
+    const policy = await this.slaPolicies.findOne({ where: { businessUnitId, priority } });
+    const minutes = policy?.resolutionTargetMinutes;
+    return minutes ? formatSlaMinutes(minutes) : '';
   }
 
   /** Mirrors WorkItemsService.notifyAssignee: skip when self-assigning, never fail the assignment. */

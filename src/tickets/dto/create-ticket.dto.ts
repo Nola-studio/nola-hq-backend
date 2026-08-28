@@ -1,4 +1,4 @@
-import { IsIn, IsOptional, IsString } from 'class-validator';
+import { IsDateString, IsIn, IsOptional, IsString } from 'class-validator';
 
 const PRIORITIES = ['P1', 'P2', 'P3'] as const;
 const STATUSES = ['open', 'pending', 'closed', 'resolved'] as const;
@@ -11,6 +11,7 @@ const CATEGORIES = [
   'other',
 ] as const;
 const REPLY_VISIBILITIES = ['internal', 'client'] as const;
+const PENDING_REASONS = ['client', 'vendor', 'internal'] as const;
 
 export class CreateTicketDto {
   @IsString() tenant!: string;
@@ -23,7 +24,6 @@ export class CreateTicketDto {
   @IsOptional() @IsIn(STATUSES as unknown as string[])
   status?: (typeof STATUSES)[number];
   @IsString() assignee!: string;
-  @IsOptional() @IsString() sla?: string;
   /** What the request is about — drives HQ triage/filtering. */
   @IsOptional() @IsIn(CATEGORIES as unknown as string[])
   category?: (typeof CATEGORIES)[number];
@@ -31,6 +31,8 @@ export class CreateTicketDto {
   @IsOptional() @IsString() source?: string;
   /** BusinessUnit code, e.g. 'khi-lab' — not a UUID. Defaults to 'khi-lab' when omitted. */
   @IsOptional() @IsString() businessUnitCode?: string;
+  /** Producing app's own upstream due date (e.g. Vantelis IT's meta.dueAt) — display only, never HQ's SLA source of truth. */
+  @IsOptional() @IsDateString() dueAt?: string;
 }
 
 export class AddReplyDto {
@@ -45,6 +47,10 @@ export class AddReplyDto {
 export class UpdateTicketStatusDto {
   @IsIn(STATUSES as unknown as string[])
   status!: (typeof STATUSES)[number];
+
+  /** Only meaningful when `status === 'pending'`; ignored otherwise. Omitted/null means 'client'. */
+  @IsOptional() @IsIn(PENDING_REASONS as unknown as string[])
+  pendingReason?: (typeof PENDING_REASONS)[number];
 }
 
 export class AssignTicketDto {
