@@ -175,13 +175,10 @@ export class HealthService
 
     try {
       this.eventBus = new EventBus(this.nolaClient.getClient());
+      await this.eventBus.init();
       await this.eventBus.ensureStream({
         name: HEALTH_STREAM,
-        subjects: [
-          'nola.events.nola.health.snapshot.>',
-          'nola.events.nola.health.incident.>',
-          'nola.events.metrics.>',
-        ],
+        subjects: ['nola.events.>'],
         max_age: 30 * 24 * 60 * 60 * 1_000_000_000,
       });
 

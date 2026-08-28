@@ -86,6 +86,7 @@ export class SupportIngestListener implements OnApplicationBootstrap {
   private readonly enabled: boolean;
 
   private static readonly STREAM = 'NOLA_HQ_EVENTS';
+  private static readonly STREAM_SUBJECTS = ['nola.events.>'];
   /** Un consumer durable par variante de sujet (voir doc de classe).
    * Le nom historique reste lié au sujet kelasi pour préserver l'état
    * (curseur/backlog) du durable déjà déployé. */
@@ -145,7 +146,7 @@ export class SupportIngestListener implements OnApplicationBootstrap {
 
       await this.eventBus.ensureStream({
         name: SupportIngestListener.STREAM,
-        subjects: SupportIngestListener.SOURCES.map((s) => s.filter),
+        subjects: SupportIngestListener.STREAM_SUBJECTS,
         max_age: 30 * 24 * 60 * 60 * 1_000_000_000,
       });
     } catch (err: unknown) {

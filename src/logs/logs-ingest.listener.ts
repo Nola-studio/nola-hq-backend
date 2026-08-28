@@ -56,6 +56,7 @@ export class LogsIngestListener
   private readonly enabled: boolean;
 
   private static readonly STREAM = 'NOLA_HQ_EVENTS';
+  private static readonly STREAM_SUBJECTS = ['nola.events.>'];
   private static readonly SOURCES: Source[] = [
     {
       category: 'incident',
@@ -115,8 +116,8 @@ export class LogsIngestListener
 
       await this.eventBus.ensureStream({
         name: LogsIngestListener.STREAM,
-        subjects: LogsIngestListener.SOURCES.map((s) => s.filter),
-        max_age: 7 * 24 * 60 * 60 * 1_000_000_000, // 7d retention
+        subjects: LogsIngestListener.STREAM_SUBJECTS,
+        max_age: 30 * 24 * 60 * 60 * 1_000_000_000,
       });
     } catch (err: unknown) {
       this.logger.error(

@@ -89,7 +89,7 @@ export class IncidentAlertListener
 
       await this.eventBus.ensureStream({
         name: HEALTH_STREAM,
-        subjects: ['nola.events.nola.health.incident.>'],
+        subjects: ['nola.events.>'],
         max_age: 30 * 24 * 60 * 60 * 1_000_000_000,
       });
 
