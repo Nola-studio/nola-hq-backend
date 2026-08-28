@@ -181,10 +181,11 @@ export class TicketsService {
     pendingReason?: TicketPendingReason,
   ) {
     const ticket = await this.findOne(id, roles);
-    // Idempotent no-op: nothing is mutated, so nothing to guard — this
+    const nextPendingReason = status === 'pending' ? pendingReason ?? null : null;
+    // Idempotent no-op: nothing is mutated (both status and pendingReason match), so nothing to guard — this
     // must come before the closed check below (re-submitting a closed
     // ticket's already-closed status isn't a reopen attempt).
-    if (ticket.status === status) return ticket;
+    if (ticket.status === status && ticket.pendingReason === nextPendingReason) return ticket;
     // No Owner/admin override — a closed ticket is not reopenable by
     // anyone, matching WorkItem.assertMutable()'s posture. Narrower than
     // WorkItem's guard: this only blocks further *status* changes, not
@@ -198,7 +199,7 @@ export class TicketsService {
     // Only meaningful while pending — null (never specified, or explicitly
     // 'client') is the SLA-pausing default; any other transition clears it
     // so a stale reason can't linger into a future, different pending spell.
-    ticket.pendingReason = status === 'pending' ? pendingReason ?? null : null;
+    ticket.pendingReason = nextPendingReason;
     ticket.updatedAt = new Date();
     const saved = await this.repo.save(ticket);
     void this.notifyStatusChange(saved, actor);

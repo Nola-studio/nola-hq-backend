@@ -288,6 +288,27 @@ describe('TicketsService (Brand Scope Filtering)', () => {
       expect(res.pendingReason).toBeNull();
     });
 
+    test('updating pendingReason on already-pending ticket updates the reason and emits event', async () => {
+      const { svc, eventsRepo } = makeServiceWithEventsRepo(sampleTickets);
+      sampleTickets[0].status = 'pending';
+      sampleTickets[0].pendingReason = 'client';
+      const res = await svc.setStatus(1, 'pending', ['hq:operator', 'hq:bu:khi-lab'], 'Alice', 'vendor');
+      expect(res.pendingReason).toBe('vendor');
+      const created = eventsRepo.create.mock.calls.at(-1)?.[0] as any;
+      expect(created.action).toBe('status_changed');
+      expect(created.meta).toEqual({ pendingReason: 'vendor' });
+    });
+
+    test('re-submitting unchanged pending status and reason is an idempotent no-op', async () => {
+      const { svc, eventsRepo } = makeServiceWithEventsRepo(sampleTickets);
+      sampleTickets[0].status = 'pending';
+      sampleTickets[0].pendingReason = 'vendor';
+      const prevCalls = eventsRepo.save.mock.calls.length;
+      const res = await svc.setStatus(1, 'pending', ['hq:operator', 'hq:bu:khi-lab'], 'Alice', 'vendor');
+      expect(res.pendingReason).toBe('vendor');
+      expect(eventsRepo.save.mock.calls.length).toBe(prevCalls);
+    });
+
     test('khi-lab operator can assign ticket 1 but 404s on ticket 2 (vantelis)', async () => {
       const svc = makeService(sampleTickets);
       const res = await svc.assign(1, 'usr-1', ['hq:operator', 'hq:bu:khi-lab']);
