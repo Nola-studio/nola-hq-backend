@@ -11,7 +11,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { NolaCommandsService } from '@nola-hq/nola-sdk';
 import { TenantCrm } from './tenant-crm.entity';
-import { TenantStatus } from './tenant.entity';
+import type { TenantStatus } from './tenant.entity';
 import { ListTenantsDto } from './dto/list-tenants.dto';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { KelasiProvisionClient } from './kelasi-provision.client';

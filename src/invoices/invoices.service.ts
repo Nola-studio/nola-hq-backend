@@ -8,7 +8,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { NolaCommandsService } from '@nola-hq/nola-sdk';
-import { Invoice, InvoiceStatus } from './invoice.entity';
+import { Invoice, type InvoiceStatus } from './invoice.entity';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { ListInvoicesDto } from './dto/list-invoices.dto';
 import type { PaginatedResult } from '../common/dto/pagination.dto';
