@@ -49,3 +49,13 @@ export class UpdateTicketStatusDto {
 export class AssignTicketDto {
   @IsString() assignee!: string;
 }
+
+export class UpdateTicketDto {
+  @IsOptional()
+  @IsIn(PRIORITIES as unknown as string[])
+  priority?: (typeof PRIORITIES)[number];
+
+  @IsOptional()
+  @IsIn(CATEGORIES as unknown as string[])
+  category?: (typeof CATEGORIES)[number] | null;
+}

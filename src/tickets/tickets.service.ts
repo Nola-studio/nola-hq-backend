@@ -1,11 +1,12 @@
 import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
-import { Ticket, TicketStatus } from './ticket.entity';
+import { Ticket, type TicketStatus } from './ticket.entity';
 import { TicketEvent, type TicketEventAction } from './ticket-event.entity';
 import {
   AddReplyDto,
   CreateTicketDto,
+  UpdateTicketDto,
 } from './dto/create-ticket.dto';
 import { PaginationDto, type PaginatedResult } from '../common/dto/pagination.dto';
 import { PushService } from '../push/push.service';
@@ -18,6 +19,7 @@ export interface TicketsListQuery extends PaginationDto {
   status?: string;
   assignee?: string;
   priority?: string;
+  category?: string;
 }
 
 /** `Ticket` as the API returns it: `businessUnit` trimmed to `{code, name}` rather than the full joined row. */
@@ -57,6 +59,8 @@ export class TicketsService {
       qb.andWhere('t.assignee = :assignee', { assignee: query.assignee });
     if (query.priority)
       qb.andWhere('t.priority = :priority', { priority: query.priority });
+    if (query.category)
+      qb.andWhere('t.category = :category', { category: query.category });
     if (query.q) {
       qb.andWhere('(LOWER(t.subject) LIKE :q OR LOWER(t.body) LIKE :q)', {
         q: `%${query.q.toLowerCase()}%`,
@@ -82,6 +86,14 @@ export class TicketsService {
     });
     if (!t) throw new NotFoundException(`Ticket ${id} introuvable`);
     return toTicketResponse(t);
+  }
+
+  async getEvents(id: number, roles?: string[]): Promise<TicketEvent[]> {
+    await this.findOne(id, roles);
+    return this.events.find({
+      where: { ticketId: id },
+      order: { createdAt: 'ASC' },
+    });
   }
 
   async create(dto: CreateTicketDto, actor?: string) {
@@ -200,6 +212,34 @@ export class TicketsService {
       meta: { fromAssignee: previousAssignee, toAssignee: assignee },
     });
     return saved;
+  }
+
+  async update(id: number, dto: UpdateTicketDto, roles?: string[], actor?: string) {
+    const ticket = await this.findOne(id, roles);
+    const changes: Record<string, unknown> = {};
+
+    if (dto.priority !== undefined && dto.priority !== ticket.priority) {
+      changes.fromPriority = ticket.priority;
+      changes.toPriority = dto.priority;
+      ticket.priority = dto.priority;
+    }
+
+    if (dto.category !== undefined && dto.category !== ticket.category) {
+      changes.fromCategory = ticket.category;
+      changes.toCategory = dto.category;
+      ticket.category = dto.category;
+    }
+
+    if (Object.keys(changes).length > 0) {
+      ticket.updatedAt = new Date();
+      const saved = await this.repo.save(ticket);
+      void this.record(saved.id, actor ?? 'unknown', 'updated', {
+        meta: changes,
+      });
+      return saved;
+    }
+
+    return ticket;
   }
 
   /**
