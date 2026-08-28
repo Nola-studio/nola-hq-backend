@@ -196,6 +196,34 @@ describe('TicketsService (Brand Scope Filtering)', () => {
       ).rejects.toThrow(NotFoundException);
     });
 
+    // `findOne()` hands `setStatus` a spread copy (`toTicketResponse`), so a
+    // mutation from one `svc.setStatus()` call never round-trips back into
+    // `sampleTickets` for a later call in the same test to observe — the
+    // mock's `save` just returns whatever copy it was given. Set the
+    // fixture's status directly rather than chaining calls through the
+    // service to establish a starting state.
+    test('pending defaults pendingReason to null (behaves as client)', async () => {
+      const svc = makeService(sampleTickets);
+      sampleTickets[0].status = 'open';
+      const res = await svc.setStatus(1, 'pending', ['hq:operator', 'hq:bu:khi-lab']);
+      expect(res.pendingReason).toBeNull();
+    });
+
+    test('pending with an explicit reason stores it', async () => {
+      const svc = makeService(sampleTickets);
+      sampleTickets[0].status = 'open';
+      const res = await svc.setStatus(1, 'pending', ['hq:operator', 'hq:bu:khi-lab'], undefined, 'vendor');
+      expect(res.pendingReason).toBe('vendor');
+    });
+
+    test('leaving pending clears pendingReason', async () => {
+      const svc = makeService(sampleTickets);
+      sampleTickets[0].status = 'pending';
+      sampleTickets[0].pendingReason = 'vendor';
+      const res = await svc.setStatus(1, 'open', ['hq:operator', 'hq:bu:khi-lab']);
+      expect(res.pendingReason).toBeNull();
+    });
+
     test('khi-lab operator can assign ticket 1 but 404s on ticket 2 (vantelis)', async () => {
       const svc = makeService(sampleTickets);
       const res = await svc.assign(1, 'usr-1', ['hq:operator', 'hq:bu:khi-lab']);

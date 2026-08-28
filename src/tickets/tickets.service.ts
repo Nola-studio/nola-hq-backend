@@ -1,7 +1,7 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
-import { Ticket, type TicketStatus } from './ticket.entity';
+import { Ticket, type TicketStatus, type TicketPendingReason } from './ticket.entity';
 import { TicketEvent, type TicketEventAction } from './ticket-event.entity';
 import {
   AddReplyDto,
@@ -163,7 +163,13 @@ export class TicketsService {
     return saved;
   }
 
-  async setStatus(id: number, status: TicketStatus, roles?: string[], actor?: string) {
+  async setStatus(
+    id: number,
+    status: TicketStatus,
+    roles?: string[],
+    actor?: string,
+    pendingReason?: TicketPendingReason,
+  ) {
     const ticket = await this.findOne(id, roles);
     // Idempotent no-op: nothing is mutated, so nothing to guard — this
     // must come before the closed check below (re-submitting a closed
@@ -179,6 +185,10 @@ export class TicketsService {
     }
     const fromStatus = ticket.status;
     ticket.status = status;
+    // Only meaningful while pending — null (never specified, or explicitly
+    // 'client') is the SLA-pausing default; any other transition clears it
+    // so a stale reason can't linger into a future, different pending spell.
+    ticket.pendingReason = status === 'pending' ? pendingReason ?? null : null;
     ticket.updatedAt = new Date();
     const saved = await this.repo.save(ticket);
     void this.notifyStatusPush(saved, actor);

@@ -13,6 +13,15 @@ export type TicketCategory =
 
 export type TicketReplyVisibility = 'internal' | 'client';
 
+/**
+ * What a `pending` ticket is actually waiting on. Only 'client' pauses the
+ * SLA clock — 'vendor'/'internal' mean the wait is on Nola's side, not the
+ * client's, and shouldn't be credited as SLA-paused time. Null (every
+ * ticket predating this column, and any pending transition that doesn't
+ * specify) is treated as 'client' — see TicketsService.
+ */
+export type TicketPendingReason = 'client' | 'vendor' | 'internal';
+
 export interface TicketReply {
   from: string;
   t: string;
@@ -57,6 +66,10 @@ export class Ticket {
   @Column({ type: 'varchar' })
   @Index()
   status!: TicketStatus;
+
+  /** Only meaningful while `status === 'pending'`; cleared on any other transition. */
+  @Column({ type: 'varchar', length: 16, name: 'pending_reason', nullable: true })
+  pendingReason!: TicketPendingReason | null;
 
   @Column()
   assignee!: string;

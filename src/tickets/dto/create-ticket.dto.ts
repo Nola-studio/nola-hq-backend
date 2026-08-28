@@ -11,6 +11,7 @@ const CATEGORIES = [
   'other',
 ] as const;
 const REPLY_VISIBILITIES = ['internal', 'client'] as const;
+const PENDING_REASONS = ['client', 'vendor', 'internal'] as const;
 
 export class CreateTicketDto {
   @IsString() tenant!: string;
@@ -45,6 +46,10 @@ export class AddReplyDto {
 export class UpdateTicketStatusDto {
   @IsIn(STATUSES as unknown as string[])
   status!: (typeof STATUSES)[number];
+
+  /** Only meaningful when `status === 'pending'`; ignored otherwise. Omitted/null means 'client'. */
+  @IsOptional() @IsIn(PENDING_REASONS as unknown as string[])
+  pendingReason?: (typeof PENDING_REASONS)[number];
 }
 
 export class AssignTicketDto {
