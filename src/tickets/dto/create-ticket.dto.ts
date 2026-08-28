@@ -7,6 +7,7 @@ const CATEGORIES = [
   'billing',
   'account',
   'feature',
+  'deployment',
   'other',
 ] as const;
 const REPLY_VISIBILITIES = ['internal', 'client'] as const;

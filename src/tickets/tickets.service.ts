@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Ticket, type TicketStatus } from './ticket.entity';
@@ -13,6 +13,10 @@ import { PushService } from '../push/push.service';
 import { TicketsNotifyService } from './tickets-notify.service';
 import { BusinessUnitResolverService, DEFAULT_BUSINESS_UNIT_CODE } from '../company/business-unit-resolver.service';
 import { TeamMember } from '../team/team-member.entity';
+
+/** Reserved sentinel for "nobody yet" — the ingest listener creates tickets
+ * this way. The only `assignee` value exempt from the team_members check. */
+const UNASSIGNED = 'unassigned';
 
 export interface TicketsListQuery extends PaginationDto {
   tenant?: string;
@@ -97,6 +101,7 @@ export class TicketsService {
   }
 
   async create(dto: CreateTicketDto, actor?: string) {
+    await this.assertValidAssignee(dto.assignee);
     const now = new Date();
     if (!dto.businessUnitCode) {
       this.logger.debug(
@@ -195,6 +200,7 @@ export class TicketsService {
 
   async assign(id: number, assignee: string, roles?: string[], actor?: string) {
     const ticket = await this.findOne(id, roles);
+    await this.assertValidAssignee(assignee);
     const previousAssignee = ticket.assignee;
     ticket.assignee = assignee;
     ticket.assigned = assignee;
@@ -272,6 +278,22 @@ export class TicketsService {
         createdAt: new Date(),
       }),
     );
+  }
+
+  /**
+   * `assignee` used to be pure free text: a typo or a stale id was accepted
+   * silently, and the only symptom was a notification that quietly never
+   * fired. That's tolerable for routine tickets but not for the deployment
+   * gate — an approval "assigned" to a ghost id defeats the whole point.
+   * `UNASSIGNED` stays exempt: the ingest listener creates tickets with no
+   * owner yet, and that's a real, valid state, not a typo.
+   */
+  private async assertValidAssignee(assignee: string): Promise<void> {
+    if (assignee === UNASSIGNED) return;
+    const member = await this.team.findOne({ where: { id: assignee } });
+    if (!member) {
+      throw new BadRequestException(`Assignee '${assignee}' n'est pas un membre de l'équipe connu.`);
+    }
   }
 
   /** Mirrors WorkItemsService.notifyAssignee: skip when self-assigning, never fail the assignment. */
