@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { FindOptionsWhere, Repository } from 'typeorm';
-import { BusinessUnit } from './business-unit.entity';
+import { BusinessUnit, type BusinessUnitThemeKey } from './business-unit.entity';
 import { LegalEntity } from './legal-entity.entity';
 import { Product } from './product.entity';
 import { PROVISIONABLE_PRODUCT_CODES } from './company.constants';
@@ -29,6 +29,10 @@ export interface BusinessUnitSummary {
   isActive: boolean;
   legalEntity: { code: string; name: string };
   productCount: number;
+  /** PDF branding overrides — exposed so an edit form can show current values, not just accept new ones. */
+  tagline: string | null;
+  footerLine: string | null;
+  theme: BusinessUnitThemeKey | null;
 }
 
 export interface BusinessUnitDetail extends BusinessUnitSummary {
@@ -226,6 +230,9 @@ export class CompanyService {
       isActive: unit.isActive,
       legalEntity: { code: unit.legalEntity!.code, name: unit.legalEntity!.name },
       productCount,
+      tagline: unit.tagline,
+      footerLine: unit.footerLine,
+      theme: unit.theme,
     };
   }
 }
