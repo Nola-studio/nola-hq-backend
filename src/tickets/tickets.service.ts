@@ -123,8 +123,6 @@ export class TicketsService {
       category: dto.category ?? null,
       source: dto.source ?? null,
       businessUnitId,
-      age: '0 min',
-      ago: '0 min',
       replies: [],
       createdAt: now,
       updatedAt: now,
