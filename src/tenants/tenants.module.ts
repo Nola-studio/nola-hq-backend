@@ -3,7 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { TenantCrm } from './tenant-crm.entity';
 import { TenantsController } from './tenants.controller';
 import { TenantsService } from './tenants.service';
-import { KelasiProvisionClient } from './kelasi-provision.client';
+import { YekoliProvisionClient } from './yekoli-provision.client';
 import { Invoice } from '../invoices/invoice.entity';
 import { MomoEntry } from '../momo/momo-entry.entity';
 import { ActivityEvent } from '../activity/activity.entity';
@@ -16,7 +16,7 @@ import { TicketsModule } from '../tickets/tickets.module';
   imports: [
     // Tenant canonical data is owned by nola-billing (read via NATS).
     // TenantCrm = local-only CRM augmentation (city/owner/nps/notes/etc.)
-    // + the HQ-driven provisioning state (kcUserId, kelasiSchoolId,
+    // + the HQ-driven provisioning state (kcUserId, yekoliSchoolId,
     //   provisionedAt, provisionError).
     TypeOrmModule.forFeature([TenantCrm, Invoice, MomoEntry, ActivityEvent]),
     // change-plan / app-activation delegate to the canonical billing flow
@@ -34,7 +34,7 @@ import { TicketsModule } from '../tickets/tickets.module';
     TicketsModule,
   ],
   controllers: [TenantsController],
-  providers: [TenantsService, KelasiProvisionClient],
+  providers: [TenantsService, YekoliProvisionClient],
   exports: [TenantsService],
 })
 export class TenantsModule {}

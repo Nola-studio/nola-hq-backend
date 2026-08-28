@@ -44,7 +44,7 @@ export class WorkItem {
   @PrimaryGeneratedColumn()
   id!: number;
 
-  /** Stable human reference, generated after the serial id (e.g. KELASI-42). */
+  /** Stable human reference, generated after the serial id (e.g. YEKOLI-42). */
   @Column({ type: 'varchar', length: 32, unique: true, nullable: true })
   reference!: string | null;
 
