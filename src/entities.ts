@@ -50,6 +50,7 @@ import { BusinessQuote, BusinessQuoteLine } from './business/business-quote.enti
 import { BusinessDocument } from './business/business-document.entity';
 import { BusinessReminder } from './business/business-reminder.entity';
 import { ProjectTimeEntry } from './business/project-time-entry.entity';
+import { SlaPolicy } from './sla/sla-policy.entity';
 
 // Le registry des apps n'a PAS de table — c'est une projection in-memory
 // reconstruite à partir du JetStream NOLA_REGISTRY (cf. AppsService).
@@ -120,4 +121,5 @@ export const entities = [
   BusinessDocument,
   BusinessReminder,
   ProjectTimeEntry,
+  SlaPolicy,
 ];
