@@ -43,6 +43,16 @@ interface SupportRequestPayload {
     personId?: string;
     /** Real email when the sender has one (web matricule users may not). */
     contactEmail?: string;
+    /**
+     * Vantelis IT's own upstream commitment (e.g. '15 min'), computed
+     * against their own business-hours config — display/context only.
+     * HQ's own `sla_policies` (business unit × priority) governs alerting;
+     * this is never parsed or compared against it. Absent from
+     * kelasi/yekoli payloads.
+     */
+    slaTarget?: string;
+    /** ISO timestamp matching `slaTarget`, same source, same caveat. */
+    dueAt?: string;
   };
 }
 
@@ -233,6 +243,7 @@ export class SupportIngestListener implements OnApplicationBootstrap {
       category,
       source: p.source ?? 'yekoli',
       businessUnitCode,
+      dueAt: p.meta?.dueAt,
     });
 
     this.logger.log(
@@ -251,6 +262,10 @@ export class SupportIngestListener implements OnApplicationBootstrap {
     if (m.appVersion) lines.push(`Version app : ${m.appVersion}`);
     if (m.platform) lines.push(`Plateforme : ${m.platform}`);
     if (m.personId) lines.push(`Person ID : ${m.personId}`);
+    // Producteur's own upstream commitment — display only, never HQ's SLA
+    // source of truth (that's sla_policies, business unit × priority).
+    if (m.slaTarget) lines.push(`Engagement fournisseur : ${m.slaTarget}`);
+    if (m.dueAt) lines.push(`Échéance fournisseur : ${m.dueAt}`);
     if (lines.length === 0) return message;
     return `${message}\n\n— Contexte —\n${lines.join('\n')}`;
   }

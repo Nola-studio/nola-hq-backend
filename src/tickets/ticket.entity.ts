@@ -96,6 +96,15 @@ export class Ticket {
   @Column({ type: 'varchar', nullable: true })
   source!: string | null;
 
+  /**
+   * The producing app's own upstream due date (e.g. Vantelis IT's
+   * `meta.dueAt`), when it sends one — display/context only, never HQ's
+   * SLA source of truth. Null for kelasi/yekoli (no upstream commitment)
+   * and any manually-created ticket.
+   */
+  @Column({ type: 'timestamp', name: 'due_at', nullable: true })
+  dueAt!: Date | null;
+
   @Column({ type: 'simple-json', default: '[]' })
   replies!: TicketReply[];
 

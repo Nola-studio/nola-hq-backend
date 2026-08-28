@@ -1,4 +1,4 @@
-import { IsIn, IsOptional, IsString } from 'class-validator';
+import { IsDateString, IsIn, IsOptional, IsString } from 'class-validator';
 
 const PRIORITIES = ['P1', 'P2', 'P3'] as const;
 const STATUSES = ['open', 'pending', 'closed', 'resolved'] as const;
@@ -31,6 +31,8 @@ export class CreateTicketDto {
   @IsOptional() @IsString() source?: string;
   /** BusinessUnit code, e.g. 'khi-lab' — not a UUID. Defaults to 'khi-lab' when omitted. */
   @IsOptional() @IsString() businessUnitCode?: string;
+  /** Producing app's own upstream due date (e.g. Vantelis IT's meta.dueAt) — display only, never HQ's SLA source of truth. */
+  @IsOptional() @IsDateString() dueAt?: string;
 }
 
 export class AddReplyDto {
