@@ -24,7 +24,6 @@ export class CreateTicketDto {
   @IsOptional() @IsIn(STATUSES as unknown as string[])
   status?: (typeof STATUSES)[number];
   @IsString() assignee!: string;
-  @IsOptional() @IsString() sla?: string;
   /** What the request is about — drives HQ triage/filtering. */
   @IsOptional() @IsIn(CATEGORIES as unknown as string[])
   category?: (typeof CATEGORIES)[number];

@@ -10,9 +10,15 @@ import { SupportIngestListener } from './support-ingest.listener';
 import { PushModule } from '../push/push.module';
 import { TeamMember } from '../team/team-member.entity';
 import { CompanyModule } from '../company/company.module';
+import { SlaPolicy } from '../sla/sla-policy.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Ticket, TicketEvent, TeamMember]), NolaSdkModule, PushModule, CompanyModule],
+  imports: [
+    TypeOrmModule.forFeature([Ticket, TicketEvent, TeamMember, SlaPolicy]),
+    NolaSdkModule,
+    PushModule,
+    CompanyModule,
+  ],
   controllers: [TicketsController],
   providers: [TicketsService, TicketsNotifyService, SupportIngestListener],
   exports: [TicketsService],
