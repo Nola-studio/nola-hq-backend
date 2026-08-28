@@ -87,24 +87,36 @@ export class SupportIngestListener implements OnApplicationBootstrap {
 
   private static readonly STREAM = 'NOLA_HQ_EVENTS';
   private static readonly STREAM_SUBJECTS = ['nola.events.>'];
-  /** Un consumer durable par variante de sujet (voir doc de classe).
-   * Le nom historique reste lié au sujet kelasi pour préserver l'état
-   * (curseur/backlog) du durable déjà déployé. */
+  /**
+   * Un consumer durable par sujet produit (voir doc de classe). Le nom
+   * historique reste lié au sujet kelasi pour préserver l'état
+   * (curseur/backlog) du durable déjà déployé.
+   *
+   * `businessUnitCode` est déclaré ici, par source — jamais dérivé du
+   * sujet, de `source`, ou d'une normalisation du nom d'app. C'est le
+   * seul endroit qui décide de la marque d'un ticket ingéré ; un sujet
+   * ajouté sans ce champ ne compile pas (le champ est requis sur le
+   * type), plutôt que de silencieusement retomber sur un défaut.
+   */
   static readonly SOURCES: ReadonlyArray<{
     consumer: string;
     filter: string;
+    businessUnitCode: string;
   }> = [
     {
       consumer: 'nola-hq-support-ingest',
       filter: 'nola.events.kelasi.support.requested',
+      businessUnitCode: 'khi-lab',
     },
     {
       consumer: 'nola-hq-support-ingest-yekoli',
       filter: 'nola.events.yekoli.support.requested',
+      businessUnitCode: 'khi-lab',
     },
     {
       consumer: 'nola-hq-support-ingest-vantelisit',
       filter: 'nola.events.vantelisit.support.requested',
+      businessUnitCode: 'vantelis-it',
     },
   ];
 
@@ -156,13 +168,13 @@ export class SupportIngestListener implements OnApplicationBootstrap {
       throw err;
     }
 
-    for (const { consumer, filter } of SupportIngestListener.SOURCES) {
+    for (const { consumer, filter, businessUnitCode } of SupportIngestListener.SOURCES) {
       try {
         await this.eventBus.consume<SupportRequestPayload>(
           SupportIngestListener.STREAM,
           consumer,
           filter,
-          (env) => this.handle(env),
+          (env) => this.handle(env, businessUnitCode),
         );
         this.logger.log(
           `Ingesting support requests from ${filter} (stream=${SupportIngestListener.STREAM}, consumer=${consumer})`,
@@ -178,6 +190,7 @@ export class SupportIngestListener implements OnApplicationBootstrap {
 
   private async handle(
     env: EventEnvelope<SupportRequestPayload>,
+    businessUnitCode: string,
   ): Promise<void> {
     const p = env.payload ?? {};
     const subject = (p.subject ?? '').trim();
@@ -219,6 +232,7 @@ export class SupportIngestListener implements OnApplicationBootstrap {
       assignee: 'unassigned',
       category,
       source: p.source ?? 'yekoli',
+      businessUnitCode,
     });
 
     this.logger.log(

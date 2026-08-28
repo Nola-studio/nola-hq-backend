@@ -34,6 +34,12 @@ export const REALMS: RealmDef[] = [
     description: 'Recruteurs et candidats (MyCVMatcher)',
   },
   {
+    id: 'vantelisit',
+    label: 'Vantelis IT',
+    apps: ['vantelisit'],
+    description: 'Services TI gérés au Québec (Vantelis IT)',
+  },
+  {
     id: 'nola-hq',
     label: 'Nola HQ',
     apps: ['nola-hq'],
