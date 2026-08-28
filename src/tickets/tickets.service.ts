@@ -13,7 +13,9 @@ import { PushService } from '../push/push.service';
 import { TicketsNotifyService } from './tickets-notify.service';
 import { BusinessUnitResolverService, DEFAULT_BUSINESS_UNIT_CODE } from '../company/business-unit-resolver.service';
 import { TeamMember } from '../team/team-member.entity';
+import { TeamService } from '../team/team.service';
 import { SlaPolicy } from '../sla/sla-policy.entity';
+import { NotificationsService } from '../notifications/notifications.service';
 
 /** Reserved sentinel for "nobody yet" — the ingest listener creates tickets
  * this way. The only `assignee` value exempt from the team_members check. */
@@ -56,6 +58,8 @@ export class TicketsService {
     private readonly push: PushService,
     private readonly notify: TicketsNotifyService,
     private readonly businessUnits: BusinessUnitResolverService,
+    private readonly teamService: TeamService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async list(query: TicketsListQuery, roles?: string[]): Promise<PaginatedResult<TicketResponse>> {
@@ -118,7 +122,8 @@ export class TicketsService {
         `create(): no businessUnitCode supplied, defaulting to '${DEFAULT_BUSINESS_UNIT_CODE}'`,
       );
     }
-    const businessUnitId = await this.businessUnits.resolve(dto.businessUnitCode ?? DEFAULT_BUSINESS_UNIT_CODE);
+    const businessUnitCode = dto.businessUnitCode ?? DEFAULT_BUSINESS_UNIT_CODE;
+    const businessUnitId = await this.businessUnits.resolve(businessUnitCode);
     const sla = await this.deriveSla(businessUnitId, dto.priority);
     const ticket = this.repo.create({
       tenant: dto.tenant,
@@ -142,12 +147,7 @@ export class TicketsService {
     const saved = await this.repo.save(ticket);
     // Fire-and-forget : une notif ratée ne doit jamais faire échouer la
     // création du ticket (broadcast()/publish() avalent et loggent leurs erreurs).
-    void this.push.broadcast({
-      title: `Nouveau ticket ${saved.priority} · ${saved.tenant}`,
-      body: saved.subject,
-      url: '/tickets',
-      tag: `ticket-${saved.id}`,
-    });
+    void this.notifyTicketCreated(saved, businessUnitCode);
     void this.notify.ticketCreated({
       id: saved.id,
       subject: saved.subject,
@@ -201,7 +201,7 @@ export class TicketsService {
     ticket.pendingReason = status === 'pending' ? pendingReason ?? null : null;
     ticket.updatedAt = new Date();
     const saved = await this.repo.save(ticket);
-    void this.notifyStatusPush(saved, actor);
+    void this.notifyStatusChange(saved, actor);
     // `pendingReason` is recorded in `meta` (not a first-class column on
     // TicketEvent) because it's only ever relevant when `toStatus ===
     // 'pending'` — without it here, the SLA elapsed-time walk could only
@@ -216,16 +216,25 @@ export class TicketsService {
     return saved;
   }
 
-  /** Mirrors notifyAssigneePush: same recipient (assignee), same self-actor guard, push only. */
-  private async notifyStatusPush(ticket: Ticket, actor?: string) {
+  /**
+   * Mirrors notifyAssignee: same recipient (assignee), same self-actor
+   * guard, same one-resolution-drives-both-the-row-and-the-push shape.
+   */
+  private async notifyStatusChange(ticket: Ticket, actor?: string) {
+    if (ticket.assignee === UNASSIGNED) return;
     const member = await this.team.findOne({ where: { id: ticket.assignee } });
     if (!member || (actor && member.email.toLowerCase() === actor.toLowerCase())) return;
-    await this.push.sendTo(member.notifyEmail ?? member.email, {
-      title: 'Statut du ticket modifié',
-      body: ticket.subject.slice(0, 180),
-      url: '/tickets',
-      tag: `ticket-${ticket.id}`,
+    const title = 'Statut du ticket modifié';
+    const body = ticket.subject.slice(0, 180);
+    const url = '/tickets';
+    void this.notifications.createForRecipients([member.id], {
+      kind: 'ticket_status_changed',
+      ticketId: ticket.id,
+      title,
+      body,
+      url,
     });
+    await this.push.sendTo(member.notifyEmail ?? member.email, { title, body, url, tag: `ticket-${ticket.id}` });
   }
 
   async assign(id: number, assignee: string, roles?: string[], actor?: string) {
@@ -243,7 +252,7 @@ export class TicketsService {
       tenant: saved.tenant,
       assigneeId: assignee,
     });
-    void this.notifyAssigneePush(saved, assignee, actor);
+    void this.notifyAssignee(saved, assignee, actor);
     void this.record(saved.id, actor ?? 'unknown', 'assigned', {
       meta: { fromAssignee: previousAssignee, toAssignee: assignee },
     });
@@ -344,16 +353,51 @@ export class TicketsService {
     return minutes ? formatSlaMinutes(minutes) : '';
   }
 
-  /** Mirrors WorkItemsService.notifyAssignee: skip when self-assigning, never fail the assignment. */
-  private async notifyAssigneePush(ticket: Ticket, assignee: string, actor?: string) {
+  /**
+   * Mirrors WorkItemsService.notifyAssignee: skip when self-assigning,
+   * never fail the assignment. The Notification row and the push share
+   * this one resolved recipient — never computed twice, never able to
+   * silently diverge on who gets told.
+   */
+  private async notifyAssignee(ticket: Ticket, assignee: string, actor?: string) {
+    if (assignee === UNASSIGNED) return;
     const member = await this.team.findOne({ where: { id: assignee } });
     if (!member || (actor && member.email.toLowerCase() === actor.toLowerCase())) return;
-    await this.push.sendTo(member.notifyEmail ?? member.email, {
-      title: 'Ticket assigné',
-      body: ticket.subject.slice(0, 180),
-      url: '/tickets',
-      tag: `ticket-${ticket.id}`,
+    const title = 'Ticket assigné';
+    const body = ticket.subject.slice(0, 180);
+    const url = '/tickets';
+    void this.notifications.createForRecipients([member.id], {
+      kind: 'ticket_assigned',
+      ticketId: ticket.id,
+      title,
+      body,
+      url,
     });
+    await this.push.sendTo(member.notifyEmail ?? member.email, { title, body, url, tag: `ticket-${ticket.id}` });
+  }
+
+  /**
+   * Recipients = the brand's team (`hq:owner` ∪ `hq:bu:<code>` holders
+   * with a local `team_members` row) — resolved once, shared by the
+   * Notification rows and the push, so the two can't silently diverge.
+   * Previously this pushed to literally every subscription regardless
+   * of brand (`push.broadcast()`) — a real scoping leak (a viewer with
+   * no access to this brand still got told about it), fixed here rather
+   * than carried into the new model.
+   */
+  private async notifyTicketCreated(ticket: Ticket, businessUnitCode: string): Promise<void> {
+    const recipients = await this.teamService.membersForBusinessUnit(businessUnitCode);
+    if (recipients.length === 0) return;
+    const title = `Nouveau ticket ${ticket.priority} · ${ticket.tenant}`;
+    const body = ticket.subject;
+    const url = '/tickets';
+    void this.notifications.createForRecipients(
+      recipients.map((m) => m.id),
+      { kind: 'ticket_created', ticketId: ticket.id, title, body, url },
+    );
+    for (const member of recipients) {
+      void this.push.sendTo(member.notifyEmail ?? member.email, { title, body, url, tag: `ticket-${ticket.id}` });
+    }
   }
 
   async summary(roles?: string[]) {

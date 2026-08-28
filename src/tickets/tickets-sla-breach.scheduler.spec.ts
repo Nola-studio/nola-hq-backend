@@ -19,6 +19,7 @@ function makeTicket(overrides: Partial<any> = {}) {
     tenant: 'tenant-1',
     subject: 'Serveur down',
     businessUnitId: VANTELIS_ID,
+    businessUnit: { code: 'vantelis-it', name: 'Vantelis IT' },
     priority: 'P1',
     status: 'open',
     assignee: 'unassigned',
@@ -31,6 +32,7 @@ function makeScheduler(opts: {
   policies?: any[];
   events?: any[];
   teamMembers?: any[];
+  brandTeam?: any[];
   failCreateActions?: string[];
 } = {}) {
   const tickets = opts.tickets ?? [makeTicket()];
@@ -39,8 +41,10 @@ function makeScheduler(opts: {
   ];
   const events = opts.events ?? [];
   const teamMembers = opts.teamMembers ?? [];
+  const brandTeam = opts.brandTeam ?? [];
   const failCreateActions = new Set(opts.failCreateActions ?? []);
   const savedEvents: any[] = [];
+  const createdNotifications: any[] = [];
 
   const ticketsRepo = { find: mock(async () => tickets) } as any;
   const policiesRepo = { find: mock(async () => policies) } as any;
@@ -60,9 +64,26 @@ function makeScheduler(opts: {
     sendTo: mock(async () => ({ sent: 1 })),
     broadcast: mock(async () => ({ sent: 1 })),
   } as any;
+  const teamServiceMock = {
+    membersForBusinessUnit: mock(async () => brandTeam),
+  } as any;
+  const notificationsMock = {
+    createForRecipients: mock(async (recipientIds: string[], input: any) => {
+      createdNotifications.push({ recipientIds, ...input });
+      return [];
+    }),
+  } as any;
 
-  const scheduler = new TicketsSlaBreachScheduler(ticketsRepo, eventsRepo, policiesRepo, teamRepo, pushMock);
-  return { scheduler, pushMock, eventsRepo, savedEvents };
+  const scheduler = new TicketsSlaBreachScheduler(
+    ticketsRepo,
+    eventsRepo,
+    policiesRepo,
+    teamRepo,
+    pushMock,
+    teamServiceMock,
+    notificationsMock,
+  );
+  return { scheduler, pushMock, eventsRepo, savedEvents, teamServiceMock, notificationsMock, createdNotifications };
 }
 
 describe('TicketsSlaBreachScheduler', () => {
@@ -93,21 +114,38 @@ describe('TicketsSlaBreachScheduler', () => {
     });
     await scheduler.run();
     expect(savedEvents).toEqual([]);
-    expect(pushMock.broadcast).not.toHaveBeenCalled();
+    expect(pushMock.sendTo).not.toHaveBeenCalled();
   });
 
-  test('at/above 80% of target, unassigned — records approaching and broadcasts', async () => {
-    const { scheduler, pushMock, savedEvents } = makeScheduler({
+  test('at/above 80% of target, unassigned — resolves the brand team and notifies each, no unscoped broadcast', async () => {
+    const { scheduler, pushMock, savedEvents, teamServiceMock, createdNotifications } = makeScheduler({
+      brandTeam: [
+        { id: 'aurel', email: 'aurel@nola.dev', notifyEmail: null },
+        { id: 'greg', email: 'greg@nola.dev', notifyEmail: null },
+      ],
       events: [{ ticketId: 1, action: 'created', toStatus: 'open', meta: {}, createdAt: min(13) }], // 13 of 15 min = ~87%
     });
     await scheduler.run();
     expect(savedEvents.map((e) => e.action)).toEqual(['sla_response_approaching']);
-    expect(pushMock.broadcast).toHaveBeenCalledTimes(1);
-    expect(pushMock.sendTo).not.toHaveBeenCalled();
+    expect(teamServiceMock.membersForBusinessUnit).toHaveBeenCalledWith('vantelis-it');
+    expect(pushMock.sendTo).toHaveBeenCalledTimes(2);
+    expect(pushMock.broadcast).not.toHaveBeenCalled();
+    expect(createdNotifications[0].recipientIds.sort()).toEqual(['aurel', 'greg']);
+    expect(createdNotifications[0].kind).toBe('sla_response_approaching');
   });
 
-  test('approaching, assigned to a real team member — sendTo them, not broadcast', async () => {
-    const { scheduler, pushMock } = makeScheduler({
+  test('unassigned with no resolvable brand team — no alert, no notification, no error', async () => {
+    const { scheduler, pushMock, createdNotifications } = makeScheduler({
+      brandTeam: [],
+      events: [{ ticketId: 1, action: 'created', toStatus: 'open', meta: {}, createdAt: min(13) }],
+    });
+    await scheduler.run();
+    expect(pushMock.sendTo).not.toHaveBeenCalled();
+    expect(createdNotifications).toEqual([]);
+  });
+
+  test('approaching, assigned to a real team member — sendTo them only, notification recipient matches', async () => {
+    const { scheduler, pushMock, teamServiceMock, createdNotifications } = makeScheduler({
       tickets: [makeTicket({ assignee: 'ikamaaurel' })],
       teamMembers: [{ id: 'ikamaaurel', email: 'ikamaaurel@gmail.com', notifyEmail: null }],
       events: [{ ticketId: 1, action: 'created', toStatus: 'open', meta: {}, createdAt: min(13) }],
@@ -116,26 +154,33 @@ describe('TicketsSlaBreachScheduler', () => {
     expect(pushMock.sendTo).toHaveBeenCalledTimes(1);
     expect(pushMock.sendTo.mock.calls[0][0]).toBe('ikamaaurel@gmail.com');
     expect(pushMock.broadcast).not.toHaveBeenCalled();
+    // Assigned case never needs the brand-team (Keycloak) lookup at all.
+    expect(teamServiceMock.membersForBusinessUnit).not.toHaveBeenCalled();
+    expect(createdNotifications[0].recipientIds).toEqual(['ikamaaurel']);
   });
 
   test('already recorded (unique violation) — does not re-alert', async () => {
-    const { scheduler, pushMock } = makeScheduler({
+    const { scheduler, pushMock, createdNotifications } = makeScheduler({
       failCreateActions: ['sla_response_approaching'],
+      brandTeam: [{ id: 'aurel', email: 'aurel@nola.dev', notifyEmail: null }],
       events: [{ ticketId: 1, action: 'created', toStatus: 'open', meta: {}, createdAt: min(13) }],
     });
     await scheduler.run();
     expect(pushMock.broadcast).not.toHaveBeenCalled();
     expect(pushMock.sendTo).not.toHaveBeenCalled();
+    expect(createdNotifications).toEqual([]);
   });
 
   test('at/above 100% of target — records breached, does NOT alert (approaching is the alert, breached is data-only)', async () => {
-    const { scheduler, pushMock, savedEvents } = makeScheduler({
+    const { scheduler, pushMock, savedEvents, createdNotifications } = makeScheduler({
+      brandTeam: [{ id: 'aurel', email: 'aurel@nola.dev', notifyEmail: null }],
       events: [{ ticketId: 1, action: 'created', toStatus: 'open', meta: {}, createdAt: min(20) }], // 20 of 15 min
     });
     await scheduler.run();
     expect(savedEvents.map((e) => e.action)).toEqual(['sla_response_breached']);
     expect(pushMock.broadcast).not.toHaveBeenCalled();
     expect(pushMock.sendTo).not.toHaveBeenCalled();
+    expect(createdNotifications).toEqual([]);
   });
 
   test('already responded (client-visible reply exists) — response clock skipped entirely', async () => {
@@ -210,5 +255,20 @@ describe('TicketsSlaBreachScheduler', () => {
     // recorded once) — resolution clock is independent and still running to now
     // (20 min elapsed, unstopped) -> also breached.
     expect(savedEvents.map((e) => e.action).sort()).toEqual(['sla_resolution_breached', 'sla_response_breached']);
+  });
+
+  test('brand team is resolved once per sweep, not once per ticket', async () => {
+    const ticketA = makeTicket({ id: 1 });
+    const ticketB = makeTicket({ id: 2 });
+    const { scheduler, teamServiceMock } = makeScheduler({
+      tickets: [ticketA, ticketB],
+      brandTeam: [{ id: 'aurel', email: 'aurel@nola.dev', notifyEmail: null }],
+      events: [
+        { ticketId: 1, action: 'created', toStatus: 'open', meta: {}, createdAt: min(13) },
+        { ticketId: 2, action: 'created', toStatus: 'open', meta: {}, createdAt: min(13) },
+      ],
+    });
+    await scheduler.run();
+    expect(teamServiceMock.membersForBusinessUnit).toHaveBeenCalledTimes(1);
   });
 });
