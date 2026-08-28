@@ -1,8 +1,10 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CompanyService } from './company.service';
 import { CreateBusinessUnitDto } from './dto/create-business-unit.dto';
 import { UpdateBusinessUnitDto } from './dto/update-business-unit.dto';
+import { CreateProductDto } from './dto/create-product.dto';
+import { UpdateProductDto } from './dto/update-product.dto';
 import { HqRoles } from '../common/auth/hq-roles.decorator';
 import { HqRole } from '../common/auth/hq-role.enum';
 
@@ -47,9 +49,33 @@ export class CompanyController {
 
   @Get('products')
   @HqRoles(HqRole.Viewer)
-  listProducts(@Query('isInternal') isInternal?: string) {
-    const filter = isInternal !== undefined ? { isInternal: isInternal === 'true' } : undefined;
-    return this.svc.listProducts(filter);
+  listProducts(@Query('isInternal') isInternal?: string, @Query('archived') archived?: string) {
+    return this.svc.listProducts({
+      isInternal: isInternal !== undefined ? isInternal === 'true' : undefined,
+      archived: archived !== undefined ? archived === 'true' : undefined,
+    });
+  }
+
+  /** Product CRUD is `hq:operator` — a catalog entry under an existing brand, not a legal identity like `BusinessUnit`. */
+  @Post('products')
+  @HqRoles(HqRole.Operator)
+  createProduct(@Body() dto: CreateProductDto) {
+    return this.svc.createProduct(dto);
+  }
+
+  /** Everything but `code`/`businessUnitCode` — immutable once created, see `UpdateProductDto`. */
+  @Patch('products/:code')
+  @HqRoles(HqRole.Operator)
+  updateProduct(@Param('code') code: string, @Body() dto: UpdateProductDto) {
+    return this.svc.updateProduct(code, dto);
+  }
+
+  /** Unconditional: nothing in the schema FKs onto `products`, so there's nothing to check before deleting. */
+  @Delete('products/:code')
+  @HttpCode(204)
+  @HqRoles(HqRole.Operator)
+  async removeProduct(@Param('code') code: string) {
+    await this.svc.removeProduct(code);
   }
 
   @Get('legal-entities')
