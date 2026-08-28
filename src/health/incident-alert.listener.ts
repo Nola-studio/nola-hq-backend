@@ -34,7 +34,7 @@ import type { HealthIncident } from './health.service';
  * destination with NOLA_HQ_INCIDENT_EMAIL.
  */
 const ALERT_CONSUMER = 'nola-hq-health-alert-bridge';
-const HEALTH_STREAM = 'NOLA_EVENTS';
+const HEALTH_STREAM = 'NOLA_HQ_EVENTS';
 const DEFAULT_RECIPIENT = 'admin@nolaastudio.com';
 
 @Injectable()
@@ -86,6 +86,12 @@ export class IncidentAlertListener
     try {
       this.eventBus = new EventBus(this.nolaClient.getClient());
       await this.eventBus.init();
+
+      await this.eventBus.ensureStream({
+        name: HEALTH_STREAM,
+        subjects: ['nola.events.nola.health.incident.>'],
+        max_age: 30 * 24 * 60 * 60 * 1_000_000_000,
+      });
 
       // Delete the consumer at boot so we don't replay the entire
       // history of incidents (which would re-send the email to every

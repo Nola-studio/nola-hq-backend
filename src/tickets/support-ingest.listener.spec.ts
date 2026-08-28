@@ -21,11 +21,12 @@ mock.module('jose', () => ({
 }));
 const { SupportIngestListener } = await import('./support-ingest.listener');
 
-describe('SupportIngestListener.SOURCES (double-écoute kelasi/yekoli)', () => {
-  test('écoute les deux variantes de sujet', () => {
+describe('SupportIngestListener.SOURCES (écoute kelasi/yekoli/vantelisit)', () => {
+  test('écoute les variantes de sujet kelasi, yekoli et vantelisit', () => {
     const filters = SupportIngestListener.SOURCES.map((s) => s.filter);
     expect(filters).toContain('nola.events.kelasi.support.requested');
     expect(filters).toContain('nola.events.yekoli.support.requested');
+    expect(filters).toContain('nola.events.vantelisit.support.requested');
   });
 
   test('le durable historique reste lié au sujet kelasi (état préservé)', () => {

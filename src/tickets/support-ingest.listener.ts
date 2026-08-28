@@ -85,7 +85,7 @@ export class SupportIngestListener implements OnApplicationBootstrap {
   private eventBus: EventBus | null = null;
   private readonly enabled: boolean;
 
-  private static readonly STREAM = 'NOLA_EVENTS';
+  private static readonly STREAM = 'NOLA_HQ_EVENTS';
   /** Un consumer durable par variante de sujet (voir doc de classe).
    * Le nom historique reste lié au sujet kelasi pour préserver l'état
    * (curseur/backlog) du durable déjà déployé. */
@@ -100,6 +100,10 @@ export class SupportIngestListener implements OnApplicationBootstrap {
     {
       consumer: 'nola-hq-support-ingest-yekoli',
       filter: 'nola.events.yekoli.support.requested',
+    },
+    {
+      consumer: 'nola-hq-support-ingest-vantelisit',
+      filter: 'nola.events.vantelisit.support.requested',
     },
   ];
 
@@ -138,16 +142,19 @@ export class SupportIngestListener implements OnApplicationBootstrap {
     try {
       this.eventBus = new EventBus(this.nolaClient.getClient());
       await this.eventBus.init();
+
+      await this.eventBus.ensureStream({
+        name: SupportIngestListener.STREAM,
+        subjects: SupportIngestListener.SOURCES.map((s) => s.filter),
+        max_age: 30 * 24 * 60 * 60 * 1_000_000_000,
+      });
     } catch (err: unknown) {
       this.logger.error(
-        `Support ingestion init failed: ${err instanceof Error ? err.message : String(err)}`,
+        `CRITICAL: Support ingestion stream init failed for ${SupportIngestListener.STREAM}: ${err instanceof Error ? err.message : String(err)}`,
       );
-      return;
+      throw err;
     }
 
-    // Chaque variante est branchée indépendamment : l'échec d'un consumer
-    // (ex. création du nouveau durable yekoli refusée) ne doit pas priver
-    // HQ des tickets arrivant encore sur l'autre sujet.
     for (const { consumer, filter } of SupportIngestListener.SOURCES) {
       try {
         await this.eventBus.consume<SupportRequestPayload>(
@@ -156,11 +163,14 @@ export class SupportIngestListener implements OnApplicationBootstrap {
           filter,
           (env) => this.handle(env),
         );
-        this.logger.log(`Ingesting support requests from ${filter}`);
+        this.logger.log(
+          `Ingesting support requests from ${filter} (stream=${SupportIngestListener.STREAM}, consumer=${consumer})`,
+        );
       } catch (err: unknown) {
         this.logger.error(
-          `Support ingestion init failed for ${filter}: ${err instanceof Error ? err.message : String(err)}`,
+          `CRITICAL: Support ingestion consumer bind failed for ${filter} (consumer=${consumer}, stream=${SupportIngestListener.STREAM}): ${err instanceof Error ? err.message : String(err)}`,
         );
+        throw err;
       }
     }
   }
