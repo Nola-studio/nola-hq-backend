@@ -10,8 +10,10 @@ import { SupportIngestListener } from './support-ingest.listener';
 import { TicketsSlaBreachScheduler } from './tickets-sla-breach.scheduler';
 import { PushModule } from '../push/push.module';
 import { TeamMember } from '../team/team-member.entity';
+import { TeamModule } from '../team/team.module';
 import { CompanyModule } from '../company/company.module';
 import { SlaPolicy } from '../sla/sla-policy.entity';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -19,6 +21,8 @@ import { SlaPolicy } from '../sla/sla-policy.entity';
     NolaSdkModule,
     PushModule,
     CompanyModule,
+    TeamModule,
+    NotificationsModule,
   ],
   controllers: [TicketsController],
   providers: [TicketsService, TicketsNotifyService, SupportIngestListener, TicketsSlaBreachScheduler],

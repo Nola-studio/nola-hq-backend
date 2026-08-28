@@ -105,8 +105,21 @@ describe('TicketsService (Brand Scope Filtering)', () => {
     } as any;
     const pushMock = { broadcast: mock(async () => {}), sendTo: mock(async () => {}) } as any;
     const notifyMock = { ticketCreated: mock(() => {}), ticketAssigned: mock(() => {}) } as any;
+    const brandTeams: Record<string, typeof teamMembers> = {
+      'khi-lab': [teamMembers[0]],
+      'vantelis-it': [teamMembers[1]],
+    };
+    const teamServiceMock = {
+      membersForBusinessUnit: mock(async (code: string) => brandTeams[code] ?? []),
+      findByEmail: mock(async (email: string) => teamMembers.find((m) => m.email === email) ?? null),
+    } as any;
+    const notificationsMock = {
+      createForRecipients: mock(async () => []),
+    } as any;
 
     lastEventsMock = eventsMock;
+    lastNotificationsMock = notificationsMock;
+    lastTeamServiceMock = teamServiceMock;
     return new TicketsService(
       repoMock,
       eventsMock,
@@ -115,16 +128,25 @@ describe('TicketsService (Brand Scope Filtering)', () => {
       pushMock,
       notifyMock,
       businessUnitsMock,
+      teamServiceMock,
+      notificationsMock,
     );
   }
 
   /** Set by `makeService()` on each call — lets a test inspect what got
    * written to `ticket_events` without changing `makeService`'s return shape. */
   let lastEventsMock: any;
+  let lastNotificationsMock: any;
+  let lastTeamServiceMock: any;
 
   function makeServiceWithEventsRepo(rows: Ticket[], slaPolicyRows: any[] = []) {
     const svc = makeService(rows, slaPolicyRows);
     return { svc, eventsRepo: lastEventsMock };
+  }
+
+  function makeServiceWithMocks(rows: Ticket[], slaPolicyRows: any[] = []) {
+    const svc = makeService(rows, slaPolicyRows);
+    return { svc, notifications: lastNotificationsMock, teamService: lastTeamServiceMock };
   }
 
   describe('list', () => {
@@ -385,6 +407,73 @@ describe('TicketsService (Brand Scope Filtering)', () => {
       ]);
       const t = await svc.create({ ...baseDto, priority: 'P3' });
       expect(t.sla).toBe('24h');
+    });
+  });
+
+  describe('notification wiring (recipient resolution shared with push)', () => {
+    const baseDto = {
+      tenant: 'tenant-1',
+      subject: 'Aide',
+      body: 'Bonjour',
+      contact: 'owner@example.com',
+      priority: 'P1' as const,
+      assignee: 'unassigned',
+      businessUnitCode: 'vantelis-it',
+    };
+
+    test('create() resolves the brand team, not everyone — no more unscoped broadcast', async () => {
+      const { svc, notifications, teamService } = makeServiceWithMocks([]);
+      await svc.create(baseDto);
+      expect(teamService.membersForBusinessUnit).toHaveBeenCalledWith('vantelis-it');
+      const call = notifications.createForRecipients.mock.calls[0];
+      expect(call[0]).toEqual(['ikamaaurel']);
+      expect(call[1].kind).toBe('ticket_created');
+    });
+
+    test('create() for a brand with no resolvable team writes no notifications (null-tolerant, not an error)', async () => {
+      const { svc, notifications } = makeServiceWithMocks([]);
+      // businessUnitsMock.resolve only knows khi-lab/vantelis-it, so route
+      // through one of those but with a brand-team fixture that resolves
+      // to nobody — the fixture's `brandTeams` map has no entry beyond
+      // khi-lab/vantelis-it, so exercise that directly by clearing it.
+      lastTeamServiceMock.membersForBusinessUnit = mock(async () => []);
+      await svc.create(baseDto);
+      expect(notifications.createForRecipients).not.toHaveBeenCalled();
+    });
+
+    test('assign() notifies only the new assignee, sharing the same resolved member with push', async () => {
+      const { svc, notifications } = makeServiceWithMocks(sampleTickets);
+      sampleTickets[0].status = 'open';
+      await svc.assign(1, 'ikamaaurel', ['hq:operator', 'hq:bu:khi-lab']);
+      const call = notifications.createForRecipients.mock.calls.at(-1);
+      expect(call?.[0]).toEqual(['ikamaaurel']);
+      expect(call?.[1].kind).toBe('ticket_assigned');
+    });
+
+    test('assign() to the unassigned sentinel writes no notification', async () => {
+      const { svc, notifications } = makeServiceWithMocks(sampleTickets);
+      sampleTickets[0].status = 'open';
+      sampleTickets[0].assignee = 'ikamaaurel';
+      await svc.assign(1, 'unassigned', ['hq:operator', 'hq:bu:khi-lab']);
+      expect(notifications.createForRecipients).not.toHaveBeenCalled();
+    });
+
+    test('setStatus() notifies the assignee, not the brand team', async () => {
+      const { svc, notifications } = makeServiceWithMocks(sampleTickets);
+      sampleTickets[0].status = 'open';
+      sampleTickets[0].assignee = 'ikamaaurel';
+      await svc.setStatus(1, 'pending', ['hq:operator', 'hq:bu:khi-lab']);
+      const call = notifications.createForRecipients.mock.calls.at(-1);
+      expect(call?.[0]).toEqual(['ikamaaurel']);
+      expect(call?.[1].kind).toBe('ticket_status_changed');
+    });
+
+    test('setStatus() on an unassigned ticket writes no notification', async () => {
+      const { svc, notifications } = makeServiceWithMocks(sampleTickets);
+      sampleTickets[0].status = 'open';
+      sampleTickets[0].assignee = 'unassigned';
+      await svc.setStatus(1, 'pending', ['hq:operator', 'hq:bu:khi-lab']);
+      expect(notifications.createForRecipients).not.toHaveBeenCalled();
     });
   });
 });

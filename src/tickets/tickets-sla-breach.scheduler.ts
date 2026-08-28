@@ -7,7 +7,10 @@ import { TicketEvent, type TicketEventAction } from './ticket-event.entity';
 import { computeActiveMs, type TicketStatusPoint } from './sla-elapsed';
 import { SlaPolicy } from '../sla/sla-policy.entity';
 import { TeamMember } from '../team/team-member.entity';
+import { TeamService } from '../team/team.service';
 import { PushService } from '../push/push.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import type { NotificationKind } from '../notifications/notification.entity';
 
 /** Alert at 80% of target elapsed — a percentage, not a fixed lead time,
  * because targets in this system range from 15 minutes (Vantelis P1) to
@@ -38,7 +41,8 @@ interface Clock {
  * null-tolerant shape as any other feature that skips rows with nothing
  * configured rather than guessing a default.
  *
- * Only 'approaching' pushes a notification. 'breached' is recorded
+ * Only 'approaching' pushes a notification (and now a `Notification` row —
+ * same recipient resolution feeds both). 'breached' is recorded
  * unconditionally (per-clock, once) so the data exists for future SLA
  * reporting, but does not alert here — Roy's ask was alerts *before*
  * breach; alerting on breach itself is a separate decision this phase
@@ -54,6 +58,8 @@ export class TicketsSlaBreachScheduler {
     @InjectRepository(SlaPolicy) private readonly policies: Repository<SlaPolicy>,
     @InjectRepository(TeamMember) private readonly team: Repository<TeamMember>,
     private readonly push: PushService,
+    private readonly teamService: TeamService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   @Cron('*/2 * * * *')
@@ -64,6 +70,7 @@ export class TicketsSlaBreachScheduler {
   async run() {
     const openTickets = await this.tickets.find({
       where: { status: Not(In(['resolved', 'closed'])) },
+      relations: ['businessUnit'],
     });
     if (openTickets.length === 0) return;
 
@@ -82,15 +89,27 @@ export class TicketsSlaBreachScheduler {
       eventsByTicket.set(event.ticketId, list);
     }
 
+    // Scoped to this one sweep — several tickets can share a brand, and
+    // resolving `hq:bu:<code>` team membership is a Keycloak admin API
+    // round trip, not a local query. Reused across tickets in the same
+    // run(), discarded afterward so a later sweep sees fresh membership.
+    const brandTeamCache = new Map<string, Promise<TeamMember[]>>();
+
     const now = new Date();
     for (const ticket of openTickets) {
       const policy = policyByKey.get(`${ticket.businessUnitId}:${ticket.priority}`);
       if (!policy) continue; // brand/priority not tracked at all — no alert, no error
-      await this.checkTicket(ticket, policy, eventsByTicket.get(ticket.id) ?? [], now);
+      await this.checkTicket(ticket, policy, eventsByTicket.get(ticket.id) ?? [], now, brandTeamCache);
     }
   }
 
-  private async checkTicket(ticket: Ticket, policy: SlaPolicy, events: TicketEvent[], now: Date): Promise<void> {
+  private async checkTicket(
+    ticket: Ticket,
+    policy: SlaPolicy,
+    events: TicketEvent[],
+    now: Date,
+    brandTeamCache: Map<string, Promise<TeamMember[]>>,
+  ): Promise<void> {
     const points: TicketStatusPoint[] = events
       .filter((e) => e.toStatus != null)
       .map((e) => ({
@@ -140,7 +159,7 @@ export class TicketsSlaBreachScheduler {
         // Only meaningful for a clock still running — "approaching" a
         // target that's already been met is nothing to warn about.
         const firstTime = await this.recordOnce(ticket, clock.approachingAction);
-        if (firstTime) await this.alert(ticket, clock);
+        if (firstTime) await this.alert(ticket, clock, brandTeamCache);
       }
     }
   }
@@ -164,24 +183,45 @@ export class TicketsSlaBreachScheduler {
     }
   }
 
-  private async alert(ticket: Ticket, clock: Clock): Promise<void> {
+  /**
+   * Recipients: the assignee if there is one, otherwise the brand's team —
+   * resolved once, shared by the Notification row(s) and the push, same
+   * shape as `TicketsService`'s trigger points. Previously the unassigned
+   * case fell back to `push.broadcast()` (everyone, any brand) — the same
+   * scoping leak fixed on ticket-created, fixed here too.
+   */
+  private async alert(ticket: Ticket, clock: Clock, brandTeamCache: Map<string, Promise<TeamMember[]>>): Promise<void> {
+    const recipients = await this.resolveRecipients(ticket, brandTeamCache);
+    if (recipients.length === 0) return;
+
     const title = `SLA ${clock.label} bientôt dépassé · Ticket #${ticket.id}`;
     const body = ticket.subject.slice(0, 180);
     const url = '/tickets';
     const tag = `ticket-${ticket.id}-${clock.approachingAction}`;
 
-    const member =
-      ticket.assignee && ticket.assignee !== 'unassigned'
-        ? await this.team.findOne({ where: { id: ticket.assignee } })
-        : null;
-
-    if (member) {
+    void this.notifications.createForRecipients(
+      recipients.map((m) => m.id),
+      { kind: clock.approachingAction as NotificationKind, ticketId: ticket.id, title, body, url },
+    );
+    for (const member of recipients) {
       await this.push.sendTo(member.notifyEmail ?? member.email, { title, body, url, tag });
-    } else {
-      // Unassigned P1 approaching breach is the case that most needs
-      // someone — anyone — to see it, so broadcast rather than drop it.
-      await this.push.broadcast({ title, body, url, tag });
     }
     this.logger.log(`${clock.approachingAction} alerted for ticket #${ticket.id}`);
+  }
+
+  private async resolveRecipients(
+    ticket: Ticket,
+    brandTeamCache: Map<string, Promise<TeamMember[]>>,
+  ): Promise<TeamMember[]> {
+    if (ticket.assignee && ticket.assignee !== 'unassigned') {
+      const member = await this.team.findOne({ where: { id: ticket.assignee } });
+      return member ? [member] : [];
+    }
+    const code = ticket.businessUnit?.code;
+    if (!code) return [];
+    if (!brandTeamCache.has(code)) {
+      brandTeamCache.set(code, this.teamService.membersForBusinessUnit(code));
+    }
+    return brandTeamCache.get(code)!;
   }
 }
