@@ -59,14 +59,33 @@ describe('CompanyService', () => {
     },
   ];
 
-  function makeService(products = sampleProducts) {
+  function makeService(initialProducts = sampleProducts, initialBusinessUnits: any[] = [KHI_LAB_BU]) {
+    const businessUnits = [...initialBusinessUnits];
+    const products = [...initialProducts];
+    const legalEntityById = new Map([[KHI_LAB_BU.legalEntity.id, KHI_LAB_BU.legalEntity]]);
+    const withLegalEntity = (u: any) => (u ? { ...u, legalEntity: u.legalEntity ?? legalEntityById.get(u.legalEntityId) } : u);
+
     const businessUnitsRepo = {
-      find: mock(async () => [KHI_LAB_BU]),
-      findOne: mock(async () => KHI_LAB_BU),
+      find: mock(async () => businessUnits.map(withLegalEntity)),
+      findOne: mock(async ({ where }: any = {}) => {
+        if (where?.code) return withLegalEntity(businessUnits.find((u) => u.code === where.code) ?? null);
+        if (where?.id) return withLegalEntity(businessUnits.find((u) => u.id === where.id) ?? null);
+        return withLegalEntity(businessUnits[0] ?? null);
+      }),
+      create: mock((data: any) => ({ ...data })),
+      save: mock(async (u: any) => {
+        const idx = businessUnits.findIndex((b) => b.code === u.code);
+        if (idx >= 0) businessUnits[idx] = u;
+        else businessUnits.push(u);
+        return u;
+      }),
     } as any;
 
     const legalEntitiesRepo = {
       find: mock(async () => [KHI_LAB_BU.legalEntity]),
+      findOne: mock(async ({ where }: any = {}) =>
+        where?.code === KHI_LAB_BU.legalEntity.code ? KHI_LAB_BU.legalEntity : null,
+      ),
     } as any;
 
     const productsRepo = {
@@ -75,7 +94,23 @@ describe('CompanyService', () => {
         if (where?.isInternal !== undefined) {
           res = res.filter((p) => p.isInternal === where.isInternal);
         }
+        if (where?.archived !== undefined) {
+          res = res.filter((p) => p.archived === where.archived);
+        }
         return res;
+      }),
+      findOne: mock(async ({ where }: any = {}) => products.find((p) => p.code === where?.code) ?? null),
+      create: mock((data: any) => ({ ...data })),
+      save: mock(async (p: any) => {
+        const idx = products.findIndex((x) => x.code === p.code);
+        if (idx >= 0) products[idx] = p;
+        else products.push(p);
+        return p;
+      }),
+      remove: mock(async (p: any) => {
+        const idx = products.findIndex((x) => x.code === p.code);
+        if (idx >= 0) products.splice(idx, 1);
+        return p;
       }),
       createQueryBuilder: mock(() => ({
         select: mock().mockReturnThis(),
@@ -85,7 +120,16 @@ describe('CompanyService', () => {
       })),
     } as any;
 
-    return new CompanyService(businessUnitsRepo, legalEntitiesRepo, productsRepo);
+    const businessUnitResolver = {
+      resolve: mock(async (code: string) => {
+        const unit = businessUnits.find((u) => u.code === code);
+        if (!unit) throw new Error(`Unknown business unit code '${code}'`);
+        return unit.id;
+      }),
+      invalidateCache: mock(() => undefined),
+    } as any;
+
+    return new CompanyService(businessUnitsRepo, legalEntitiesRepo, productsRepo, businessUnitResolver);
   }
 
   describe('listProducts', () => {
@@ -133,6 +177,84 @@ describe('CompanyService', () => {
       expect(PROVISIONABLE_PRODUCT_CODES.has('yekoli')).toBe(true);
       expect(PROVISIONABLE_PRODUCT_CODES.has('kelasi')).toBe(false);
       expect(PROVISIONABLE_PRODUCT_CODES.has('k-river')).toBe(false);
+    });
+  });
+
+  describe('createBusinessUnit', () => {
+    test('creates the unit, resolves the legal entity by code, and invalidates the resolver cache', async () => {
+      const svc = makeService();
+      const res = await svc.createBusinessUnit({
+        code: 'roy-marketing',
+        name: 'Roy Marketing',
+        legalEntityCode: 'nolaa-studio',
+      });
+      expect(res.code).toBe('roy-marketing');
+      expect(res.isActive).toBe(true);
+      expect(res.legalEntity.code).toBe('nolaa-studio');
+    });
+
+    test('rejects an unknown legal entity code', async () => {
+      const svc = makeService();
+      await expect(
+        svc.createBusinessUnit({ code: 'roy-marketing', name: 'Roy Marketing', legalEntityCode: 'nope' }),
+      ).rejects.toThrow();
+    });
+
+    test('rejects a duplicate code', async () => {
+      const svc = makeService();
+      await expect(
+        svc.createBusinessUnit({ code: 'khi-lab', name: 'Dup', legalEntityCode: 'nolaa-studio' }),
+      ).rejects.toThrow();
+    });
+  });
+
+  describe('updateBusinessUnit', () => {
+    test('updates editable fields and leaves code untouched', async () => {
+      const svc = makeService();
+      const res = await svc.updateBusinessUnit('khi-lab', { theme: 'navy', isActive: false });
+      expect(res.code).toBe('khi-lab');
+      expect(res.isActive).toBe(false);
+    });
+
+    test('404s on an unknown code', async () => {
+      const svc = makeService();
+      await expect(svc.updateBusinessUnit('nope', { isActive: false })).rejects.toThrow();
+    });
+  });
+
+  describe('createProduct / updateProduct / removeProduct', () => {
+    test('creates a product resolved against businessUnitCode, defaulting archived to false', async () => {
+      const svc = makeService();
+      const res = await svc.createProduct({ code: 'new-app', name: 'New App', businessUnitCode: 'khi-lab' });
+      expect(res.code).toBe('new-app');
+      expect(res.archived).toBe(false);
+      expect(res.businessUnit.code).toBe('khi-lab');
+    });
+
+    test('rejects a duplicate product code', async () => {
+      const svc = makeService();
+      await expect(
+        svc.createProduct({ code: 'yekoli', name: 'Dup', businessUnitCode: 'khi-lab' }),
+      ).rejects.toThrow();
+    });
+
+    test('updateProduct can toggle archived without a delete', async () => {
+      const svc = makeService();
+      const res = await svc.updateProduct('yekoli', { archived: true });
+      expect(res.archived).toBe(true);
+      expect(res.code).toBe('yekoli');
+    });
+
+    test('removeProduct hard-deletes unconditionally (no FKs reference products)', async () => {
+      const svc = makeService();
+      await svc.removeProduct('butterfly');
+      const res = await svc.listProducts();
+      expect(res.find((p) => p.code === 'butterfly')).toBeUndefined();
+    });
+
+    test('removeProduct 404s on an unknown code', async () => {
+      const svc = makeService();
+      await expect(svc.removeProduct('nope')).rejects.toThrow();
     });
   });
 });

@@ -29,6 +29,9 @@ export class Product {
   @Column({ type: 'simple-json', name: 'source_aliases', default: '[]' })
   sourceAliases!: string[];
 
+  @Column({ type: 'boolean', default: false })
+  archived!: boolean;
+
   @Column({ name: 'created_at' })
   createdAt!: Date;
 

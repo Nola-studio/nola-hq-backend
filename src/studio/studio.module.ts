@@ -3,8 +3,18 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { CompanyModule } from '../company/company.module';
 import { RoadmapModule } from '../roadmap/roadmap.module';
 import { RoadmapInitiative } from '../roadmap/roadmap-initiative.entity';
+import { RoadmapMilestone } from '../roadmap/roadmap-milestone.entity';
 import { WorkItemsModule } from '../work-items/work-items.module';
 import { WorkItem } from '../work-items/work-item.entity';
+import { ProjectRisk } from '../work-items/project-risk.entity';
+import { WorkSprint } from '../work-items/work-sprint.entity';
+import { ProjectBudget } from '../business/project-budget.entity';
+import { ProjectTimeEntry } from '../business/project-time-entry.entity';
+import { BusinessExpense } from '../business/business-expense.entity';
+import { BusinessInvoice } from '../business/business-invoice.entity';
+import { BusinessOpportunity } from '../business/business-opportunity.entity';
+import { BusinessContract } from '../business/business-contract.entity';
+import { BusinessQuote } from '../business/business-quote.entity';
 import { StudioMeeting } from './studio-meeting.entity';
 import { StudioExpense } from './studio-expense.entity';
 import { StudioDomain } from './studio-domain.entity';
@@ -35,7 +45,17 @@ import { StudioRequestsController } from './studio-requests.controller';
   imports: [
     TypeOrmModule.forFeature([
       RoadmapInitiative,
+      RoadmapMilestone,
       WorkItem,
+      ProjectRisk,
+      WorkSprint,
+      ProjectBudget,
+      ProjectTimeEntry,
+      BusinessExpense,
+      BusinessInvoice,
+      BusinessOpportunity,
+      BusinessContract,
+      BusinessQuote,
       StudioMeeting,
       StudioExpense,
       StudioDomain,
