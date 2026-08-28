@@ -1,0 +1,74 @@
+# Logue automatiquement chaque release sur `main` dans le panneau Déploiements HQ.
+#
+# Se déclenche après tout push ou merge de PR sur `main`. Envoie un enregistrement
+# avec le statut 'pending' ; le webhook Railway se charge ensuite de basculer
+# le statut à 'success' ou 'failed' dès que le conteneur est en ligne.
+
+name: deploy log
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  notify-hq:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Préparer le journal et envoyer à HQ
+        continue-on-error: true
+        env:
+          HQ_API_URL: ${{ secrets.HQ_API_URL || 'https://api.hq.nola.cd' }}
+          HQ_DEPLOY_SECRET: ${{ secrets.HQ_DEPLOY_SECRET }}
+          AUTHOR: ${{ github.triggering_actor || github.actor }}
+          COMMIT_SHA: ${{ github.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          APP_NAME="nola-hq-backend"
+          VERSION=$(node -p "try { require('./package.json').version } catch(e) { '0.1.0' }")
+          SHORT_SHA=$(git rev-parse --short HEAD)
+
+          if [ -n "$BEFORE_SHA" ] && [ "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$BEFORE_SHA" 2>/dev/null; then
+            CHANGELOG=$(git log "$BEFORE_SHA..$COMMIT_SHA" --pretty=format:"- %s (%h)")
+          fi
+
+          if [ -z "$CHANGELOG" ]; then
+            CHANGELOG=$(git log -1 --pretty=format:"- %s (%h)")
+          fi
+
+          if [ -z "$HQ_DEPLOY_SECRET" ]; then
+            echo "::warning::Secret HQ_DEPLOY_SECRET non configuré — journalisation ignorée."
+            exit 0
+          fi
+
+          PAYLOAD=$(node -e '
+            console.log(JSON.stringify({
+              app: process.env.APP_NAME,
+              version: process.env.VERSION,
+              env: "production",
+              author: process.env.AUTHOR,
+              sha: process.env.SHORT_SHA,
+              changelog: process.env.CHANGELOG || "—",
+              status: "pending"
+            }));
+          ')
+
+          echo "Envoi du log de déploiement à HQ pour $APP_NAME (sha: $SHORT_SHA)..."
+          HTTP_CODE=$(curl -s -o /tmp/hq_response.json -w "%{http_code}" \
+            -X POST "$HQ_API_URL/deploys/webhook" \
+            -H "Content-Type: application/json" \
+            -H "x-deploy-secret: $HQ_DEPLOY_SECRET" \
+            -d "$PAYLOAD")
+
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+            echo "Déploiement enregistré avec succès dans HQ (status pending)."
+          else
+            echo "::warning::Échec enregistrement HQ (HTTP $HTTP_CODE): $(cat /tmp/hq_response.json 2>/dev/null || true)"
+          fi

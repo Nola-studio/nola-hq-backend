@@ -29,6 +29,10 @@ export class EnvironmentVariables {
   @IsOptional() @IsString() VAPID_PUBLIC_KEY?: string;
   @IsOptional() @IsString() VAPID_PRIVATE_KEY?: string;
   @IsOptional() @IsString() VAPID_SUBJECT?: string;
+
+  // Webhooks de déploiement (GitHub Actions + Railway)
+  @IsOptional() @IsString() DEPLOY_WEBHOOK_SECRET?: string;
+  @IsOptional() @IsString() RAILWAY_WEBHOOK_SECRET?: string;
 }
 
 /** base64 of 32 zero bytes — the dev placeholder that must never reach prod. */

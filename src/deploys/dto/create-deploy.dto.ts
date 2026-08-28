@@ -1,6 +1,6 @@
 import { IsIn, IsOptional, IsString } from 'class-validator';
 
-const STATUSES = ['success', 'rolled-back'] as const;
+const STATUSES = ['pending', 'success', 'failed', 'rolled-back'] as const;
 
 export class CreateDeployDto {
   @IsOptional() @IsString() id?: string;

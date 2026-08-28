@@ -1,6 +1,6 @@
 import { Column, Entity, Index, PrimaryColumn } from 'typeorm';
 
-export type DeployStatus = 'success' | 'rolled-back';
+export type DeployStatus = 'pending' | 'success' | 'failed' | 'rolled-back';
 
 @Entity('deploys')
 export class Deploy {
