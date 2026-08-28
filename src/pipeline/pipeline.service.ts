@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { PipelineItem, PipelineStageId } from './pipeline-item.entity';
+import { PipelineItem, type PipelineStageId } from './pipeline-item.entity';
 import { UpsertPipelineItemDto } from './dto/upsert-pipeline-item.dto';
 
 const STAGE_TONES: Record<PipelineStageId, string> = {

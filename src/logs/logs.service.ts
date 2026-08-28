@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { LogEntry, LogLevel } from './log.entity';
+import { LogEntry, type LogLevel } from './log.entity';
 import { PaginationDto, type PaginatedResult } from '../common/dto/pagination.dto';
 
 export interface LogQuery extends PaginationDto {
