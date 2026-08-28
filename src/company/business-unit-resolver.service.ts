@@ -106,4 +106,15 @@ export class BusinessUnitResolverService {
     this.cache = new Map(rows.map((r) => [r.code, r.id]));
     return this.cache;
   }
+
+  /**
+   * Must be called after any create/update to `business_units`.
+   * `resolve()`/`resolveAllowedUnits()` self-heal on a miss, but
+   * `resolveAllIds()` (the `hq:owner` path) does not — it trusts whatever
+   * is cached, so a new unit would stay invisible to owners until some
+   * unrelated miss happened to clear the cache first.
+   */
+  invalidateCache(): void {
+    this.cache = null;
+  }
 }
