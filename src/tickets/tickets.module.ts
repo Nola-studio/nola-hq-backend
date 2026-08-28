@@ -7,6 +7,7 @@ import { TicketsController } from './tickets.controller';
 import { TicketsService } from './tickets.service';
 import { TicketsNotifyService } from './tickets-notify.service';
 import { SupportIngestListener } from './support-ingest.listener';
+import { TicketsSlaBreachScheduler } from './tickets-sla-breach.scheduler';
 import { PushModule } from '../push/push.module';
 import { TeamMember } from '../team/team-member.entity';
 import { CompanyModule } from '../company/company.module';
@@ -20,7 +21,7 @@ import { SlaPolicy } from '../sla/sla-policy.entity';
     CompanyModule,
   ],
   controllers: [TicketsController],
-  providers: [TicketsService, TicketsNotifyService, SupportIngestListener],
+  providers: [TicketsService, TicketsNotifyService, SupportIngestListener, TicketsSlaBreachScheduler],
   exports: [TicketsService],
 })
 export class TicketsModule {}

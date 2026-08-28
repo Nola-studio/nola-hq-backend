@@ -202,7 +202,17 @@ export class TicketsService {
     ticket.updatedAt = new Date();
     const saved = await this.repo.save(ticket);
     void this.notifyStatusPush(saved, actor);
-    void this.record(saved.id, actor ?? 'unknown', 'status_changed', { fromStatus, toStatus: status });
+    // `pendingReason` is recorded in `meta` (not a first-class column on
+    // TicketEvent) because it's only ever relevant when `toStatus ===
+    // 'pending'` — without it here, the SLA elapsed-time walk could only
+    // see the ticket's *current* pendingReason, which is wrong for any
+    // earlier pending spell once the ticket has cycled through pending
+    // more than once.
+    void this.record(saved.id, actor ?? 'unknown', 'status_changed', {
+      fromStatus,
+      toStatus: status,
+      meta: { pendingReason: saved.pendingReason },
+    });
     return saved;
   }
 
