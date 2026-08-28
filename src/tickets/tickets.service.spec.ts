@@ -84,10 +84,14 @@ describe('TicketsService (Brand Scope Filtering)', () => {
       create: mock((e: any) => e),
       save: mock(async (e: any) => e),
     } as any;
+    const teamMembers = [
+      { id: 'usr-1', email: 'usr1@nola.dev', notifyEmail: null },
+      { id: 'ikamaaurel', email: 'ikamaaurel@gmail.com', notifyEmail: null },
+    ];
     const teamMock = {
-      findOne: mock(async () => null),
+      findOne: mock(async ({ where }: any) => teamMembers.find((m) => m.id === where.id) ?? null),
     } as any;
-    const pushMock = { broadcast: mock(async () => {}) } as any;
+    const pushMock = { broadcast: mock(async () => {}), sendTo: mock(async () => {}) } as any;
     const notifyMock = { ticketCreated: mock(() => {}), ticketAssigned: mock(() => {}) } as any;
 
     return new TicketsService(repoMock, eventsMock, teamMock, pushMock, notifyMock, businessUnitsMock);
@@ -200,6 +204,19 @@ describe('TicketsService (Brand Scope Filtering)', () => {
       expect(
         svc.assign(2, 'usr-1', ['hq:operator', 'hq:bu:khi-lab']),
       ).rejects.toThrow(NotFoundException);
+    });
+
+    test('assign rejects an assignee id with no matching team member', async () => {
+      const svc = makeService(sampleTickets);
+      expect(
+        svc.assign(1, 'not-a-real-person', ['hq:operator', 'hq:bu:khi-lab']),
+      ).rejects.toThrow('not-a-real-person');
+    });
+
+    test('assign to a real team member (Aurel) succeeds', async () => {
+      const svc = makeService(sampleTickets);
+      const res = await svc.assign(1, 'ikamaaurel', ['hq:operator', 'hq:bu:khi-lab']);
+      expect(res.assignee).toBe('ikamaaurel');
     });
 
     test('khi-lab operator can update category and priority on ticket 1', async () => {

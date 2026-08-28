@@ -8,6 +8,7 @@ export type TicketCategory =
   | 'billing'
   | 'account'
   | 'feature'
+  | 'deployment'
   | 'other';
 
 export type TicketReplyVisibility = 'internal' | 'client';
