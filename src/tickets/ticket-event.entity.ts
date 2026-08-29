@@ -8,6 +8,16 @@ export type TicketEventAction =
   | 'replied'
   | 'updated'
   /**
+   * Deployment-ticket sign-off. Deliberately not a status and not a field
+   * on `Ticket` — see TicketsService.approve(). Can fire more than once
+   * per ticket: an edit after approval does not invalidate it (no code
+   * enforces re-approval), so a human re-approving after a change is a
+   * second event, not a correction of the first. The ordering in this
+   * table is the only record of "approved, then edited" vs "edited, then
+   * approved" — read it, don't infer it from `Ticket.updatedAt`.
+   */
+  | 'approved'
+  /**
    * Written once per ticket, ever — never re-fires even across a
    * pause/resume cycle. A partial unique index on (ticket_id, action)
    * enforces that at the DB level (see TicketEventSlaAlertIndex

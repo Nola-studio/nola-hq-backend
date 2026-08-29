@@ -1,5 +1,5 @@
 import { describe, expect, test, mock } from 'bun:test';
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { TicketsService } from './tickets.service';
 import type { Ticket } from './ticket.entity';
 
@@ -369,6 +369,48 @@ describe('TicketsService (Brand Scope Filtering)', () => {
       expect(
         svc.getEvents(2, ['hq:viewer', 'hq:bu:khi-lab']),
       ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('approve (deployment sign-off)', () => {
+    const deploymentTicket: Ticket = {
+      id: 10,
+      tenant: 'internal',
+      subject: 'Promote nola-hq-backend to prod',
+      title: 'Promote nola-hq-backend to prod',
+      body: 'dev -> main',
+      priority: 'P2',
+      status: 'open',
+      category: 'deployment',
+      businessUnitId: KHI_LAB_ID,
+      businessUnit: { id: KHI_LAB_ID, code: 'khi-lab', name: 'Khi-Lab' } as any,
+      createdAt: new Date(),
+    } as Ticket;
+    const nonDeploymentTicket: Ticket = { ...sampleTickets[0], id: 11, category: 'technical' } as Ticket;
+
+    test('records an approved event for a deployment ticket', async () => {
+      const { svc, eventsRepo } = makeServiceWithEventsRepo([deploymentTicket]);
+      const event = await svc.approve(10, ['hq:owner'], 'aurel@nola.dev');
+      expect(event.action).toBe('approved');
+      expect(event.actor).toBe('aurel@nola.dev');
+      expect(eventsRepo.save).toHaveBeenCalled();
+    });
+
+    test('rejects approval of a non-deployment ticket', async () => {
+      const { svc } = makeServiceWithEventsRepo([nonDeploymentTicket]);
+      expect(svc.approve(11, ['hq:owner'], 'aurel@nola.dev')).rejects.toThrow(BadRequestException);
+    });
+
+    test('does not guard against a second approval — re-approval after an edit is a new event, not blocked', async () => {
+      const { svc, eventsRepo } = makeServiceWithEventsRepo([deploymentTicket]);
+      await svc.approve(10, ['hq:owner'], 'aurel@nola.dev');
+      await svc.approve(10, ['hq:owner'], 'aurel@nola.dev');
+      expect(eventsRepo.save).toHaveBeenCalledTimes(2);
+    });
+
+    test('out of brand scope -> 404, same as any other ticket read', async () => {
+      const { svc } = makeServiceWithEventsRepo([deploymentTicket]);
+      expect(svc.approve(10, ['hq:viewer', 'hq:bu:vantelis-it'], 'aurel@nola.dev')).rejects.toThrow(NotFoundException);
     });
   });
 

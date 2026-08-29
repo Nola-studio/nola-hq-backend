@@ -260,6 +260,25 @@ export class TicketsService {
     return saved;
   }
 
+  /**
+   * Sign-off, distinct from assignment: Aurel being assigned isn't Aurel
+   * having approved. Scoped to deployment tickets — that's the only
+   * category where "approved" has a meaning HQ enforces nothing around
+   * (see the 'approved' TicketEventAction doc comment). Awaited, not
+   * fire-and-forget like every other `record()` call here — this event
+   * *is* the entire point of the call, so a write failure must surface as
+   * an error rather than silently vanish.
+   */
+  async approve(id: number, roles?: string[], actor?: string): Promise<TicketEvent> {
+    const ticket = await this.findOne(id, roles);
+    if (ticket.category !== 'deployment') {
+      throw new BadRequestException(
+        `Ticket #${ticket.id} n'est pas un ticket de déploiement — l'approbation ne s'applique qu'à cette catégorie.`,
+      );
+    }
+    return this.record(ticket.id, actor ?? 'unknown', 'approved', {});
+  }
+
   async update(id: number, dto: UpdateTicketDto, roles?: string[], actor?: string) {
     const ticket = await this.findOne(id, roles);
     const changes: Record<string, unknown> = {};
