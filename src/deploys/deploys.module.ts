@@ -4,11 +4,12 @@ import { Deploy } from './deploy.entity';
 import { Ticket } from '../tickets/ticket.entity';
 import { DeploysController } from './deploys.controller';
 import { DeploysService } from './deploys.service';
+import { GithubService } from './github.service';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Deploy, Ticket])],
   controllers: [DeploysController],
-  providers: [DeploysService],
+  providers: [DeploysService, GithubService],
   exports: [DeploysService],
 })
 export class DeploysModule {}
