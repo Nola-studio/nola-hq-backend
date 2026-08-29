@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Ticket, type TicketStatus, type TicketPendingReason, type TicketPriority } from './ticket.entity';
@@ -58,7 +58,7 @@ export class TicketsService {
     private readonly push: PushService,
     private readonly notify: TicketsNotifyService,
     private readonly businessUnits: BusinessUnitResolverService,
-    private readonly teamService: TeamService,
+    @Inject(forwardRef(() => TeamService)) private readonly teamService: TeamService,
     private readonly notifications: NotificationsService,
   ) {}
 
