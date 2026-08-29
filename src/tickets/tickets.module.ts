@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { NolaSdkModule } from '@nola-hq/nola-sdk';
 import { Ticket } from './ticket.entity';
@@ -21,7 +21,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     NolaSdkModule,
     PushModule,
     CompanyModule,
-    TeamModule,
+    forwardRef(() => TeamModule),
     NotificationsModule,
   ],
   controllers: [TicketsController],

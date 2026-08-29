@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Param, Patch, Post, Req } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Inject, Param, Patch, Post, Req, forwardRef } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { IsIn, IsObject, IsOptional, IsString, MaxLength } from 'class-validator';
 import { NotificationsService } from './notifications.service';
@@ -44,6 +44,7 @@ class SendTestNotificationDto {
 export class NotificationsController {
   constructor(
     private readonly svc: NotificationsService,
+    @Inject(forwardRef(() => TeamService))
     private readonly teamService: TeamService,
   ) {}
 

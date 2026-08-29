@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Not, Repository } from 'typeorm';
@@ -58,6 +58,7 @@ export class TicketsSlaBreachScheduler {
     @InjectRepository(SlaPolicy) private readonly policies: Repository<SlaPolicy>,
     @InjectRepository(TeamMember) private readonly team: Repository<TeamMember>,
     private readonly push: PushService,
+    @Inject(forwardRef(() => TeamService))
     private readonly teamService: TeamService,
     private readonly notifications: NotificationsService,
   ) {}
