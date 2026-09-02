@@ -75,4 +75,78 @@ export class StudioExpensesService {
     const rows = await this.expenses.find({ order: { date: 'DESC' } });
     return toCsv(rows);
   }
+
+  /**
+   * Generates concrete monthly expense rows from active recurring templates
+   * for the given target month (YYYY-MM-DD, defaults to current date).
+   * Avoids creating duplicates if an instance for that template already exists for that month.
+   */
+  async generateMonthlyRecurring(
+    targetDateStr?: string,
+  ): Promise<{ generated: StudioExpense[]; count: number; skipped: number }> {
+    const today = new Date().toISOString().slice(0, 10);
+    const targetDate = targetDateStr || today;
+    const targetMonth = targetDate.slice(0, 7); // 'YYYY-MM'
+
+    // Find all recurring templates
+    const templates = await this.expenses.find({ where: { recurring: true } });
+    const allMonthExpenses = await this.expenses.find();
+    const thisMonthExpenses = allMonthExpenses.filter(
+      (e) => e.date && e.date.startsWith(targetMonth),
+    );
+
+    const created: StudioExpense[] = [];
+    let skipped = 0;
+
+    for (const t of templates) {
+      // Check if this template was already accounted for in this month:
+      // 1. If the template's own date is in the target month (e.g. newly created this month)
+      // 2. Or if a child instance with templateId === t.id already exists in this month
+      // 3. Or matching description & category with templateId in this month
+      const alreadyExists = thisMonthExpenses.some(
+        (e) =>
+          (e.id === t.id && e.date.startsWith(targetMonth)) ||
+          e.templateId === t.id ||
+          (e.description === t.description &&
+            e.category === t.category &&
+            e.amountCents === t.amountCents &&
+            e.id !== t.id),
+      );
+
+      if (alreadyExists) {
+        skipped++;
+        continue;
+      }
+
+      // Preserve day of month from template date if valid, else clamp
+      const day = t.date ? t.date.slice(8, 10) : '01';
+      const expenseDate = `${targetMonth}-${day}`;
+
+      const instance = this.expenses.create({
+        description: t.description,
+        amountCents: t.amountCents,
+        currency: t.currency,
+        category: t.category,
+        paidByEmail: t.paidByEmail,
+        date: expenseDate,
+        recurring: false,
+        frequency: t.frequency,
+        status: 'paid',
+        workspace: t.workspace,
+        billingEmail: t.billingEmail,
+        paymentMethod: t.paymentMethod,
+        templateId: t.id,
+        createdAt: new Date(),
+      });
+
+      const saved = await this.expenses.save(instance);
+      created.push(saved);
+    }
+
+    return {
+      generated: created,
+      count: created.length,
+      skipped,
+    };
+  }
 }

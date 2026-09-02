@@ -33,6 +33,13 @@ export class StudioExpensesController {
     res.send(csv);
   }
 
+  @Post('generate-recurring')
+  @HqRoles(HqRole.Operator)
+  @ApiOperation({ summary: 'Generate concrete monthly expense rows from recurring templates' })
+  generateRecurring(@Body('targetDate') targetDate?: string) {
+    return this.svc.generateMonthlyRecurring(targetDate);
+  }
+
   @Post()
   @HqRoles(HqRole.Operator)
   create(@Body() dto: CreateExpenseDto) {
