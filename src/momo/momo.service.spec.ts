@@ -46,6 +46,7 @@ describe('summarizePayments', () => {
 
     expect(s.tx_count).toBe(4);
     expect(s.total_in_cdf).toBe(150); // succeeded only: 100 + 50
+    expect(s.total_currency).toBe('USD'); // both succeeded rows are USD
     expect(s.total_payout_cdf).toBe(0); // billing has no payouts
     expect(s.failed_count).toBe(1);
     expect(s.reconciled_pct).toBeCloseTo(50); // 2 succeeded / 4 total
@@ -53,15 +54,25 @@ describe('summarizePayments', () => {
 
   test('nets succeeded amounts per real billing category', () => {
     const s = summaryOf([
-      billingPayment({ status: 'succeeded', amount: '100', provider: 'mobile_money' }),
-      billingPayment({ status: 'succeeded', amount: '40', provider: 'mobile_money' }),
-      billingPayment({ status: 'succeeded', amount: '25', provider: 'card' }),
+      billingPayment({ status: 'succeeded', amount: '100', provider: 'mobile_money', currency: 'CDF' }),
+      billingPayment({ status: 'succeeded', amount: '40', provider: 'mobile_money', currency: 'CDF' }),
+      billingPayment({ status: 'succeeded', amount: '25', provider: 'card', currency: 'USD' }),
       billingPayment({ status: 'failed', amount: '999', provider: 'card' }), // excluded
     ]);
 
-    expect(s.net_by_category.mobile_money).toEqual({ net_cdf: 140, tx_count: 2 });
-    expect(s.net_by_category.card).toEqual({ net_cdf: 25, tx_count: 1 });
-    expect(s.net_by_category.bank_transfer).toEqual({ net_cdf: 0, tx_count: 0 });
+    expect(s.net_by_category.mobile_money).toEqual({ net_cdf: 140, tx_count: 2, currency: 'CDF' });
+    expect(s.net_by_category.card).toEqual({ net_cdf: 25, tx_count: 1, currency: 'USD' });
+    expect(s.net_by_category.bank_transfer).toEqual({ net_cdf: 0, tx_count: 0, currency: null });
+  });
+
+  test('flags mixed currency within a category instead of picking one', () => {
+    const s = summaryOf([
+      billingPayment({ status: 'succeeded', amount: '100', provider: 'mobile_money', currency: 'CDF' }),
+      billingPayment({ status: 'succeeded', amount: '5', provider: 'mobile_money', currency: 'USD' }),
+    ]);
+
+    expect(s.net_by_category.mobile_money.currency).toBeNull();
+    expect(s.total_currency).toBeNull();
   });
 
   test('buckets the 7-day series by day (index 6 = today, 0 = J-6)', () => {

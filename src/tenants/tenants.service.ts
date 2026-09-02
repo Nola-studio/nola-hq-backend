@@ -23,7 +23,7 @@ import {
   SubscriptionsService,
   type BillingSubscriptionRow,
 } from '../subscriptions/subscriptions.service';
-import { PROVISIONABLE_PRODUCT_CODES } from '../company/company.constants';
+import { Product } from '../company/product.entity';
 import { PlansService } from '../plans/plans.service';
 import { IamClientService } from '../iam/iam-client.service';
 import type { IamMembershipResponse } from '../iam/iam.types';
@@ -122,6 +122,7 @@ export class TenantsService {
     @InjectRepository(MomoEntry) private readonly momo: Repository<MomoEntry>,
     @InjectRepository(ActivityEvent)
     private readonly activity: Repository<ActivityEvent>,
+    @InjectRepository(Product) private readonly products: Repository<Product>,
     private readonly commands: NolaCommandsService,
     private readonly yekoliProvision: YekoliProvisionClient,
     private readonly subscriptions: SubscriptionsService,
@@ -317,7 +318,10 @@ export class TenantsService {
     // V1 : seule l'app scolaire expose le point d'entrée hq-provision. Ajouter
     // une table de routage quand d'autres apps clientes offriront la même surface.
     const targetApp = (dto.apps?.[0] ?? '').trim();
-    if (!PROVISIONABLE_PRODUCT_CODES.has(targetApp)) {
+    const product = targetApp
+      ? await this.products.findOne({ where: { code: targetApp } })
+      : null;
+    if (!product?.isProvisionable) {
       throw new BadRequestException(`unsupported_app: ${targetApp || '(none)'}`);
     }
 

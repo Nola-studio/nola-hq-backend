@@ -17,4 +17,5 @@ export class CreateProductDto {
 
   @IsOptional() @IsBoolean() isInternal?: boolean;
   @IsOptional() @IsArray() @IsString({ each: true }) sourceAliases?: string[];
+  @IsOptional() @IsBoolean() isProvisionable?: boolean;
 }

@@ -6,4 +6,5 @@ export class UpdateProductDto {
   @IsOptional() @IsBoolean() isInternal?: boolean;
   @IsOptional() @IsArray() @IsString({ each: true }) sourceAliases?: string[];
   @IsOptional() @IsBoolean() archived?: boolean;
+  @IsOptional() @IsBoolean() isProvisionable?: boolean;
 }
