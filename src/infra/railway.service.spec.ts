@@ -2,7 +2,7 @@
 import { RailwayService } from './railway.service';
 import { ConfigService } from '@nestjs/config';
 
-describe('RailwayService (3-State Health & Raw Metrics)', () => {
+describe('RailwayService (Workspace Token & Real Metrics)', () => {
   let service: RailwayService;
   let originalFetch: typeof globalThis.fetch;
 
@@ -29,7 +29,7 @@ describe('RailwayService (3-State Health & Raw Metrics)', () => {
     expect(res.error).toContain('non configuré');
   });
 
-  it('reports "error" loudly when Railway API rejects the token (Not Authorized)', async () => {
+  it('reports "error" loudly when Railway API rejects the token', async () => {
     process.env.RAILWAY_TOKEN = 'mock_bad_token';
     const config = new ConfigService();
     service = new RailwayService(config);
@@ -37,7 +37,7 @@ describe('RailwayService (3-State Health & Raw Metrics)', () => {
     globalThis.fetch = mock(async () => {
       return new Response(
         JSON.stringify({
-          errors: [{ message: 'Not Authorized', path: ['me'] }],
+          errors: [{ message: 'Not Authorized', path: ['apiToken'] }],
           data: null,
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } }
@@ -51,50 +51,58 @@ describe('RailwayService (3-State Health & Raw Metrics)', () => {
     expect(res.projects).toEqual([]);
   });
 
-  it('reports "connected" with workspace info and raw project metrics upon success', async () => {
+  it('reports "connected" with workspace name, billing total, and project metrics', async () => {
     process.env.RAILWAY_TOKEN = 'mock_valid_workspace_token';
     const config = new ConfigService();
     service = new RailwayService(config);
 
-    let callCount = 0;
     globalThis.fetch = mock(async (_url, opts: any) => {
-      callCount++;
       const body = JSON.parse(opts.body);
-      if (body.query.includes('GetProjectsAndBilling')) {
+      if (body.query.includes('GetWorkspaceData')) {
         return new Response(
           JSON.stringify({
             data: {
-              me: {
-                name: 'NolaaStudio-npr',
-                projects: {
-                  edges: [
-                    {
-                      node: {
-                        id: 'proj-1',
-                        name: 'Nola-Core',
-                        services: {
-                          edges: [{ node: { id: 'svc-1', name: 'nola-hq-backend' } }],
-                        },
+              apiToken: {
+                workspaces: [
+                  {
+                    id: 'ws-123',
+                    name: 'NolaaStudio-npr',
+                  },
+                ],
+              },
+              projects: {
+                edges: [
+                  {
+                    node: {
+                      id: 'proj-1',
+                      name: 'Nola-Core',
+                      services: {
+                        edges: [{ node: { id: 'svc-1', name: 'nola-hq-backend' } }],
                       },
                     },
-                  ],
-                },
+                  },
+                ],
               },
-            },
-          }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } }
-        );
-      }
-      if (body.query.includes('GetEstimatedUsage')) {
-        return new Response(
-          JSON.stringify({
-            data: {
               estimatedUsage: [
                 { projectId: 'proj-1', measurement: 'CPU_USAGE_2', estimatedValue: 12.5 },
                 { projectId: 'proj-1', measurement: 'MEMORY_USAGE_GB', estimatedValue: 34.2 },
                 { projectId: 'proj-1', measurement: 'DISK_USAGE_GB', estimatedValue: 10.0 },
                 { projectId: 'proj-1', measurement: 'NETWORK_TX_GB', estimatedValue: 1.8 },
               ],
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      if (body.query.includes('GetWorkspaceBilling')) {
+        return new Response(
+          JSON.stringify({
+            data: {
+              workspace: {
+                customer: {
+                  currentUsage: 45.35,
+                },
+              },
             },
           }),
           { status: 200, headers: { 'Content-Type': 'application/json' } }
@@ -107,6 +115,7 @@ describe('RailwayService (3-State Health & Raw Metrics)', () => {
     expect(res.status).toBe('connected');
     expect(res.configured).toBe(true);
     expect(res.workspaceName).toBe('NolaaStudio-npr');
+    expect(res.totalCostUsd).toBe(45.35);
     expect(res.projects.length).toBe(1);
     expect(res.projects[0].name).toBe('Nola-Core');
     expect(res.projects[0].metrics.cpuHours).toBe(12.5);
