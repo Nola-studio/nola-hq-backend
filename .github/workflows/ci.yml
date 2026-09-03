@@ -41,20 +41,11 @@ jobs:
         with:
           bun-version: latest
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          registry-url: 'https://npm.pkg.github.com'
-          scope: '@nola-studio'
-
       - name: Install dependencies
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bun install --frozen-lockfile
 
       - name: Typecheck
-        run: npm run typecheck
+        run: bun run typecheck
 
       - name: Unit Tests (including Tier 1 Static Schema Guard)
         run: bun test
@@ -65,4 +56,4 @@ jobs:
         run: bun run src/scripts/verify-schema-integrity.ts
 
       - name: Production build
-        run: npm run build
+        run: bun run build
