@@ -1,5 +1,5 @@
 ﻿import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
-import { RailwayService } from './railway.service';
+import { RailwayService, RAILWAY_PRO_RATES } from './railway.service';
 import { ConfigService } from '@nestjs/config';
 
 describe('RailwayService (Workspace Token & Real Metrics)', () => {
@@ -15,6 +15,11 @@ describe('RailwayService (Workspace Token & Real Metrics)', () => {
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+  });
+
+  it('exposes verifiable pricing source URL and date', () => {
+    expect(RAILWAY_PRO_RATES.source).toBe('https://railway.com/pricing');
+    expect(RAILWAY_PRO_RATES.asOf).toBe('2026-09-03');
   });
 
   it('reports "unconfigured" when no RAILWAY_TOKEN is present', async () => {
@@ -51,7 +56,7 @@ describe('RailwayService (Workspace Token & Real Metrics)', () => {
     expect(res.projects).toEqual([]);
   });
 
-  it('reports "connected" with workspace name, billing total, and project metrics', async () => {
+  it('reports "connected" with workspace name, billing total, and computed project estimates', async () => {
     process.env.RAILWAY_TOKEN = 'mock_valid_workspace_token';
     const config = new ConfigService();
     service = new RailwayService(config);
@@ -84,24 +89,50 @@ describe('RailwayService (Workspace Token & Real Metrics)', () => {
                 ],
               },
               estimatedUsage: [
-                { projectId: 'proj-1', measurement: 'CPU_USAGE_2', estimatedValue: 12.5 },
-                { projectId: 'proj-1', measurement: 'MEMORY_USAGE_GB', estimatedValue: 34.2 },
-                { projectId: 'proj-1', measurement: 'DISK_USAGE_GB', estimatedValue: 10.0 },
-                { projectId: 'proj-1', measurement: 'NETWORK_TX_GB', estimatedValue: 1.8 },
+                { projectId: 'proj-1', measurement: 'CPU_USAGE_2', estimatedValue: 100.0 },
+                { projectId: 'proj-1', measurement: 'MEMORY_USAGE_GB', estimatedValue: 200000.0 },
+                { projectId: 'proj-1', measurement: 'DISK_USAGE_GB', estimatedValue: 50000.0 },
+                { projectId: 'proj-1', measurement: 'NETWORK_TX_GB', estimatedValue: 1.0 },
               ],
             },
           }),
           { status: 200, headers: { 'Content-Type': 'application/json' } }
         );
       }
-      if (body.query.includes('GetWorkspaceBilling')) {
+      if (body.query.includes('GetWorkspaceBillingDetails')) {
         return new Response(
           JSON.stringify({
             data: {
               workspace: {
+                id: 'ws-123',
+                name: 'NolaaStudio-npr',
+                plan: 'PRO',
                 customer: {
-                  currentUsage: 45.35,
+                  currentUsage: 45.39,
+                  creditBalance: 0,
+                  billingPeriod: {
+                    start: '2026-08-19T04:44:50.000Z',
+                    end: '2026-09-19T04:44:50.000Z',
+                  },
+                  usageLimit: {
+                    hardLimit: 75,
+                    softLimit: 70,
+                    isOverLimit: false,
+                  },
+                  subscriptions: [
+                    {
+                      nextInvoiceCurrentTotal: 4515,
+                      nextInvoiceDate: '2026-09-19T04:44:50.000Z',
+                      status: 'active',
+                      items: [{ priceDollars: 20 }],
+                    },
+                  ],
                 },
+              },
+              agentUsage: {
+                totalUsedCents: 0,
+                hardLimitCents: 2000,
+                softLimitCents: 0,
               },
             },
           }),
@@ -115,13 +146,14 @@ describe('RailwayService (Workspace Token & Real Metrics)', () => {
     expect(res.status).toBe('connected');
     expect(res.configured).toBe(true);
     expect(res.workspaceName).toBe('NolaaStudio-npr');
-    expect(res.totalCostUsd).toBe(45.35);
+    expect(res.totalCostUsd).toBe(45.39);
+    expect(res.billing?.plan).toBe('PRO');
+    expect(res.billing?.baseFeeUsd).toBe(20);
+    expect(res.billing?.computeLimit?.hardLimitUsd).toBe(75);
+    expect(res.billing?.agentLimit?.hardLimitUsd).toBe(20);
     expect(res.projects.length).toBe(1);
     expect(res.projects[0].name).toBe('Nola-Core');
-    expect(res.projects[0].metrics.cpuHours).toBe(12.5);
-    expect(res.projects[0].metrics.memoryGbHours).toBe(34.2);
-    expect(res.projects[0].metrics.diskGb).toBe(10);
-    expect(res.projects[0].metrics.networkTxGb).toBe(1.8);
+    expect(res.projects[0].estimatedCostUsd).toBeGreaterThan(20);
     expect(res.error).toBeNull();
   });
 });

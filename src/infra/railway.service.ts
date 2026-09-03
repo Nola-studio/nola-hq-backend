@@ -1,6 +1,40 @@
 ﻿import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
+export const RAILWAY_PRO_RATES = {
+  asOf: '2026-09-03',
+  source: 'https://railway.com/pricing',
+  rates: {
+    ramGbHour: 0.000128,
+    vcpuHour: 0.000257,
+    diskGbHour: 0.0000038,
+    egressGb: 0.05,
+  },
+};
+
+export interface RailwayBillingDetails {
+  plan: string;
+  baseFeeUsd: number;
+  currentUsageUsd: number;
+  creditBalanceUsd: number;
+  billingPeriod: {
+    start: string;
+    end: string;
+  } | null;
+  nextInvoiceDate: string | null;
+  nextInvoiceTotalUsd: number | null;
+  computeLimit: {
+    hardLimitUsd: number;
+    softLimitUsd: number;
+    isOverLimit: boolean;
+  } | null;
+  agentLimit: {
+    usedUsd: number;
+    hardLimitUsd: number;
+    softLimitUsd: number;
+  } | null;
+}
+
 export interface RailwayProjectMetrics {
   memoryGbHours: number;
   cpuHours: number;
@@ -12,6 +46,7 @@ export interface RailwayProjectNode {
   id: string;
   name: string;
   servicesCount: number;
+  estimatedCostUsd: number;
   metrics: RailwayProjectMetrics;
   services: Array<{
     id: string;
@@ -26,7 +61,9 @@ export interface RailwayUsageResult {
   configured: boolean;
   updatedAt: string;
   totalCostUsd: number;
+  totalEstimatedCostUsd: number;
   workspaceName: string | null;
+  billing: RailwayBillingDetails | null;
   projects: RailwayProjectNode[];
   error: string | null;
 }
@@ -55,22 +92,26 @@ export class RailwayService {
         configured: false,
         updatedAt: new Date().toISOString(),
         totalCostUsd: 0,
+        totalEstimatedCostUsd: 0,
         workspaceName: null,
+        billing: null,
         projects: [],
         error: 'RAILWAY_TOKEN non configuré sur ce backend',
       };
     }
 
     try {
-      const { projects, totalCostUsd, workspaceName } = await this.fetchUsageData(token);
+      const data = await this.fetchUsageData(token);
 
       const result: RailwayUsageResult = {
         status: 'connected',
         configured: true,
         updatedAt: new Date().toISOString(),
-        totalCostUsd,
-        workspaceName,
-        projects,
+        totalCostUsd: data.totalCostUsd,
+        totalEstimatedCostUsd: data.totalEstimatedCostUsd,
+        workspaceName: data.workspaceName,
+        billing: data.billing,
+        projects: data.projects,
         error: null,
       };
 
@@ -85,7 +126,9 @@ export class RailwayService {
         configured: true,
         updatedAt: new Date().toISOString(),
         totalCostUsd: 0,
+        totalEstimatedCostUsd: 0,
         workspaceName: null,
+        billing: null,
         projects: [],
         error: errMsg,
       };
@@ -95,7 +138,9 @@ export class RailwayService {
   private async fetchUsageData(token: string): Promise<{
     projects: RailwayProjectNode[];
     totalCostUsd: number;
+    totalEstimatedCostUsd: number;
     workspaceName: string | null;
+    billing: RailwayBillingDetails | null;
   }> {
     const endpoint = 'https://backboard.railway.app/graphql/v2';
 
@@ -191,19 +236,49 @@ export class RailwayService {
       }
     }
 
-    // 3. Query authoritative Workspace Customer currentUsage if workspaceId is present
+    // 3. Query authoritative Workspace Billing and Limits
     let totalCostUsd = 0;
+    let billing: RailwayBillingDetails | null = null;
+
     if (workspaceId) {
       try {
         const billingQuery = `
-          query GetWorkspaceBilling($wsId: String!) {
+          query GetWorkspaceBillingDetails($wsId: String!) {
             workspace(workspaceId: $wsId) {
+              id
+              name
+              plan
               customer {
                 currentUsage
+                creditBalance
+                appliedCredits
+                billingPeriod {
+                  start
+                  end
+                }
+                usageLimit {
+                  hardLimit
+                  softLimit
+                  isOverLimit
+                }
+                subscriptions {
+                  nextInvoiceCurrentTotal
+                  nextInvoiceDate
+                  status
+                  items {
+                    priceDollars
+                  }
+                }
               }
+            }
+            agentUsage(workspaceId: $wsId) {
+              totalUsedCents
+              hardLimitCents
+              softLimitCents
             }
           }
         `;
+
         const resBilling = await fetch(endpoint, {
           method: 'POST',
           headers: {
@@ -212,19 +287,53 @@ export class RailwayService {
           },
           body: JSON.stringify({ query: billingQuery, variables: { wsId: workspaceId } }),
         });
+
         if (resBilling.ok) {
           const jsonBilling: any = await resBilling.json();
-          const rawUsage = jsonBilling.data?.workspace?.customer?.currentUsage;
-          if (typeof rawUsage === 'number') {
-            totalCostUsd = Number(rawUsage.toFixed(2));
+          const wsData = jsonBilling.data?.workspace;
+          const customer = wsData?.customer;
+          const agentData = jsonBilling.data?.agentUsage;
+
+          if (typeof customer?.currentUsage === 'number') {
+            totalCostUsd = Number(customer.currentUsage.toFixed(2));
           }
+
+          const subscription = customer?.subscriptions?.[0];
+          const baseItem = subscription?.items?.find((i: any) => i.priceDollars >= 5);
+          const baseFeeUsd = baseItem ? baseItem.priceDollars : (wsData?.plan === 'PRO' ? 20 : 0);
+
+          billing = {
+            plan: wsData?.plan || 'PRO',
+            baseFeeUsd,
+            currentUsageUsd: totalCostUsd,
+            creditBalanceUsd: customer?.creditBalance || 0,
+            billingPeriod: customer?.billingPeriod ? {
+              start: customer.billingPeriod.start,
+              end: customer.billingPeriod.end,
+            } : null,
+            nextInvoiceDate: subscription?.nextInvoiceDate || null,
+            nextInvoiceTotalUsd: typeof subscription?.nextInvoiceCurrentTotal === 'number'
+              ? Number((subscription.nextInvoiceCurrentTotal / 100).toFixed(2))
+              : null,
+            computeLimit: customer?.usageLimit ? {
+              hardLimitUsd: customer.usageLimit.hardLimit,
+              softLimitUsd: customer.usageLimit.softLimit,
+              isOverLimit: Boolean(customer.usageLimit.isOverLimit),
+            } : null,
+            agentLimit: agentData ? {
+              usedUsd: Number(((agentData.totalUsedCents || 0) / 100).toFixed(2)),
+              hardLimitUsd: Number(((agentData.hardLimitCents || 0) / 100).toFixed(2)),
+              softLimitUsd: Number(((agentData.softLimitCents || 0) / 100).toFixed(2)),
+            } : null,
+          };
         }
       } catch (err: any) {
-        this.logger.warn(`Failed to fetch workspace billing: ${err.message}`);
+        this.logger.warn(`Failed to fetch workspace billing details: ${err.message}`);
       }
     }
 
-    // 4. Map projects
+    // 4. Map projects with computed estimated USD
+    let totalEstimatedCostUsd = 0;
     const projects: RailwayProjectNode[] = edges.map((edge: any) => {
       const node = edge.node;
       const serviceEdges = node.services?.edges || [];
@@ -240,10 +349,20 @@ export class RailwayService {
         networkTxGb: 0,
       };
 
+      const estCost =
+        raw.memoryGbHours * RAILWAY_PRO_RATES.rates.ramGbHour +
+        raw.cpuHours * RAILWAY_PRO_RATES.rates.vcpuHour +
+        raw.diskGb * RAILWAY_PRO_RATES.rates.diskGbHour +
+        raw.networkTxGb * RAILWAY_PRO_RATES.rates.egressGb;
+
+      const roundedEstCost = Number(estCost.toFixed(2));
+      totalEstimatedCostUsd += roundedEstCost;
+
       return {
         id: node.id,
         name: node.name,
         servicesCount: services.length,
+        estimatedCostUsd: roundedEstCost,
         metrics: {
           memoryGbHours: Number(raw.memoryGbHours.toFixed(2)),
           cpuHours: Number(raw.cpuHours.toFixed(2)),
@@ -257,7 +376,9 @@ export class RailwayService {
     return {
       projects,
       totalCostUsd,
+      totalEstimatedCostUsd: Number(totalEstimatedCostUsd.toFixed(2)),
       workspaceName,
+      billing,
     };
   }
 }
