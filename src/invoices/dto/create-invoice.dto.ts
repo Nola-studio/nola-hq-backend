@@ -6,6 +6,7 @@ export class CreateInvoiceDto {
   @IsOptional() @IsString() id?: string;
   @IsString() tenant!: string;
   @IsInt() @Min(0) amt!: number;
+  @IsOptional() @IsString() currency?: string;
   @IsString() due!: string;
   @IsIn(STATUSES as unknown as string[])
   status!: (typeof STATUSES)[number];

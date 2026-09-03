@@ -25,6 +25,7 @@ export class Invoice {
   @Index()
   status!: InvoiceStatus;
 
+  /** Payment method/rail (e.g. 'mobile_money', 'card', 'bank_transfer', 'mpesa', 'airtel'). */
   @Column()
   method!: string;
 
