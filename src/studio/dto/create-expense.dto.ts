@@ -31,6 +31,8 @@ export class CreateExpenseDto {
   @IsOptional() @IsIn(EXPENSE_FREQUENCIES as unknown as string[]) frequency?: StudioExpenseFrequency;
   @IsOptional() @IsIn(EXPENSE_STATUSES as unknown as string[]) status?: StudioExpenseStatus;
   @IsOptional() @IsString() @MaxLength(200) workspace?: string;
-  @IsOptional() @IsEmail() @MaxLength(160) billingEmail?: string;
   @IsOptional() @IsString() @MaxLength(120) paymentMethod?: string;
+  @IsOptional() @IsIn(['manual', 'railway']) source?: 'manual' | 'railway';
+  @IsOptional() @IsString() externalInvoiceId?: string;
+  @IsOptional() @IsString() receiptUrl?: string;
 }
