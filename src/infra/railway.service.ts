@@ -1,4 +1,4 @@
-﻿import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 export interface RailwayProjectNode {
@@ -37,14 +37,18 @@ export class RailwayService {
       return this.cachedResult;
     }
 
-    const token = this.config.get<string>('RAILWAY_API_TOKEN') || process.env.RAILWAY_API_TOKEN;
+    const token =
+      this.config.get<string>('RAILWAY_API_TOKEN') ||
+      this.config.get<string>('RAILWAY_WORKSPACE_TOKEN') ||
+      process.env.RAILWAY_API_TOKEN ||
+      process.env.RAILWAY_WORKSPACE_TOKEN;
     if (!token) {
       return {
         configured: false,
         updatedAt: new Date().toISOString(),
         totalCostUsd: 0,
         projects: [],
-        error: 'RAILWAY_API_TOKEN non configuré',
+        error: 'RAILWAY_API_TOKEN ou RAILWAY_WORKSPACE_TOKEN non configuré',
       };
     }
 
