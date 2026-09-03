@@ -1,40 +1,118 @@
-﻿import { test, expect, describe, mock } from 'bun:test';
+﻿import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { RailwayService } from './railway.service';
+import { ConfigService } from '@nestjs/config';
 
-describe('RailwayService', () => {
-  test('returns configured: false when RAILWAY_API_TOKEN is not set', async () => {
-    const config = { get: mock(() => null) } as any;
-    const svc = new RailwayService(config);
+describe('RailwayService (3-State Health & Raw Metrics)', () => {
+  let service: RailwayService;
+  let originalFetch: typeof globalThis.fetch;
 
-    const result = await svc.getUsage();
-    expect(result.configured).toBe(false);
-    expect(result.projects).toEqual([]);
-    expect(result.totalCostUsd).toBe(0);
-    expect(result.error).toContain('RAILWAY_API_TOKEN');
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    delete process.env.RAILWAY_TOKEN;
+    delete process.env.RAILWAY_API_TOKEN;
+    delete process.env.RAILWAY_WORKSPACE_TOKEN;
   });
 
-  test('caches the response when called multiple times within TTL', async () => {
-    const config = { get: mock(() => 'fake-token') } as any;
-    const svc = new RailwayService(config);
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
 
-    // Mock internal fetchProjects
-    (svc as any).fetchProjects = mock(async () => [
-      {
-        id: 'proj-1',
-        name: 'Nola Studio Prod',
-        servicesCount: 2,
-        estimatedCostUsd: 15.5,
-        services: [{ id: 'srv-1', name: 'api' }, { id: 'srv-2', name: 'db' }],
-      },
-    ]);
+  it('reports "unconfigured" when no RAILWAY_TOKEN is present', async () => {
+    const config = new ConfigService();
+    service = new RailwayService(config);
 
-    const res1 = await svc.getUsage();
-    expect(res1.configured).toBe(true);
-    expect(res1.totalCostUsd).toBe(15.5);
-    expect(res1.projects.length).toBe(1);
+    const res = await service.getUsage(true);
+    expect(res.status).toBe('unconfigured');
+    expect(res.configured).toBe(false);
+    expect(res.totalCostUsd).toBe(0);
+    expect(res.projects).toEqual([]);
+    expect(res.error).toContain('non configuré');
+  });
 
-    const res2 = await svc.getUsage();
-    expect((svc as any).fetchProjects).toHaveBeenCalledTimes(1);
-    expect(res2).toBe(res1);
+  it('reports "error" loudly when Railway API rejects the token (Not Authorized)', async () => {
+    process.env.RAILWAY_TOKEN = 'mock_bad_token';
+    const config = new ConfigService();
+    service = new RailwayService(config);
+
+    globalThis.fetch = mock(async () => {
+      return new Response(
+        JSON.stringify({
+          errors: [{ message: 'Not Authorized', path: ['me'] }],
+          data: null,
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }) as any;
+
+    const res = await service.getUsage(true);
+    expect(res.status).toBe('error');
+    expect(res.configured).toBe(true);
+    expect(res.error).toBe('Not Authorized');
+    expect(res.projects).toEqual([]);
+  });
+
+  it('reports "connected" with workspace info and raw project metrics upon success', async () => {
+    process.env.RAILWAY_TOKEN = 'mock_valid_workspace_token';
+    const config = new ConfigService();
+    service = new RailwayService(config);
+
+    let callCount = 0;
+    globalThis.fetch = mock(async (_url, opts: any) => {
+      callCount++;
+      const body = JSON.parse(opts.body);
+      if (body.query.includes('GetProjectsAndBilling')) {
+        return new Response(
+          JSON.stringify({
+            data: {
+              me: {
+                name: 'NolaaStudio-npr',
+                projects: {
+                  edges: [
+                    {
+                      node: {
+                        id: 'proj-1',
+                        name: 'Nola-Core',
+                        services: {
+                          edges: [{ node: { id: 'svc-1', name: 'nola-hq-backend' } }],
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      if (body.query.includes('GetEstimatedUsage')) {
+        return new Response(
+          JSON.stringify({
+            data: {
+              estimatedUsage: [
+                { projectId: 'proj-1', measurement: 'CPU_USAGE_2', estimatedValue: 12.5 },
+                { projectId: 'proj-1', measurement: 'MEMORY_USAGE_GB', estimatedValue: 34.2 },
+                { projectId: 'proj-1', measurement: 'DISK_USAGE_GB', estimatedValue: 10.0 },
+                { projectId: 'proj-1', measurement: 'NETWORK_TX_GB', estimatedValue: 1.8 },
+              ],
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      return new Response('{}', { status: 200 });
+    }) as any;
+
+    const res = await service.getUsage(true);
+    expect(res.status).toBe('connected');
+    expect(res.configured).toBe(true);
+    expect(res.workspaceName).toBe('NolaaStudio-npr');
+    expect(res.projects.length).toBe(1);
+    expect(res.projects[0].name).toBe('Nola-Core');
+    expect(res.projects[0].metrics.cpuHours).toBe(12.5);
+    expect(res.projects[0].metrics.memoryGbHours).toBe(34.2);
+    expect(res.projects[0].metrics.diskGb).toBe(10);
+    expect(res.projects[0].metrics.networkTxGb).toBe(1.8);
+    expect(res.error).toBeNull();
   });
 });
