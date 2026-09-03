@@ -1,0 +1,59 @@
+name: Continuous Integration
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [dev, main]
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: nola-hq-backend-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Types, tests, migrations & production build
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: nola_hq_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Unit Tests (including Tier 1 Static Schema Guard)
+        run: bun test src
+
+      - name: Tier 2 Schema Migration Integrity Gate (Live PostgreSQL)
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/nola_hq_test
+        run: bun run src/scripts/verify-schema-integrity.ts
+
+      - name: Production build
+        run: bun run build
