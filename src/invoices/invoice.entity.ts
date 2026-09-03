@@ -14,6 +14,10 @@ export class Invoice {
   @Column({ type: 'integer' })
   amt!: number;
 
+  /** ISO 4217 code (e.g. 'USD', 'CDF') — never assumed or dropped. */
+  @Column({ type: 'varchar', length: 10, default: 'USD' })
+  currency!: string;
+
   @Column()
   due!: string;
 
@@ -21,6 +25,7 @@ export class Invoice {
   @Index()
   status!: InvoiceStatus;
 
+  /** Payment method/rail (e.g. 'mobile_money', 'card', 'bank_transfer', 'mpesa', 'airtel'). */
   @Column()
   method!: string;
 

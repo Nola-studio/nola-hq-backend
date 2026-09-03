@@ -7,10 +7,15 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { NolaCommandsService } from '@nola-hq/nola-sdk';
+import { NolaCommandsService, NolaClientService } from '@nola-hq/nola-sdk';
 import { Invoice, type InvoiceStatus } from './invoice.entity';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { ListInvoicesDto } from './dto/list-invoices.dto';
+import { PaymentSucceededEventPayload } from './dto/payment-succeeded.dto';
+import { BusinessPdfService } from '../business/business-pdf.service';
+import { BusinessInvoice } from '../business/business-invoice.entity';
+import { Product } from '../company/product.entity';
+import { nextBusinessNumber } from '../business/business-number-sequence';
 import type { PaginatedResult } from '../common/dto/pagination.dto';
 
 /**
@@ -51,7 +56,10 @@ export class InvoicesService {
 
   constructor(
     @InjectRepository(Invoice) private readonly repo: Repository<Invoice>,
+    @InjectRepository(Product) private readonly products: Repository<Product>,
     private readonly commands: NolaCommandsService,
+    private readonly nolaClient: NolaClientService,
+    private readonly pdfService: BusinessPdfService,
   ) {}
 
   async list(query: ListInvoicesDto): Promise<PaginatedResult<Invoice>> {
@@ -94,7 +102,7 @@ export class InvoicesService {
     if (await this.repo.findOne({ where: { id } })) {
       throw new BadRequestException(`Facture ${id} existe déjà`);
     }
-    return this.repo.save(this.repo.create({ ...dto, id }));
+    return this.repo.save(this.repo.create({ ...dto, id, currency: dto.currency || 'USD' }));
   }
 
   async setStatus(id: string, status: InvoiceStatus, method?: string) {
@@ -130,15 +138,167 @@ export class InvoicesService {
     };
   }
 
-  private async nextInvoiceId() {
-    const last = await this.repo
-      .createQueryBuilder('i')
-      .orderBy('i.id', 'DESC')
-      .getOne();
-    const year = new Date().getFullYear();
-    if (!last) return `INV-${year}-0001`;
-    const num = parseInt(last.id.split('-').pop() ?? '0', 10) || 0;
-    return `INV-${year}-${String(num + 1).padStart(4, '0')}`;
+  /** Generates sequential invoice number using HQ's authoritative sequence. */
+  async generateSequentialInvoiceNumber(now: Date | number = new Date()): Promise<string> {
+    const date = typeof now === 'number' ? new Date(Date.UTC(now, 0, 1)) : now;
+    return nextBusinessNumber(this.repo.manager, 'FAC', date);
+  }
+
+  private async nextInvoiceId(): Promise<string> {
+    return this.generateSequentialInvoiceNumber();
+  }
+
+  /**
+   * Processes a `payment.succeeded` event:
+   * 1. Resolves Product -> BusinessUnit -> LegalEntity (strictly failing closed on miss).
+   * 2. Generates sequential invoice number via HQ's `nextBusinessNumber('FAC')`.
+   * 3. Renders official branded PDF via `BusinessPdfService`.
+   * 4. Dispatches email notification via fire-and-forget `nola.commands.notify.send`.
+   * 5. Persists the `Invoice` row in HQ with real payment rail and currency.
+   */
+  async processPaymentSucceeded(payload: PaymentSucceededEventPayload): Promise<{
+    invoiceNumber: string;
+    receiptNumber: string;
+    brandName: string;
+    legalEntityName: string;
+    pdfBuffer: Buffer;
+    notificationDispatched: boolean;
+  }> {
+    const rawAmount = typeof payload.amount === 'string' ? parseFloat(payload.amount) : payload.amount;
+    const amount = Number.isFinite(rawAmount) ? rawAmount : 0;
+    const currency = (payload.currency || 'USD').toUpperCase();
+    const productCode = (payload.appId || payload.productCode || '').trim();
+    const paymentMethod = payload.provider || payload.paymentMethod || payload.method || 'mobile_money';
+    const tenantId = (payload.tenantId || '').trim();
+    const now = payload.paidAt ? new Date(payload.paidAt) : new Date();
+
+    if (!productCode) {
+      this.logger.error(
+        `CRITICAL: payment.succeeded rejected — missing product/app identifier (tenant=${tenantId})`,
+      );
+      throw new BadRequestException('Missing product/app identifier for payment.succeeded');
+    }
+
+    // 1. Resolve Product -> BusinessUnit -> LegalEntity
+    let product = await this.products.findOne({
+      where: { code: productCode },
+      relations: ['businessUnit', 'businessUnit.legalEntity'],
+    });
+
+    if (!product) {
+      // Check legacy/source aliases
+      const allProducts = await this.products.find({
+        relations: ['businessUnit', 'businessUnit.legalEntity'],
+      });
+      product =
+        allProducts.find(
+          (p) => Array.isArray(p.sourceAliases) && p.sourceAliases.includes(productCode),
+        ) ?? null;
+    }
+
+    if (!product || !product.businessUnit) {
+      this.logger.error(
+        `CRITICAL: payment.succeeded rejected — unresolvable brand for app '${productCode}' (tenant=${tenantId}). Zero mock fabrication allowed.`,
+      );
+      throw new BadRequestException(
+        `Unresolvable brand for product '${productCode}'. Document generation aborted.`,
+      );
+    }
+
+    const businessUnit = product.businessUnit;
+    const legalEntity = businessUnit.legalEntity;
+
+    // 2. Sequential Document Numbering strictly from HQ authority
+    const invoiceNumber = await nextBusinessNumber(this.repo.manager, 'FAC', now);
+    const receiptNumber = await nextBusinessNumber(this.repo.manager, 'REC', now);
+
+    // 3. Render Branded PDF via BusinessPdfService
+    const invoiceEntity: BusinessInvoice = {
+      id: payload.invoiceId || invoiceNumber,
+      number: invoiceNumber,
+      receiptNumber,
+      businessUnitId: businessUnit.id,
+      businessUnit,
+      amountCdf: amount,
+      paidAmountCdf: amount,
+      taxRate: 0,
+      taxCdf: 0,
+      taxLabel: null,
+      currency: currency as any,
+      issuedOn: now.toISOString().slice(0, 10),
+      dueOn: now.toISOString().slice(0, 10),
+      paidAt: now,
+      status: 'paid',
+      description: payload.description || `Abonnement ${product.name} — ${tenantId}`,
+      paymentMethod: (paymentMethod as any) || 'mobile_money',
+      paymentReference: payload.reference || payload.paymentId || null,
+      verificationToken: receiptNumber,
+      client: {
+        name: payload.customerName || tenantId,
+        email: payload.customerEmail || null,
+        phone: null,
+      } as any,
+    } as BusinessInvoice;
+
+    const pdfBuffer = await this.pdfService.invoice(invoiceEntity);
+
+    // 4. Dispatch Email Notification via standard nola.commands.notify.send (fire-and-forget)
+    let notificationDispatched = false;
+    const recipient = payload.customerEmail || (tenantId ? `admin@${tenantId}.nola.cd` : null);
+
+    if (recipient && this.nolaClient.isReady()) {
+      try {
+        await this.nolaClient.getClient().publish('nola.commands.notify.send', {
+          channel: 'email',
+          to: recipient,
+          template: '_inline',
+          variables: {
+            subject: `Facture ${invoiceNumber} — ${businessUnit.name}`,
+            body: `Votre paiement de ${amount} ${currency} pour le service ${product.name} (${tenantId}) a bien été enregistré. Facture n° ${invoiceNumber}.`,
+          },
+          idempotencyKey: `billing-payment-${payload.paymentId || payload.invoiceId || invoiceNumber}`,
+          realm: 'nola-hq',
+          tenantId: tenantId || 'nola-studio',
+        });
+        notificationDispatched = true;
+        this.logger.warn(`notify dispatched, delivery not confirmed — invoice=${invoiceNumber} to=${recipient}`);
+      } catch (err: any) {
+        this.logger.error(`Failed to publish notify.send for ${invoiceNumber}: ${err.message}`);
+      }
+    } else if (recipient) {
+      this.logger.warn(`nola_client_offline — skipped notification for ${recipient}`);
+    }
+
+    // 5. Persist/Update Invoice row
+    const id = payload.invoiceId || invoiceNumber;
+    let local = await this.repo.findOne({ where: { id } });
+    if (!local) {
+      local = this.repo.create({
+        id,
+        tenant: tenantId,
+        amt: Math.round(amount),
+        currency,
+        status: 'paid',
+        method: paymentMethod,
+        issued: now.toISOString().slice(0, 10),
+        due: now.toISOString().slice(0, 10),
+      });
+    } else {
+      local.status = 'paid';
+      local.amt = Math.round(amount);
+      local.currency = currency;
+      local.method = paymentMethod;
+    }
+    await this.repo.save(local);
+
+    return {
+      invoiceNumber,
+      receiptNumber,
+      brandName: businessUnit.name,
+      legalEntityName: legalEntity?.name ?? 'Nolaa Studio',
+      pdfBuffer,
+      notificationDispatched,
+    };
   }
 
   private async fetchBillingInvoices(filter: {
@@ -192,6 +352,7 @@ function adaptBillingInvoice(b: BillingInvoice): Invoice {
   inv.id = b.id;
   inv.tenant = b.tenantId;
   inv.amt = Math.round(Number(b.amount ?? 0));
+  inv.currency = b.currency || 'USD';
   inv.due = (b.dueDate ?? b.createdAt ?? '').slice(0, 10);
   inv.status = status;
   inv.method = methodFromInvoice(b);
