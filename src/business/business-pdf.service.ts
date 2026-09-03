@@ -48,6 +48,10 @@ interface DocumentBrand {
   tagline: string;
   footerLine: string;
   theme: PdfTheme;
+  registrationNumber?: string | null;
+  taxRegime?: string | null;
+  jurisdiction?: string | null;
+  legalEntityName?: string | null;
 }
 
 const INVOICE_STATUS_LABELS: Record<BusinessInvoiceStatus, string> = {
@@ -372,11 +376,16 @@ export class BusinessPdfService {
   }
 
   private brandOf(unit?: BusinessUnit | null): DocumentBrand {
+    const le = unit?.legalEntity;
     return {
-      name: unit?.name ?? LEGAL_ENTITY.name,
+      name: unit?.name ?? le?.name ?? LEGAL_ENTITY.name,
       tagline: unit?.tagline ?? LEGAL_ENTITY.tagline,
       footerLine: unit?.footerLine ?? LEGAL_ENTITY.footerLine,
       theme: resolvePdfTheme(unit),
+      registrationNumber: le?.registrationNumber ?? null,
+      taxRegime: le?.taxRegime ?? null,
+      jurisdiction: le?.jurisdiction ?? null,
+      legalEntityName: le?.name ?? null,
     };
   }
 
@@ -403,10 +412,15 @@ export class BusinessPdfService {
       draw(doc);
 
       const { start, count } = doc.bufferedPageRange();
+      const entityLabel = brand.legalEntityName || 'Nolaa Studio Inc.';
+      const rightText = brand.registrationNumber
+        ? `${entityLabel}  •  ${brand.registrationNumber}`
+        : entityLabel;
+
       for (let i = 0; i < count; i++) {
         doc.switchToPage(start + i);
         if (i === count - 1) {
-          footer(doc, 755, { brandLine: brand.footerLine, monogram: this.monogram(brand.name), theme: brand.theme, rightText: 'Nolaa Studio Inc.' });
+          footer(doc, 755, { brandLine: brand.footerLine, monogram: this.monogram(brand.name), theme: brand.theme, rightText });
         } else {
           pageNumberStamp(doc, i + 1, count);
         }
