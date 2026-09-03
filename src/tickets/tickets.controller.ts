@@ -87,6 +87,17 @@ export class TicketsController {
     return this.svc.assign(id, dto.assignee, user?.roles, actor(user));
   }
 
+  /**
+   * Sign-off on a deployment ticket — distinct from assignment, and
+   * `hq:owner` rather than `hq:operator`: approving a production deploy
+   * isn't an operator action.
+   */
+  @Post(':id/approve')
+  @HqRoles(HqRole.Owner)
+  approve(@Param('id', ParseIntPipe) id: number, @CurrentUser() user?: AuthenticatedUser) {
+    return this.svc.approve(id, user?.roles, actor(user));
+  }
+
   @Patch(':id')
   @HqRoles(HqRole.Operator)
   update(

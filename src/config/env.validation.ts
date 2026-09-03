@@ -29,6 +29,12 @@ export class EnvironmentVariables {
   @IsOptional() @IsString() VAPID_PUBLIC_KEY?: string;
   @IsOptional() @IsString() VAPID_PRIVATE_KEY?: string;
   @IsOptional() @IsString() VAPID_SUBJECT?: string;
+  // Read-only, repo-scoped PAT for deployment ticket commit-range lookups
+  // (GithubService) — optional: unset just disables the composer's
+  // GitHub compare call (degraded mode, matches KeycloakAdminService's
+  // contract). Deliberately not the GITHUB_TOKEN already present in this
+  // app's environment — that one's scope was never verified for this use.
+  @IsOptional() @IsString() DEPLOYMENT_GITHUB_TOKEN?: string;
 }
 
 /** base64 of 32 zero bytes — the dev placeholder that must never reach prod. */
