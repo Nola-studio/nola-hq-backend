@@ -14,6 +14,10 @@ export class Invoice {
   @Column({ type: 'integer' })
   amt!: number;
 
+  /** ISO 4217 code (e.g. 'USD', 'CDF') — never assumed or dropped. */
+  @Column({ type: 'varchar', length: 10, default: 'USD' })
+  currency!: string;
+
   @Column()
   due!: string;
 
