@@ -48,7 +48,7 @@ jobs:
         run: bun run typecheck
 
       - name: Unit Tests (including Tier 1 Static Schema Guard)
-        run: bun test
+        run: bun test src
 
       - name: Tier 2 Schema Migration Integrity Gate (Live PostgreSQL)
         env:
