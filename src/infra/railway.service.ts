@@ -47,13 +47,7 @@ export class RailwayService {
       return this.cachedResult;
     }
 
-    const token =
-      this.config.get<string>('RAILWAY_TOKEN') ||
-      this.config.get<string>('RAILWAY_API_TOKEN') ||
-      this.config.get<string>('RAILWAY_WORKSPACE_TOKEN') ||
-      process.env.RAILWAY_TOKEN ||
-      process.env.RAILWAY_API_TOKEN ||
-      process.env.RAILWAY_WORKSPACE_TOKEN;
+    const token = this.config.get<string>('RAILWAY_TOKEN') || process.env.RAILWAY_TOKEN;
 
     if (!token) {
       return {
@@ -105,54 +99,31 @@ export class RailwayService {
   }> {
     const endpoint = 'https://backboard.railway.app/graphql/v2';
 
-    const projectsQuery = `
-      query GetProjectsAndBilling {
-        me {
-          name
-          projects {
-            edges {
-              node {
-                id
-                name
-                services {
-                  edges {
-                    node {
-                      id
-                      name
-                    }
+    // 1. Query Workspace identity, Projects, and Estimated Measurements
+    const mainQuery = `
+      query GetWorkspaceData($measurements: [MetricMeasurement!]!) {
+        apiToken {
+          workspaces {
+            id
+            name
+          }
+        }
+        projects {
+          edges {
+            node {
+              id
+              name
+              services {
+                edges {
+                  node {
+                    id
+                    name
                   }
                 }
               }
             }
           }
         }
-      }
-    `;
-
-    const resProjects = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ query: projectsQuery }),
-    });
-
-    if (!resProjects.ok) {
-      throw new Error(`Railway API HTTP ${resProjects.status}: ${resProjects.statusText}`);
-    }
-
-    const jsonProjects: any = await resProjects.json();
-    if (jsonProjects.errors && jsonProjects.errors.length > 0) {
-      throw new Error(jsonProjects.errors[0].message || 'GraphQL Error');
-    }
-
-    const edges = jsonProjects.data?.me?.projects?.edges || [];
-    const workspaceName = jsonProjects.data?.me?.name || null;
-
-    // Query raw estimated measurements
-    const measurementsQuery = `
-      query GetEstimatedUsage($measurements: [MetricMeasurement!]!) {
         estimatedUsage(measurements: $measurements) {
           projectId
           measurement
@@ -161,7 +132,7 @@ export class RailwayService {
       }
     `;
 
-    const measurementsVars = {
+    const mainVars = {
       measurements: [
         'CPU_USAGE_2',
         'CPU_USAGE',
@@ -172,40 +143,88 @@ export class RailwayService {
       ],
     };
 
-    let metricsByProject: Record<string, RailwayProjectMetrics> = {};
-    try {
-      const resMetrics = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ query: measurementsQuery, variables: measurementsVars }),
-      });
-      if (resMetrics.ok) {
-        const jsonMetrics: any = await resMetrics.json();
-        const usageItems = jsonMetrics.data?.estimatedUsage || [];
-        for (const item of usageItems) {
-          if (!metricsByProject[item.projectId]) {
-            metricsByProject[item.projectId] = {
-              memoryGbHours: 0,
-              cpuHours: 0,
-              diskGb: 0,
-              networkTxGb: 0,
-            };
-          }
-          const p = metricsByProject[item.projectId];
-          const val = Number(item.estimatedValue) || 0;
-          if (item.measurement === 'MEMORY_USAGE_GB') p.memoryGbHours += val;
-          else if (item.measurement === 'CPU_USAGE_2' || item.measurement === 'CPU_USAGE') p.cpuHours += val;
-          else if (item.measurement === 'DISK_USAGE_GB' || item.measurement === 'EPHEMERAL_DISK_USAGE_GB') p.diskGb += val;
-          else if (item.measurement === 'NETWORK_TX_GB') p.networkTxGb += val;
-        }
-      }
-    } catch {
-      // Non-blocking for raw metrics
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ query: mainQuery, variables: mainVars }),
+    });
+
+    if (!res.ok) {
+      throw new Error(`Railway API HTTP ${res.status}: ${res.statusText}`);
     }
 
+    const json: any = await res.json();
+    if (json.errors && json.errors.length > 0) {
+      throw new Error(json.errors[0].message || 'GraphQL Error');
+    }
+
+    const workspace = json.data?.apiToken?.workspaces?.[0];
+    const workspaceId = workspace?.id || null;
+    const workspaceName = workspace?.name || null;
+    const edges = json.data?.projects?.edges || [];
+    const usageItems = json.data?.estimatedUsage || [];
+
+    // 2. Aggregate raw measurements per project
+    const metricsByProject: Record<string, RailwayProjectMetrics> = {};
+    for (const item of usageItems) {
+      if (!metricsByProject[item.projectId]) {
+        metricsByProject[item.projectId] = {
+          memoryGbHours: 0,
+          cpuHours: 0,
+          diskGb: 0,
+          networkTxGb: 0,
+        };
+      }
+      const p = metricsByProject[item.projectId];
+      const val = Number(item.estimatedValue) || 0;
+      if (item.measurement === 'MEMORY_USAGE_GB') {
+        p.memoryGbHours += val;
+      } else if (item.measurement === 'CPU_USAGE_2' || item.measurement === 'CPU_USAGE') {
+        p.cpuHours += val;
+      } else if (item.measurement === 'DISK_USAGE_GB' || item.measurement === 'EPHEMERAL_DISK_USAGE_GB') {
+        p.diskGb += val;
+      } else if (item.measurement === 'NETWORK_TX_GB') {
+        p.networkTxGb += val;
+      }
+    }
+
+    // 3. Query authoritative Workspace Customer currentUsage if workspaceId is present
+    let totalCostUsd = 0;
+    if (workspaceId) {
+      try {
+        const billingQuery = `
+          query GetWorkspaceBilling($wsId: String!) {
+            workspace(workspaceId: $wsId) {
+              customer {
+                currentUsage
+              }
+            }
+          }
+        `;
+        const resBilling = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ query: billingQuery, variables: { wsId: workspaceId } }),
+        });
+        if (resBilling.ok) {
+          const jsonBilling: any = await resBilling.json();
+          const rawUsage = jsonBilling.data?.workspace?.customer?.currentUsage;
+          if (typeof rawUsage === 'number') {
+            totalCostUsd = Number(rawUsage.toFixed(2));
+          }
+        }
+      } catch (err: any) {
+        this.logger.warn(`Failed to fetch workspace billing: ${err.message}`);
+      }
+    }
+
+    // 4. Map projects
     const projects: RailwayProjectNode[] = edges.map((edge: any) => {
       const node = edge.node;
       const serviceEdges = node.services?.edges || [];
@@ -237,7 +256,7 @@ export class RailwayService {
 
     return {
       projects,
-      totalCostUsd: 0, // Authoritative billing total populated when Customer.currentUsage is queried
+      totalCostUsd,
       workspaceName,
     };
   }
