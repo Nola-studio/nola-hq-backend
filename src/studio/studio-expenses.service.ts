@@ -99,18 +99,10 @@ export class StudioExpensesService {
     let skipped = 0;
 
     for (const t of templates) {
-      // Check if this template was already accounted for in this month:
-      // 1. If the template's own date is in the target month (e.g. newly created this month)
-      // 2. Or if a child instance with templateId === t.id already exists in this month
-      // 3. Or matching description & category with templateId in this month
+      // Check if an instance generated from this template already exists in the target month,
+      // or if the template was itself created in the target month.
       const alreadyExists = thisMonthExpenses.some(
-        (e) =>
-          (e.id === t.id && e.date.startsWith(targetMonth)) ||
-          e.templateId === t.id ||
-          (e.description === t.description &&
-            e.category === t.category &&
-            e.amountCents === t.amountCents &&
-            e.id !== t.id),
+        (e) => (e.id === t.id && e.date.startsWith(targetMonth)) || e.templateId === t.id,
       );
 
       if (alreadyExists) {

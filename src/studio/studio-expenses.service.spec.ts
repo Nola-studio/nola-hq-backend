@@ -128,4 +128,37 @@ describe('StudioExpensesService', () => {
     expect(result.count).toBe(0);
     expect(result.skipped).toBe(1);
   });
+
+  test('does not dedup against distinct manual expenses without templateId', async () => {
+    const rows = [
+      {
+        id: 't-1',
+        description: 'Office Supplies',
+        amountCents: 5000,
+        currency: 'USD',
+        category: 'other',
+        paidByEmail: 'greg@nola.dev',
+        date: '2026-08-01',
+        recurring: true,
+        frequency: 'monthly',
+      },
+      {
+        id: 'manual-1',
+        description: 'Office Supplies',
+        amountCents: 5000,
+        currency: 'USD',
+        category: 'other',
+        paidByEmail: 'greg@nola.dev',
+        date: '2026-09-02',
+        recurring: false,
+        templateId: null,
+      },
+    ];
+    const repo = makeRepo(rows);
+    const svc = new StudioExpensesService(repo);
+
+    const result = await svc.generateMonthlyRecurring('2026-09-01');
+    expect(result.count).toBe(1);
+    expect(result.skipped).toBe(0);
+  });
 });
