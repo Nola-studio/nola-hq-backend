@@ -62,6 +62,10 @@ export class StudioExpense {
   @Column({ type: 'varchar', length: 120, name: 'payment_method', nullable: true })
   paymentMethod!: string | null;
 
+  /** ID of the recurring template that generated this monthly expense instance. Null if created manually or if this row itself is a template. */
+  @Column({ type: 'varchar', length: 64, nullable: true, name: 'template_id' })
+  templateId!: string | null;
+
   @Column({ name: 'created_at' })
   createdAt!: Date;
 }
