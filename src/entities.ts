@@ -56,6 +56,7 @@ import { ProjectTimeEntry } from './business/project-time-entry.entity';
 import { SlaPolicy } from './sla/sla-policy.entity';
 import { Notification } from './notifications/notification.entity';
 import { CodeRepository, RepositoryProject } from './github/repository.entity';
+import { GithubWebhookDelivery } from './github/github-webhook-delivery.entity';
 
 // Le registry des apps n'a PAS de table — c'est une projection in-memory
 // reconstruite à partir du JetStream NOLA_REGISTRY (cf. AppsService).
@@ -136,4 +137,5 @@ export const entities = [
   IdempotencyKey,
   CodeRepository,
   RepositoryProject,
+  GithubWebhookDelivery,
 ];

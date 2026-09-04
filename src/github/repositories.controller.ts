@@ -9,6 +9,7 @@ import {
   UpdateRepositoryDto,
 } from './dto/repository.dto';
 import { GithubAppService } from './github-app.service';
+import { GithubWebhooksService } from './github-webhooks.service';
 import { RepositoriesService } from './repositories.service';
 
 @ApiBearerAuth()
@@ -18,6 +19,7 @@ export class RepositoriesController {
   constructor(
     private readonly svc: RepositoriesService,
     private readonly github: GithubAppService,
+    private readonly webhooks: GithubWebhooksService,
   ) {}
 
   @Get()
@@ -49,6 +51,13 @@ export class RepositoriesController {
   @HqRoles(HqRole.Viewer)
   findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.svc.findOne(id);
+  }
+
+  @Get(':id/deliveries')
+  @HqRoles(HqRole.Viewer)
+  @ApiOperation({ summary: 'Ce que GitHub a raconté sur ce dépôt, du plus récent au plus ancien.' })
+  deliveries(@Param('id', ParseUUIDPipe) id: string) {
+    return this.webhooks.listForRepository(id);
   }
 
   @Get(':id/projects')

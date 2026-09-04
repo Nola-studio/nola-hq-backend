@@ -9,7 +9,10 @@ import { NolaClientService } from '@nola-hq/nola-sdk';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { cors: false });
+    // `rawBody: true` conserve les octets reçus à côté du corps analysé. Les
+  // webhooks GitHub en dépendent : la signature porte sur ce que GitHub a
+  // envoyé, et re-sérialiser l'objet analysé donnerait d'autres octets.
+  const app = await NestFactory.create(AppModule, { cors: false, rawBody: true });
   const config = app.get(ConfigService);
   const logger = new Logger('Bootstrap');
 
