@@ -4,15 +4,25 @@
 #
 #   ./scripts/import-referentiel.sh <fichier.md> [version]
 #
-# Variables :
+# Trois façons de s'authentifier, de la meilleure à la moins bonne :
+#
+#   HQ_TOKEN    jeton client_credentials émis par Nola Auth. Le script vise la
+#               surface publique (/public/v1). C'est l'option pour tout ce qui
+#               est automatisé : le service account porte ses propres scopes
+#               (execution-reference:write, :parse, backlog:preview, :write) et
+#               se révoque sans toucher au compte de personne.
+#
+#   HQ_SESSION  identifiant de session d'une console déjà ouverte, envoyé en
+#               `Authorization: Bearer`. L'option pour un import ponctuel :
+#               aucun mot de passe ne transite ni ne traîne dans un
+#               historique de shell. Se récupère dans le navigateur, cookie
+#               `nola_hq_session`, ou dans la réponse de /auth/login.
+#
+#   HQ_EMAIL    en dernier recours, quand il n'y a ni service account ni
+#   HQ_PASSWORD session sous la main. Le script ouvre une session lui-même.
+#
 #   HQ_API      base de l'API, sans slash final
 #               (défaut : https://dev.api.nolaastudio.com/api/v1)
-#   HQ_EMAIL    identifiants console — le script ouvre une session et
-#   HQ_PASSWORD réutilise le cookie pour les appels suivants
-#   HQ_TOKEN    alternative : un jeton client_credentials Nola Auth. Le script
-#               vise alors la surface publique (/public/v1) et n'ouvre pas de
-#               session. Le service account doit porter les scopes
-#               execution-reference:write, :parse et backlog:preview, :write.
 #   HQ_KEY      clé stable du référentiel (défaut : REF-NOLAAHQ)
 #
 # Le script s'arrête avant d'écrire quoi que ce soit dans le backlog : il
@@ -49,7 +59,12 @@ if [[ -n "${HQ_TOKEN:-}" ]]; then
   BASE="${HQ_API%/api/v1}/public/v1"
   AUTH=(-H "Authorization: Bearer $HQ_TOKEN")
   PREVIEW_PATH="backlog/preview"; APPLY_PATH="backlog/apply"
-  echo "Surface publique : $BASE"
+  echo "Surface publique : $BASE (service account)"
+elif [[ -n "${HQ_SESSION:-}" ]]; then
+  BASE="$HQ_API"
+  AUTH=(-H "Authorization: Bearer $HQ_SESSION")
+  PREVIEW_PATH="import?dryRun=true"; APPLY_PATH="import"
+  echo "Surface interne : $BASE (session existante)"
 else
   : "${HQ_EMAIL:?HQ_EMAIL requis (ou HQ_TOKEN pour la surface publique)}"
   : "${HQ_PASSWORD:?HQ_PASSWORD requis}"
@@ -57,6 +72,7 @@ else
   AUTH=()
   PREVIEW_PATH="import?dryRun=true"; APPLY_PATH="import"
   echo "Surface interne : $BASE — ouverture de session pour $HQ_EMAIL"
+  echo "  (HQ_SESSION évite d'avoir à passer un mot de passe — voir l'entête)"
   curl -sS -f -X POST "$HQ_API/auth/login" -H 'Content-Type: application/json' -c "$COOKIES" \
     -d "$(jq -n --arg e "$HQ_EMAIL" --arg p "$HQ_PASSWORD" '{email:$e,password:$p}')" >/dev/null
   AUTH=(-b "$COOKIES")
