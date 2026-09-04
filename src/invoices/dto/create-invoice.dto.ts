@@ -1,10 +1,11 @@
 import { IsIn, IsInt, IsOptional, IsString, Min } from 'class-validator';
 
-const STATUSES = ['paid', 'pending', 'late', 'overdue'] as const;
+const STATUSES = ['paid', 'pending', 'late', 'overdue', 'cancelled'] as const;
 
 export class CreateInvoiceDto {
   @IsOptional() @IsString() id?: string;
   @IsString() tenant!: string;
+  @IsOptional() @IsString() subscriptionId?: string | null;
   @IsInt() @Min(0) amt!: number;
   @IsOptional() @IsString() currency?: string;
   @IsString() due!: string;

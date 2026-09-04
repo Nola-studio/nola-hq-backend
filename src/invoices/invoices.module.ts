@@ -7,6 +7,7 @@ import { BusinessModule } from '../business/business.module';
 import { InvoicesController } from './invoices.controller';
 import { InvoicesService } from './invoices.service';
 import { PaymentEventsListener } from './payment-events.listener';
+import { InvoicesUpcomingScheduler } from './invoices-upcoming.scheduler';
 
 @Module({
   imports: [
@@ -15,7 +16,7 @@ import { PaymentEventsListener } from './payment-events.listener';
     BusinessModule,
   ],
   controllers: [InvoicesController],
-  providers: [InvoicesService, PaymentEventsListener],
+  providers: [InvoicesService, PaymentEventsListener, InvoicesUpcomingScheduler],
   exports: [InvoicesService],
 })
 export class InvoicesModule {}
