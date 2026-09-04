@@ -1,7 +1,7 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
-import { Ticket, type TicketStatus, type TicketPendingReason, type TicketPriority } from './ticket.entity';
+import { Ticket, type TicketStatus, type TicketPendingReason, type TicketPriority, type TicketResolutionCode, TICKET_RESOLUTION_CODES } from './ticket.entity';
 import { TicketEvent, type TicketEventAction } from './ticket-event.entity';
 import {
   AddReplyDto,
@@ -179,13 +179,47 @@ export class TicketsService {
     roles?: string[],
     actor?: string,
     pendingReason?: TicketPendingReason,
+    resolutionCode?: TicketResolutionCode,
+    resolutionNotes?: string,
   ) {
     const ticket = await this.findOne(id, roles);
     const nextPendingReason = status === 'pending' ? pendingReason ?? null : null;
-    // Idempotent no-op: nothing is mutated (both status and pendingReason match), so nothing to guard — this
-    // must come before the closed check below (re-submitting a closed
-    // ticket's already-closed status isn't a reopen attempt).
-    if (ticket.status === status && ticket.pendingReason === nextPendingReason) return ticket;
+    const nextResolutionCode = (status === 'resolved' || status === 'closed')
+      ? (resolutionCode ?? ticket.resolutionCode ?? null)
+      : null;
+    const nextResolutionNotes = (status === 'resolved' || status === 'closed')
+      ? (resolutionNotes !== undefined ? (resolutionNotes?.trim() || null) : (ticket.resolutionNotes ?? null))
+      : null;
+
+    if (status === 'resolved' || status === 'closed') {
+      if (!nextResolutionCode) {
+        throw new BadRequestException(
+          `Un code de résolution valide est requis pour passer le ticket en statut ${status}.`,
+        );
+      }
+      if (!TICKET_RESOLUTION_CODES.includes(nextResolutionCode)) {
+        throw new BadRequestException(`Code de résolution '${nextResolutionCode}' invalide.`);
+      }
+      if (
+        (nextResolutionCode === 'doublon' || nextResolutionCode === 'transfere') &&
+        (!nextResolutionNotes || !nextResolutionNotes.trim())
+      ) {
+        throw new BadRequestException(
+          `Une note explicative (resolutionNotes) est obligatoire pour le code de résolution '${nextResolutionCode}'.`,
+        );
+      }
+    }
+
+    // Idempotent no-op: nothing is mutated
+    if (
+      ticket.status === status &&
+      (ticket.pendingReason ?? null) === nextPendingReason &&
+      (ticket.resolutionCode ?? null) === nextResolutionCode &&
+      (ticket.resolutionNotes ?? null) === nextResolutionNotes
+    ) {
+      return ticket;
+    }
+
     // No Owner/admin override — a closed ticket is not reopenable by
     // anyone, matching WorkItem.assertMutable()'s posture. Narrower than
     // WorkItem's guard: this only blocks further *status* changes, not
@@ -200,19 +234,22 @@ export class TicketsService {
     // 'client') is the SLA-pausing default; any other transition clears it
     // so a stale reason can't linger into a future, different pending spell.
     ticket.pendingReason = nextPendingReason;
+    ticket.resolutionCode = nextResolutionCode;
+    ticket.resolutionNotes = nextResolutionNotes;
     ticket.updatedAt = new Date();
     const saved = await this.repo.save(ticket);
     void this.notifyStatusChange(saved, actor);
-    // `pendingReason` is recorded in `meta` (not a first-class column on
-    // TicketEvent) because it's only ever relevant when `toStatus ===
-    // 'pending'` — without it here, the SLA elapsed-time walk could only
-    // see the ticket's *current* pendingReason, which is wrong for any
-    // earlier pending spell once the ticket has cycled through pending
-    // more than once.
+
+    const eventMeta: Record<string, unknown> = {};
+    if (saved.pendingReason) eventMeta.pendingReason = saved.pendingReason;
+    if (saved.resolutionCode) eventMeta.resolutionCode = saved.resolutionCode;
+    if (saved.resolutionNotes) eventMeta.resolutionNotes = saved.resolutionNotes;
+
     void this.record(saved.id, actor ?? 'unknown', 'status_changed', {
       fromStatus,
       toStatus: status,
-      meta: { pendingReason: saved.pendingReason },
+      reason: saved.resolutionNotes?.slice(0, 240) ?? saved.resolutionCode ?? null,
+      meta: eventMeta,
     });
     return saved;
   }

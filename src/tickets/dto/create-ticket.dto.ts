@@ -1,4 +1,5 @@
 import { IsDateString, IsIn, IsOptional, IsString } from 'class-validator';
+import { TICKET_RESOLUTION_CODES, type TicketResolutionCode } from '../ticket.entity';
 
 const PRIORITIES = ['P1', 'P2', 'P3'] as const;
 const STATUSES = ['open', 'pending', 'closed', 'resolved'] as const;
@@ -51,6 +52,16 @@ export class UpdateTicketStatusDto {
   /** Only meaningful when `status === 'pending'`; ignored otherwise. Omitted/null means 'client'. */
   @IsOptional() @IsIn(PENDING_REASONS as unknown as string[])
   pendingReason?: (typeof PENDING_REASONS)[number];
+
+  /** Required when status is 'resolved' or 'closed'. */
+  @IsOptional()
+  @IsIn(TICKET_RESOLUTION_CODES as unknown as string[])
+  resolutionCode?: TicketResolutionCode;
+
+  /** Required when resolutionCode is 'doublon' or 'transfere'. */
+  @IsOptional()
+  @IsString()
+  resolutionNotes?: string;
 }
 
 export class AssignTicketDto {
