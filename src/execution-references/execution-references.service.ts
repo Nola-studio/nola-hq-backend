@@ -3,9 +3,11 @@ import {
   Injectable,
   NotFoundException,
   PayloadTooLargeException,
+  Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, IsNull, Repository } from 'typeorm';
+import { WorkItem } from '../work-items/work-item.entity';
 import { createHash } from 'node:crypto';
 import {
   ExecutionReference,
@@ -41,11 +43,15 @@ const VERSION_METADATA_COLUMNS = [
 
 @Injectable()
 export class ExecutionReferencesService {
+  private readonly logger = new Logger(ExecutionReferencesService.name);
+
   constructor(
     @InjectRepository(ExecutionReference)
     private readonly references: Repository<ExecutionReference>,
     @InjectRepository(ExecutionReferenceVersion)
     private readonly versions: Repository<ExecutionReferenceVersion>,
+    @InjectRepository(WorkItem)
+    private readonly workItems: Repository<WorkItem>,
   ) {}
 
   list(): Promise<ExecutionReference[]> {
@@ -171,13 +177,44 @@ export class ExecutionReferencesService {
 
   async update(key: string, dto: UpdateExecutionReferenceDto): Promise<ExecutionReference> {
     const reference = await this.findByKey(key);
+    const projectChanged = dto.projectId !== undefined && dto.projectId !== reference.projectId;
+
     if (dto.title !== undefined) reference.title = dto.title;
     if (dto.owner !== undefined) reference.owner = dto.owner;
     if (dto.domainId !== undefined) reference.domainId = dto.domainId;
     if (dto.productId !== undefined) reference.productId = dto.productId;
     if (dto.projectId !== undefined) reference.projectId = dto.projectId;
     reference.updatedAt = new Date();
-    return this.references.save(reference);
+    const saved = await this.references.save(reference);
+
+    if (projectChanged && dto.projectId) await this.attachProject(reference, dto.projectId);
+    return saved;
+  }
+
+  /**
+   * Rattache au projet les tickets que ce référentiel a déjà produits.
+   *
+   * Dire « ce référentiel concerne le projet Nolaa HQ » sans le dire aux cent
+   * tickets qui en découlent serait une demi-vérité : ils resteraient sans
+   * projet, donc sans dépôt, donc sans « Start Work ». Le rattachement porte
+   * sur ce que le référentiel a produit, pas sur le backlog entier.
+   *
+   * Les tickets qui ont déjà un projet ne sont pas touchés : les affecter à la
+   * main est une décision, et une propagation ne doit pas la défaire.
+   */
+  private async attachProject(reference: ExecutionReference, projectId: string): Promise<number> {
+    const versionIds = await this.listVersionIds(reference.id);
+    if (versionIds.length === 0) return 0;
+
+    const result = await this.workItems.update(
+      { sourceKind: 'manifest', sourceRefId: In(versionIds), projectId: IsNull() },
+      { projectId, updatedAt: new Date() },
+    );
+    const touched = result.affected ?? 0;
+    if (touched > 0) {
+      this.logger.log(`${touched} ticket(s) de ${reference.key} rattaché(s) au projet ${projectId}.`);
+    }
+    return touched;
   }
 
   private async storeVersion(

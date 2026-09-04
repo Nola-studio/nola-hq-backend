@@ -291,6 +291,16 @@ export class ExecutionImportService {
           reference:
             current?.reference ??
             (takenReferences.has(item.sourceKey.slice(0, 32)) ? null : item.sourceKey.slice(0, 32)),
+          /**
+           * Le projet que le référentiel déclare concerner (EXE-01 : « le
+           * produit, projet, organisation ou domaine concerné »).
+           *
+           * C'est ce qui relie un ticket au code : un projet porte ses dépôts
+           * autorisés, et « Start Work » n'a alors plus de question à poser.
+           * Un projet déjà posé sur le ticket l'emporte — l'affecter à la main
+           * est une décision, la propager est un défaut.
+           */
+          projectId: current?.projectId ?? reference.projectId ?? null,
           title: item.title.slice(0, 200),
           description: item.body,
           type: item.kind === 'epic' ? 'epic' : 'story',
