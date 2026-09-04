@@ -325,10 +325,85 @@ describe('TicketsService (Brand Scope Filtering)', () => {
       expect(created.meta).toEqual({ pendingReason: 'vendor' });
     });
 
+    test('resolving a ticket requires a valid resolutionCode', async () => {
+      const svc = makeService(sampleTickets);
+      sampleTickets[0].status = 'open';
+      expect(svc.setStatus(1, 'resolved', ['hq:operator', 'hq:bu:khi-lab'])).rejects.toThrow(
+        /code de résolution/,
+      );
+      expect(
+        svc.setStatus(1, 'resolved', ['hq:operator', 'hq:bu:khi-lab'], 'Alice', undefined, 'invalid_code' as any),
+      ).rejects.toThrow(/invalide/);
+    });
+
+    test('resolving with doublon or transfere requires non-empty resolutionNotes', async () => {
+      const svc = makeService(sampleTickets);
+      sampleTickets[0].status = 'open';
+      expect(
+        svc.setStatus(1, 'resolved', ['hq:operator', 'hq:bu:khi-lab'], 'Alice', undefined, 'doublon', ''),
+      ).rejects.toThrow(/note explicative/);
+      expect(
+        svc.setStatus(1, 'resolved', ['hq:operator', 'hq:bu:khi-lab'], 'Alice', undefined, 'transfere', '   '),
+      ).rejects.toThrow(/note explicative/);
+
+      const res = await svc.setStatus(
+        1,
+        'resolved',
+        ['hq:operator', 'hq:bu:khi-lab'],
+        'Alice',
+        undefined,
+        'doublon',
+        'Doublon de #42',
+      );
+      expect(res.status).toBe('resolved');
+      expect(res.resolutionCode).toBe('doublon');
+      expect(res.resolutionNotes).toBe('Doublon de #42');
+    });
+
+    test('resolving with corrige records resolutionCode and notes in event', async () => {
+      const { svc, eventsRepo } = makeServiceWithEventsRepo(sampleTickets);
+      sampleTickets[0].status = 'open';
+      sampleTickets[0].resolutionCode = null;
+      sampleTickets[0].resolutionNotes = null;
+      const res = await svc.setStatus(
+        1,
+        'resolved',
+        ['hq:operator', 'hq:bu:khi-lab'],
+        'Alice',
+        undefined,
+        'corrige',
+        'Bug corrigé en prod',
+      );
+      expect(res.resolutionCode).toBe('corrige');
+      expect(res.resolutionNotes).toBe('Bug corrigé en prod');
+      const created = eventsRepo.create.mock.calls.at(-1)?.[0] as any;
+      expect(created.action).toBe('status_changed');
+      expect(created.reason).toBe('Bug corrigé en prod');
+      expect(created.meta).toEqual({
+        resolutionCode: 'corrige',
+        resolutionNotes: 'Bug corrigé en prod',
+      });
+    });
+
+    test('reopening a resolved ticket clears resolutionCode and resolutionNotes', async () => {
+      const svc = makeService(sampleTickets);
+      sampleTickets[0].status = 'resolved';
+      sampleTickets[0].resolutionCode = 'corrige';
+      sampleTickets[0].resolutionNotes = 'Fixed';
+      const res = await svc.setStatus(1, 'open', ['hq:operator', 'hq:bu:khi-lab']);
+      expect(res.status).toBe('open');
+      expect(res.resolutionCode).toBeNull();
+      expect(res.resolutionNotes).toBeNull();
+      sampleTickets[0].resolutionCode = null;
+      sampleTickets[0].resolutionNotes = null;
+    });
+
     test('re-submitting unchanged pending status and reason is an idempotent no-op', async () => {
       const { svc, eventsRepo } = makeServiceWithEventsRepo(sampleTickets);
       sampleTickets[0].status = 'pending';
       sampleTickets[0].pendingReason = 'vendor';
+      sampleTickets[0].resolutionCode = null;
+      sampleTickets[0].resolutionNotes = null;
       const prevCalls = eventsRepo.save.mock.calls.length;
       const res = await svc.setStatus(1, 'pending', ['hq:operator', 'hq:bu:khi-lab'], 'Alice', 'vendor');
       expect(res.pendingReason).toBe('vendor');

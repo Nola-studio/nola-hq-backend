@@ -14,6 +14,27 @@ export type TicketCategory =
 
 export type TicketReplyVisibility = 'internal' | 'client';
 
+export type TicketResolutionCode =
+  | 'corrige'
+  | 'contournement'
+  | 'comportement_attendu'
+  | 'non_reproductible'
+  | 'assistance_formation'
+  | 'doublon'
+  | 'transfere'
+  | 'sans_suite';
+
+export const TICKET_RESOLUTION_CODES: readonly TicketResolutionCode[] = [
+  'corrige',
+  'contournement',
+  'comportement_attendu',
+  'non_reproductible',
+  'assistance_formation',
+  'doublon',
+  'transfere',
+  'sans_suite',
+] as const;
+
 /**
  * What a `pending` ticket is actually waiting on. Only 'client' pauses the
  * SLA clock — 'vendor'/'internal' mean the wait is on Nola's side, not the
@@ -80,6 +101,20 @@ export class Ticket {
   /** Only meaningful while `status === 'pending'`; cleared on any other transition. */
   @Column({ type: 'varchar', length: 16, name: 'pending_reason', nullable: true })
   pendingReason!: TicketPendingReason | null;
+
+  /**
+   * Why the ticket was resolved or closed. Required when status is 'resolved' or 'closed'.
+   * Null while open or pending.
+   */
+  @Column({ type: 'varchar', length: 32, name: 'resolution_code', nullable: true })
+  resolutionCode!: TicketResolutionCode | null;
+
+  /**
+   * Explanation / notes associated with resolution. Required when resolutionCode is
+   * 'doublon' or 'transfere'. Nullable.
+   */
+  @Column({ type: 'text', name: 'resolution_notes', nullable: true })
+  resolutionNotes!: string | null;
 
   @Column()
   assignee!: string;
