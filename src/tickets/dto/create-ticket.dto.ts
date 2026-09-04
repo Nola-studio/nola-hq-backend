@@ -1,4 +1,4 @@
-import { IsDateString, IsIn, IsOptional, IsString } from 'class-validator';
+import { IsDateString, IsIn, IsOptional, IsString, IsUUID } from 'class-validator';
 
 const PRIORITIES = ['P1', 'P2', 'P3'] as const;
 const STATUSES = ['open', 'pending', 'closed', 'resolved'] as const;
@@ -29,6 +29,8 @@ export class CreateTicketDto {
   category?: (typeof CATEGORIES)[number];
   /** Where the ticket came from, e.g. 'kelasi-owner-app'. */
   @IsOptional() @IsString() source?: string;
+  /** Nullable product FK id. Resolved on ingest from source / sourceAliases if omitted. */
+  @IsOptional() @IsUUID() productId?: string | null;
   /** BusinessUnit code, e.g. 'khi-lab' — not a UUID. Defaults to 'khi-lab' when omitted. */
   @IsOptional() @IsString() businessUnitCode?: string;
   /** Producing app's own upstream due date (e.g. Vantelis IT's meta.dueAt) — display only, never HQ's SLA source of truth. */
@@ -65,4 +67,8 @@ export class UpdateTicketDto {
   @IsOptional()
   @IsIn(CATEGORIES as unknown as string[])
   category?: (typeof CATEGORIES)[number] | null;
+
+  @IsOptional()
+  @IsUUID()
+  productId?: string | null;
 }

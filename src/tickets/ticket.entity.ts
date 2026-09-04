@@ -1,5 +1,6 @@
 import { Column, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
 import { BusinessUnit } from '../company/business-unit.entity';
+import { Product } from '../company/product.entity';
 
 export type TicketPriority = 'P1' | 'P2' | 'P3';
 export type TicketStatus = 'open' | 'pending' | 'closed' | 'resolved';
@@ -46,6 +47,15 @@ export class Ticket {
   @ManyToOne(() => BusinessUnit, { onDelete: 'RESTRICT' })
   @JoinColumn({ name: 'business_unit_id' })
   businessUnit?: BusinessUnit;
+
+  /** Nullable FK to products (Vantelis tickets have no product). */
+  @Column({ type: 'uuid', name: 'product_id', nullable: true })
+  @Index()
+  productId!: string | null;
+
+  @ManyToOne(() => Product, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'product_id' })
+  product?: Product | null;
 
   @Column()
   subject!: string;
