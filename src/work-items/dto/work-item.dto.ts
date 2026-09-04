@@ -85,6 +85,8 @@ export class CreateWorkItemDto {
 
 export class UpdateWorkItemDto {
   @IsOptional() @IsUUID() projectId?: string;
+  /** `null` détache. Les règles de forme sont dans `work-item-hierarchy.ts`. */
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) parentId?: number | null;
   @IsOptional() @IsString() @MinLength(2) @MaxLength(200) title?: string;
   @IsOptional() @IsString() @MaxLength(10_000) description?: string | null;
   @IsOptional() @IsIn(WORK_ITEM_TYPES as unknown as string[])

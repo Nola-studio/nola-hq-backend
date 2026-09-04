@@ -60,6 +60,13 @@ export class WorkItemsController {
     return this.svc.findDetail(id);
   }
 
+  @Get(':id/lineage')
+  @HqRoles(HqRole.Viewer)
+  @ApiOperation({ summary: "Ancêtres, domaine et capacité — où se situe l'élément dans la taxonomie" })
+  lineage(@Param('id', ParseIntPipe) id: number) {
+    return this.svc.lineage(id);
+  }
+
   @Post('capture')
   @HqRoles(HqRole.Operator)
   @ApiOperation({
