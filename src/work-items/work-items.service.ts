@@ -42,6 +42,7 @@ import {
   AddWorkItemCommentDto,
   AddWorkItemSubtaskDto,
   UpdateWorkItemSubtaskDto,
+  CaptureWorkItemDto,
 } from './dto/work-item.dto';
 
 const STATUS_LABELS: Record<WorkItemStatus, string> = {
@@ -114,6 +115,7 @@ export class WorkItemsService implements OnModuleInit {
     if (query.status) qb.andWhere('w.status = :status', { status: query.status });
     if (query.priority) qb.andWhere('w.priority = :priority', { priority: query.priority });
     if (query.type) qb.andWhere('w.type = :type', { type: query.type });
+    if (query.sourceKind) qb.andWhere('w.sourceKind = :sourceKind', { sourceKind: query.sourceKind });
     if (query.assignee) qb.andWhere('w.assignee = :assignee', { assignee: query.assignee });
     if (query.q) {
       qb.andWhere('(LOWER(w.title) LIKE :q OR LOWER(w.description) LIKE :q OR LOWER(w.reference) LIKE :q)', {
@@ -193,6 +195,48 @@ export class WorkItemsService implements OnModuleInit {
       .returning('task_seq')
       .execute();
     return (result.raw[0] as { task_seq: number }).task_seq;
+  }
+
+  /**
+   * Files a need in one field (REQ-01).
+   *
+   * The retired `StudioRequest` made this a four-step ritual — capture, triage,
+   * a conversion modal re-asking a title and a priority it already held, then
+   * an assignment. Here the item *is* the backlog entry from the first second,
+   * so there is nothing to convert.
+   *
+   * It lands in `todo`, not `triage`: `triage` gates machine-generated batches
+   * that a human has to accept, and putting a colleague's sentence behind an
+   * approval would rebuild the ceremony this replaces. `projectId` stays
+   * optional — the column is nullable, and demanding a project up front is
+   * exactly the friction that made people stop filing.
+   */
+  async capture(dto: CaptureWorkItemDto, reporter: string) {
+    const now = new Date();
+    const project = dto.projectId ? await this.findProject(dto.projectId) : null;
+    const item = this.repo.create({
+      // A human-readable reference needs a project to draw its sequence from;
+      // an unassigned capture gets one when it is filed under a project.
+      reference: project ? taskReference(this.projectPrefix(project), await this.nextTaskSeq(project.id)) : null,
+      projectId: project?.id ?? null,
+      title: dto.title.trim(),
+      description: dto.description?.trim() || null,
+      type: dto.type ?? 'task',
+      status: 'todo',
+      priority: dto.priority ?? 'P2',
+      reporter,
+      sourceKind: 'request',
+      sourceAuthor: reporter,
+      position: await this.repo.count({ where: { status: 'todo' } }),
+      estimatePoints: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const saved = await this.repo.save(item);
+    await this.events.save(
+      this.events.create({ workItemId: saved.id, actor: reporter, action: 'created', meta: { via: 'capture' }, createdAt: now }),
+    );
+    return saved;
   }
 
   async create(dto: CreateWorkItemDto, reporter: string) {

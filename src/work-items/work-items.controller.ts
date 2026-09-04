@@ -14,12 +14,13 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, type AuthenticatedUser } from '../common/auth/current-user.decorator';
 import { HqRole } from '../common/auth/hq-role.enum';
 import { HqRoles } from '../common/auth/hq-roles.decorator';
 import { MAX_ATTACHMENT_BYTES } from './work-item-attachment-storage';
 import {
+  CaptureWorkItemDto,
   CreateWorkItemDto,
   ListWorkItemsDto,
   MoveWorkItemDto,
@@ -57,6 +58,16 @@ export class WorkItemsController {
   @HqRoles(HqRole.Viewer)
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.svc.findDetail(id);
+  }
+
+  @Post('capture')
+  @HqRoles(HqRole.Operator)
+  @ApiOperation({
+    summary:
+      "Dépose un besoin en un champ — il entre directement dans le backlog, sans conversion ni projet obligatoire",
+  })
+  capture(@Body() dto: CaptureWorkItemDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.svc.capture(dto, actor(user));
   }
 
   @Post()
