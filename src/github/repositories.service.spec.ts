@@ -25,7 +25,11 @@ function repo(over: Partial<CodeRepository> = {}): CodeRepository {
   } as CodeRepository;
 }
 
-function makeService(rows: CodeRepository[] = [], projects: { id: string }[] = [{ id: 'p1' }]) {
+function makeService(
+  rows: CodeRepository[] = [],
+  projects: { id: string }[] = [{ id: 'p1' }],
+  discovered: unknown[] = [],
+) {
   const links: RepositoryProject[] = [];
   const saved: CodeRepository[] = [];
 
@@ -53,7 +57,11 @@ function makeService(rows: CodeRepository[] = [], projects: { id: string }[] = [
       };
       return qb;
     }),
-    findOne: mock(async ({ where }: any) => rows.find((r) => r.id === where.id) ?? null),
+    findOne: mock(async ({ where }: any) =>
+      rows.find((r) =>
+        where.externalId !== undefined ? r.externalId === where.externalId : r.id === where.id,
+      ) ?? null,
+    ),
     create: mock((r: any) => ({ id: 'r-new', ...r })),
     save: mock(async (r: any) => {
       saved.push(r);
@@ -89,6 +97,7 @@ function makeService(rows: CodeRepository[] = [], projects: { id: string }[] = [
   } as any;
 
   const github = {
+    listInstallationRepositories: mock(async () => discovered),
     fetchRepository: mock(async () => ({
       externalId: '987654321',
       owner: 'nola-studio',
@@ -280,5 +289,99 @@ describe('sync', () => {
     }));
 
     expect((await svc.sync('r1')).name).toBe('nouveau-nom');
+  });
+});
+
+const FACTS = {
+  externalId: '987654321',
+  owner: 'nola-studio',
+  name: 'nola-hq',
+  defaultBranch: 'main',
+  visibility: 'private' as const,
+  archived: false,
+  htmlUrl: 'https://github.com/nola-studio/nola-hq',
+  description: 'Console Nolaa HQ',
+};
+
+describe('discover', () => {
+  /** C'est GitHub qui sait à quoi il donne accès — on le lui demande. */
+  test('enregistre les dépôts que l’App peut voir', async () => {
+    const { svc, saved } = makeService([], [{ id: 'p1' }], [FACTS]);
+    const res = await svc.discover();
+
+    expect(res.added).toHaveLength(1);
+    expect(saved[0]).toMatchObject({
+      owner: 'nola-studio',
+      name: 'nola-hq',
+      externalId: '987654321',
+      defaultBranch: 'main',
+    });
+    expect(saved[0].lastSyncedAt).toBeInstanceOf(Date);
+  });
+
+  /** Relancer la découverte ne doit pas dupliquer ce qui est déjà connu. */
+  test('un dépôt déjà connu est rafraîchi, pas dupliqué', async () => {
+    const known = repo({ externalId: '987654321', defaultBranch: 'master' });
+    const { svc } = makeService([known], [{ id: 'p1' }], [FACTS]);
+    const res = await svc.discover();
+
+    expect(res.added).toHaveLength(0);
+    expect(res.updated).toHaveLength(1);
+    expect(known.defaultBranch).toBe('main');
+  });
+
+  test('un dépôt inchangé est compté comme tel', async () => {
+    const known = repo({ ...FACTS });
+    const { svc } = makeService([known], [{ id: 'p1' }], [FACTS]);
+    const res = await svc.discover();
+
+    expect(res.updated).toHaveLength(0);
+    expect(res.unchanged).toBe(1);
+  });
+
+  /**
+   * Un dépôt enregistré à la main n'a pas encore d'identifiant GitHub : il
+   * doit être reconnu par son nom, pas dupliqué.
+   */
+  test('un dépôt saisi à la main est reconnu par son nom et reçoit son identifiant', async () => {
+    const known = repo({ externalId: null });
+    const { svc } = makeService([known], [{ id: 'p1' }], [FACTS]);
+    const res = await svc.discover();
+
+    expect(res.added).toHaveLength(0);
+    expect(known.externalId).toBe('987654321');
+  });
+
+  /** Ce que HQ est seul à savoir n'appartient pas à GitHub. */
+  test('le produit, le domaine et le responsable ne sont jamais écrasés', async () => {
+    const known = repo({
+      externalId: '987654321',
+      productId: 'prod-1',
+      domainId: 'dom-6',
+      steward: 'greg@nolaa.dev',
+    });
+    const { svc } = makeService([known], [{ id: 'p1' }], [FACTS]);
+    await svc.discover();
+
+    expect(known.productId).toBe('prod-1');
+    expect(known.domainId).toBe('dom-6');
+    expect(known.steward).toBe('greg@nolaa.dev');
+  });
+
+  /** L'archivage descend de GitHub, il ne remonte pas. */
+  test('un dépôt archivé dans HQ le reste', async () => {
+    const known = repo({ externalId: '987654321', archived: true });
+    const { svc } = makeService([known], [{ id: 'p1' }], [FACTS]);
+    await svc.discover();
+
+    expect(known.archived).toBe(true);
+  });
+
+  test('sans App installée, rien n’est enregistré', async () => {
+    const { svc, saved } = makeService([], [{ id: 'p1' }], []);
+    const res = await svc.discover();
+
+    expect(res).toEqual({ added: [], updated: [], unchanged: 0 });
+    expect(saved).toHaveLength(0);
   });
 });
