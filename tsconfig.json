@@ -22,9 +22,11 @@
     "paths": {
       "@nola-hq/nola-sdk": ["libs/nola-sdk/src"],
       "@nola-hq/nola-sdk/*": ["libs/nola-sdk/src/*"],
-      "@nola-studio/sdk/commands": ["node_modules/@nola-studio/sdk/dist/commands"],
-      "@nola-studio/sdk/notify":   ["node_modules/@nola-studio/sdk/dist/notify"],
-      "@nola-studio/sdk/events":   ["node_modules/@nola-studio/sdk/dist/events"]
+      "@nola-studio/sdk": ["libs/vendor-sdk/dist"],
+      "@nola-studio/sdk/*": ["libs/vendor-sdk/dist/*"],
+      "@nola-studio/sdk/commands": ["libs/vendor-sdk/dist/commands"],
+      "@nola-studio/sdk/notify":   ["libs/vendor-sdk/dist/notify"],
+      "@nola-studio/sdk/events":   ["libs/vendor-sdk/dist/events"]
     }
   },
   "include": ["src/**/*.ts", "libs/**/*.ts", "scripts/**/*.ts"],

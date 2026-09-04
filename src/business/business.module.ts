@@ -45,6 +45,6 @@ import { ProjectRisk } from '../work-items/project-risk.entity';
   ],
   controllers: [BusinessController, BusinessOperationsController],
   providers: [BusinessService, BusinessOperationsService, BusinessPdfService],
-  exports: [BusinessService, BusinessOperationsService],
+  exports: [BusinessService, BusinessOperationsService, BusinessPdfService],
 })
 export class BusinessModule {}

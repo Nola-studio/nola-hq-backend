@@ -93,6 +93,46 @@ export class TeamService {
   }
 
   /**
+   * "Who am I" as a `TeamMember` row, from the JWT's own email — every
+   * caller that needs to act as *the current user* rather than look up
+   * *someone else* (notifications' recipient scoping today; anything
+   * else asking the same question later) should go through this rather
+   * than inlining an `email` lookup, so there's exactly one place this
+   * resolution lives. Raw entity, not stripped — for internal
+   * service-to-service use, never serialized straight to a response.
+   */
+  async findByEmail(email: string): Promise<TeamMember | null> {
+    return this.repo.findOne({ where: { email } });
+  }
+
+  /**
+   * Every local `team_members` row entitled to see `businessUnitCode` —
+   * `hq:owner` (sees every brand) union whoever holds `hq:bu:<code>`
+   * directly. Same reverse role→users lookup `backfillMissingMembers`
+   * already uses (`usersWithRealmRole`), just a different role name;
+   * resolved back to local rows by email, so a Keycloak-only account
+   * with no `team_members` row (nothing to key a notification/push to)
+   * is silently excluded rather than erroring. Degraded mode (Keycloak
+   * admin not configured) returns `[]`, same contract as every other
+   * `KeycloakAdminService` consumer — a brand-created-ticket
+   * notification simply reaches nobody rather than crashing ticket
+   * creation.
+   */
+  async membersForBusinessUnit(businessUnitCode: string): Promise<TeamMember[]> {
+    const realm = this.hqRealm();
+    const [owners, brandScoped] = await Promise.all([
+      this.kc.usersWithRealmRole(realm, 'hq:owner'),
+      this.kc.usersWithRealmRole(realm, `hq:bu:${businessUnitCode}`),
+    ]);
+    const emails = new Set(
+      [...owners, ...brandScoped].map((u) => u.email?.toLowerCase()).filter((e): e is string => !!e),
+    );
+    if (emails.size === 0) return [];
+    const rows = await this.repo.find();
+    return rows.filter((m) => emails.has(m.email.toLowerCase()));
+  }
+
+  /**
    * `actorEmail` is who's making the change — required to enforce the two
    * self-protection rules: you can't demote your own Owner role, and you
    * can't demote the last remaining Owner (yourself or anyone else).

@@ -33,4 +33,7 @@ export class CreateExpenseDto {
   @IsOptional() @IsString() @MaxLength(200) workspace?: string;
   @IsOptional() @IsEmail() @MaxLength(160) billingEmail?: string;
   @IsOptional() @IsString() @MaxLength(120) paymentMethod?: string;
+  @IsOptional() @IsIn(['manual', 'railway']) source?: 'manual' | 'railway';
+  @IsOptional() @IsString() externalInvoiceId?: string;
+  @IsOptional() @IsString() receiptUrl?: string;
 }

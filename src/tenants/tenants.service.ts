@@ -11,10 +11,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { NolaCommandsService } from '@nola-hq/nola-sdk';
 import { TenantCrm } from './tenant-crm.entity';
-import { TenantStatus } from './tenant.entity';
+import type { TenantStatus } from './tenant.entity';
 import { ListTenantsDto } from './dto/list-tenants.dto';
 import { CreateTenantDto } from './dto/create-tenant.dto';
-import { KelasiProvisionClient } from './kelasi-provision.client';
+import { YekoliProvisionClient } from './yekoli-provision.client';
 import { MomoEntry } from '../momo/momo-entry.entity';
 import { TicketsService } from '../tickets/tickets.service';
 import { ActivityEvent } from '../activity/activity.entity';
@@ -123,7 +123,7 @@ export class TenantsService {
     @InjectRepository(ActivityEvent)
     private readonly activity: Repository<ActivityEvent>,
     private readonly commands: NolaCommandsService,
-    private readonly kelasiProvision: KelasiProvisionClient,
+    private readonly yekoliProvision: YekoliProvisionClient,
     private readonly subscriptions: SubscriptionsService,
     private readonly plans: PlansService,
     private readonly iam: IamClientService,
@@ -321,14 +321,14 @@ export class TenantsService {
       throw new BadRequestException(`unsupported_app: ${targetApp || '(none)'}`);
     }
 
-    const result = await this.kelasiProvision.provision({
+    const result = await this.yekoliProvision.provision({
       schoolName: dto.name.trim(),
       countryCode: dto.country.toUpperCase(),
       city: dto.city?.trim() || undefined,
       address: dto.address?.trim() || undefined,
       planSlug,
       // Forward the optional academic bootstrap. When present,
-      // kelasi-gateway runs school/setup so the owner lands on a
+      // the Yekoli gateway runs school/setup so the owner lands on a
       // ready admin shell (year + classes + subjects + fees) without
       // having to run the OnboardingWizard themselves.
       academic:
@@ -351,7 +351,7 @@ export class TenantsService {
       },
     });
 
-    // Persist CRM augmentation. We use the kelasi tenantId as the key —
+    // Persist CRM augmentation. We use the Yekoli tenantId as the key —
     // billing's externalId mirrors it once the subscription lands, so
     // the `list()` merge picks this row up on the next refresh.
     await this.crm.save(
@@ -364,7 +364,7 @@ export class TenantsService {
         mobileMoney: dto.mobile_money ?? '',
         nps: null,
         kcUserId: result.kcUserId,
-        kelasiSchoolId: result.schoolId,
+        yekoliSchoolId: result.schoolId,
         ownerEmail: dto.ownerEmail.trim().toLowerCase(),
         mobileMoneyPhone: dto.mobileMoneyPhone ?? null,
         provisionedAt: result.invitationSentAt,

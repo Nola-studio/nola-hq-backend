@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { ActivityCategory, ActivityEvent } from './activity.entity';
+import { type ActivityCategory, ActivityEvent } from './activity.entity';
 import { PaginationDto, type PaginatedResult } from '../common/dto/pagination.dto';
 
 export interface ActivityQuery extends PaginationDto {

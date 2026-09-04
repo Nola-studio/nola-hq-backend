@@ -12,7 +12,7 @@ import { BroadcastService } from './broadcast.service';
 import { CreateBroadcastDto } from './dto/create-broadcast.dto';
 import {
   CurrentUser,
-  CurrentUserPayload,
+  type CurrentUserPayload,
 } from '../common/auth/current-user.decorator';
 import { HqRoles } from '../common/auth/hq-roles.decorator';
 import { HqRole } from '../common/auth/hq-role.enum';

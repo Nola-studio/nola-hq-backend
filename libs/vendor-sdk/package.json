@@ -1,0 +1,91 @@
+{
+  "name": "@nola-studio/sdk",
+  "version": "0.5.8",
+  "description": "Nola Platform SDK — shared library for Core services and applications",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "package.json",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "default": "./dist/core/index.js"
+    },
+    "./discovery": {
+      "types": "./dist/discovery/index.d.ts",
+      "default": "./dist/discovery/index.js"
+    },
+    "./commands": {
+      "types": "./dist/commands/index.d.ts",
+      "default": "./dist/commands/index.js"
+    },
+    "./events": {
+      "types": "./dist/events/index.d.ts",
+      "default": "./dist/events/index.js"
+    },
+    "./auth": {
+      "types": "./dist/auth/index.d.ts",
+      "default": "./dist/auth/index.js"
+    },
+    "./notify": {
+      "types": "./dist/notify/index.d.ts",
+      "default": "./dist/notify/index.js"
+    },
+    "./hmac": {
+      "types": "./dist/hmac/index.d.ts",
+      "default": "./dist/hmac/index.js"
+    },
+    "./tracing": {
+      "types": "./dist/tracing/index.d.ts",
+      "default": "./dist/tracing/index.js"
+    },
+    "./config": {
+      "types": "./dist/config/index.d.ts",
+      "default": "./dist/config/index.js"
+    }
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Nola-studio/nola-platform.git",
+    "directory": "packages/sdk"
+  },
+  "dependencies": {
+    "@opentelemetry/exporter-metrics-otlp-http": "^0.57.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.57.0",
+    "@opentelemetry/instrumentation-express": "^0.47.0",
+    "@opentelemetry/instrumentation-http": "^0.57.0",
+    "@opentelemetry/instrumentation-nestjs-core": "^0.44.0",
+    "@opentelemetry/resources": "^1.30.0",
+    "@opentelemetry/sdk-metrics": "^1.30.0",
+    "@opentelemetry/sdk-node": "^0.57.0",
+    "@opentelemetry/semantic-conventions": "^1.30.0",
+    "jose": "^5.2.0",
+    "nats": "^2.19.0",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0",
+    "vitest": "^1.2.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

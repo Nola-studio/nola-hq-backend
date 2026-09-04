@@ -12,7 +12,7 @@ import type { StudioTaskPriority } from '../work-items/work-item-studio-mapping'
 import { TeamMember } from '../team/team-member.entity';
 import { PushService } from '../push/push.service';
 
-const TERMINAL_STATUSES = ['rejetee', 'fermee'];
+const TERMINAL_STATUSES = ['rejetee', 'fermee', 'acceptee'];
 
 /** A request's `P0-P3` triage priority folds onto the ticket's `none..urgent` scale. */
 const REQUEST_PRIORITY_TO_TASK_PRIORITY: Record<StudioRequestPriority, StudioTaskPriority> = {
@@ -123,8 +123,9 @@ export class StudioRequestsService {
    */
   private assertStatusMutable(request: StudioRequest) {
     if (TERMINAL_STATUSES.includes(request.status)) {
+      const label = request.status === 'fermee' ? 'fermée' : request.status === 'acceptee' ? 'acceptée' : 'rejetée';
       throw new ForbiddenException(
-        `Cette demande est ${request.status === 'fermee' ? 'fermée' : 'rejetée'} et ne peut plus changer de statut.`,
+        `Cette demande est ${label} et ne peut plus changer de statut.`,
       );
     }
   }

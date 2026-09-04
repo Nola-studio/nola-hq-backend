@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { KelasiProxyController } from './kelasi-proxy.controller';
-import { KelasiProvisionClient } from '../tenants/kelasi-provision.client';
+import { YekoliProvisionClient } from '../tenants/yekoli-provision.client';
 
 /**
  * Server-side read proxy to kelasi-gateway. Reuses the HTTP client
@@ -9,6 +9,6 @@ import { KelasiProvisionClient } from '../tenants/kelasi-provision.client';
  */
 @Module({
   controllers: [KelasiProxyController],
-  providers: [KelasiProvisionClient],
+  providers: [YekoliProvisionClient],
 })
 export class KelasiProxyModule {}

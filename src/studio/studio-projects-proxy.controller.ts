@@ -94,6 +94,14 @@ export class StudioProjectsProxyController {
     return this.svc.unarchiveProject(id, user?.roles);
   }
 
+  @Delete('projects/:id')
+  @HttpCode(204)
+  @HqRoles(HqRole.Operator)
+  @ApiOperation({ summary: 'Hard delete — only allowed when nothing references the project; 409 otherwise. Archive is the usual path.' })
+  async removeProject(@Param('id') id: string, @CurrentUser() user?: AuthenticatedUser) {
+    await this.svc.removeProject(id, user?.roles);
+  }
+
   @Get('tasks')
   @HqRoles(HqRole.Viewer)
   @ApiQuery({ name: 'assignee', required: false, type: String })

@@ -1,10 +1,19 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { FindOptionsWhere, Repository } from 'typeorm';
-import { BusinessUnit } from './business-unit.entity';
+import { BusinessUnit, type BusinessUnitThemeKey } from './business-unit.entity';
 import { LegalEntity } from './legal-entity.entity';
 import { Product } from './product.entity';
 import { PROVISIONABLE_PRODUCT_CODES } from './company.constants';
+import { BusinessUnitResolverService } from './business-unit-resolver.service';
+import { CreateBusinessUnitDto } from './dto/create-business-unit.dto';
+import { UpdateBusinessUnitDto } from './dto/update-business-unit.dto';
+import { CreateProductDto } from './dto/create-product.dto';
+import { UpdateProductDto } from './dto/update-product.dto';
+import { SlaPolicy } from '../sla/sla-policy.entity';
+import type { TicketPriority } from '../tickets/ticket.entity';
+
+const SLA_PRIORITIES: TicketPriority[] = ['P1', 'P2', 'P3'];
 
 export interface ProductSummary {
   id: string;
@@ -13,6 +22,7 @@ export interface ProductSummary {
   businessUnitId: string;
   businessUnit: { id: string; code: string; name: string };
   isInternal: boolean;
+  archived: boolean;
   provisionable: boolean;
 }
 
@@ -23,6 +33,10 @@ export interface BusinessUnitSummary {
   isActive: boolean;
   legalEntity: { code: string; name: string };
   productCount: number;
+  /** PDF branding overrides — exposed so an edit form can show current values, not just accept new ones. */
+  tagline: string | null;
+  footerLine: string | null;
+  theme: BusinessUnitThemeKey | null;
 }
 
 export interface BusinessUnitDetail extends BusinessUnitSummary {
@@ -44,6 +58,8 @@ export class CompanyService {
     @InjectRepository(BusinessUnit) private readonly businessUnits: Repository<BusinessUnit>,
     @InjectRepository(LegalEntity) private readonly legalEntities: Repository<LegalEntity>,
     @InjectRepository(Product) private readonly products: Repository<Product>,
+    @InjectRepository(SlaPolicy) private readonly slaPolicies: Repository<SlaPolicy>,
+    private readonly businessUnitResolver: BusinessUnitResolverService,
   ) {}
 
   async listBusinessUnits(): Promise<BusinessUnitSummary[]> {
@@ -62,6 +78,75 @@ export class CompanyService {
     };
   }
 
+  async createBusinessUnit(dto: CreateBusinessUnitDto): Promise<BusinessUnitDetail> {
+    const existing = await this.businessUnits.findOne({ where: { code: dto.code } });
+    if (existing) throw new ConflictException(`Business unit '${dto.code}' existe déjà`);
+    const legalEntity = await this.legalEntities.findOne({ where: { code: dto.legalEntityCode } });
+    if (!legalEntity) throw new BadRequestException(`Legal entity '${dto.legalEntityCode}' introuvable`);
+
+    const now = new Date();
+    const unit = this.businessUnits.create({
+      code: dto.code,
+      name: dto.name,
+      legalEntityId: legalEntity.id,
+      tagline: dto.tagline ?? null,
+      footerLine: dto.footerLine ?? null,
+      theme: dto.theme ?? null,
+      isActive: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await this.businessUnits.save(unit);
+    this.businessUnitResolver.invalidateCache();
+    await this.seedSlaPolicies(unit.id, now);
+    return this.findBusinessUnit(dto.code);
+  }
+
+  /**
+   * Every brand gets a P1/P2/P3 row with null targets at creation — so
+   * "no SLA policy row" (a data-integrity gap) and "SLA tracked but not
+   * yet configured" (the normal state for a brand nobody's set numbers
+   * for yet) stay visibly distinguishable at read time.
+   */
+  private async seedSlaPolicies(businessUnitId: string, now: Date): Promise<void> {
+    await this.slaPolicies.save(
+      SLA_PRIORITIES.map((priority) =>
+        this.slaPolicies.create({
+          businessUnitId,
+          priority,
+          responseTargetMinutes: null,
+          resolutionTargetMinutes: null,
+          createdAt: now,
+          updatedAt: now,
+        }),
+      ),
+    );
+  }
+
+  async updateBusinessUnit(code: string, dto: UpdateBusinessUnitDto): Promise<BusinessUnitDetail> {
+    const unit = await this.businessUnits.findOne({ where: { code } });
+    if (!unit) throw new NotFoundException(`Business unit '${code}' introuvable`);
+
+    if (dto.legalEntityCode !== undefined) {
+      const legalEntity = await this.legalEntities.findOne({ where: { code: dto.legalEntityCode } });
+      if (!legalEntity) throw new BadRequestException(`Legal entity '${dto.legalEntityCode}' introuvable`);
+      unit.legalEntityId = legalEntity.id;
+    }
+    if (dto.name !== undefined) unit.name = dto.name;
+    if (dto.tagline !== undefined) unit.tagline = dto.tagline;
+    if (dto.footerLine !== undefined) unit.footerLine = dto.footerLine;
+    if (dto.theme !== undefined) unit.theme = dto.theme;
+    if (dto.isActive !== undefined) unit.isActive = dto.isActive;
+    unit.updatedAt = new Date();
+
+    await this.businessUnits.save(unit);
+    // Only `code` feeds the resolver's cache key; nothing edited here can
+    // change it, but invalidating unconditionally is cheap and keeps this
+    // safe against a future field ever becoming part of that cache.
+    this.businessUnitResolver.invalidateCache();
+    return this.findBusinessUnit(code);
+  }
+
   async listLegalEntities(): Promise<LegalEntitySummary[]> {
     const rows = await this.legalEntities.find({ order: { code: 'ASC' } });
     return rows.map((e) => ({
@@ -74,17 +159,70 @@ export class CompanyService {
     }));
   }
 
-  async listProducts(filter?: { isInternal?: boolean }): Promise<ProductSummary[]> {
+  async listProducts(filter?: { isInternal?: boolean; archived?: boolean }): Promise<ProductSummary[]> {
     const where: FindOptionsWhere<Product> = {};
     if (filter?.isInternal !== undefined) {
       where.isInternal = filter.isInternal;
+    }
+    if (filter?.archived !== undefined) {
+      where.archived = filter.archived;
     }
     const rows = await this.products.find({
       where,
       relations: ['businessUnit'],
       order: { code: 'ASC' },
     });
-    return rows.map((p) => ({
+    return rows.map((p) => this.toProductSummary(p));
+  }
+
+  async createProduct(dto: CreateProductDto): Promise<ProductSummary> {
+    const existing = await this.products.findOne({ where: { code: dto.code } });
+    if (existing) throw new ConflictException(`Product '${dto.code}' existe déjà`);
+    const businessUnitId = await this.businessUnitResolver.resolve(dto.businessUnitCode);
+
+    const now = new Date();
+    const product = this.products.create({
+      code: dto.code,
+      name: dto.name,
+      businessUnitId,
+      isInternal: dto.isInternal ?? false,
+      sourceAliases: dto.sourceAliases ?? [],
+      archived: false,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const saved = await this.products.save(product);
+    saved.businessUnit = await this.businessUnits.findOne({ where: { id: businessUnitId } }) ?? undefined;
+    return this.toProductSummary(saved);
+  }
+
+  async updateProduct(code: string, dto: UpdateProductDto): Promise<ProductSummary> {
+    const product = await this.products.findOne({ where: { code }, relations: ['businessUnit'] });
+    if (!product) throw new NotFoundException(`Product '${code}' introuvable`);
+
+    if (dto.name !== undefined) product.name = dto.name;
+    if (dto.isInternal !== undefined) product.isInternal = dto.isInternal;
+    if (dto.sourceAliases !== undefined) product.sourceAliases = dto.sourceAliases;
+    if (dto.archived !== undefined) product.archived = dto.archived;
+    product.updatedAt = new Date();
+
+    const saved = await this.products.save(product);
+    return this.toProductSummary(saved);
+  }
+
+  /**
+   * Unconditional hard delete: unlike `BusinessUnit`/`RoadmapInitiative`,
+   * nothing in the schema holds a FK onto `products` — no dependent-row
+   * check is needed because there is nothing that could be orphaned.
+   */
+  async removeProduct(code: string): Promise<void> {
+    const product = await this.products.findOne({ where: { code } });
+    if (!product) throw new NotFoundException(`Product '${code}' introuvable`);
+    await this.products.remove(product);
+  }
+
+  private toProductSummary(p: Product): ProductSummary {
+    return {
       id: p.id,
       code: p.code,
       name: p.name,
@@ -95,8 +233,9 @@ export class CompanyService {
         name: p.businessUnit!.name,
       },
       isInternal: p.isInternal,
+      archived: p.archived,
       provisionable: PROVISIONABLE_PRODUCT_CODES.has(p.code),
-    }));
+    };
   }
 
   /** One grouped query for the whole table rather than a per-unit count — only three business units exist. */
@@ -118,6 +257,9 @@ export class CompanyService {
       isActive: unit.isActive,
       legalEntity: { code: unit.legalEntity!.code, name: unit.legalEntity!.name },
       productCount,
+      tagline: unit.tagline,
+      footerLine: unit.footerLine,
+      theme: unit.theme,
     };
   }
 }

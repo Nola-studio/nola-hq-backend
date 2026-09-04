@@ -29,6 +29,15 @@ export class Product {
   @Column({ type: 'simple-json', name: 'source_aliases', default: '[]' })
   sourceAliases!: string[];
 
+  @Column({ type: 'boolean', default: false })
+  archived!: boolean;
+
+  /** Whether HQ-driven tenant provisioning (`POST /tenants`) is implemented
+   *  for this product. Editable from Entreprises — replaces the old
+   *  hardcoded `PROVISIONABLE_PRODUCT_CODES` set. */
+  @Column({ type: 'boolean', name: 'is_provisionable', default: false })
+  isProvisionable!: boolean;
+
   @Column({ name: 'created_at' })
   createdAt!: Date;
 

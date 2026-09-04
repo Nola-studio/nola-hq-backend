@@ -8,9 +8,19 @@ export type TicketCategory =
   | 'billing'
   | 'account'
   | 'feature'
+  | 'deployment'
   | 'other';
 
 export type TicketReplyVisibility = 'internal' | 'client';
+
+/**
+ * What a `pending` ticket is actually waiting on. Only 'client' pauses the
+ * SLA clock — 'vendor'/'internal' mean the wait is on Nola's side, not the
+ * client's, and shouldn't be credited as SLA-paused time. Null (every
+ * ticket predating this column, and any pending transition that doesn't
+ * specify) is treated as 'client' — see TicketsService.
+ */
+export type TicketPendingReason = 'client' | 'vendor' | 'internal';
 
 export interface TicketReply {
   from: string;
@@ -57,6 +67,10 @@ export class Ticket {
   @Index()
   status!: TicketStatus;
 
+  /** Only meaningful while `status === 'pending'`; cleared on any other transition. */
+  @Column({ type: 'varchar', length: 16, name: 'pending_reason', nullable: true })
+  pendingReason!: TicketPendingReason | null;
+
   @Column()
   assignee!: string;
 
@@ -65,12 +79,6 @@ export class Ticket {
 
   @Column()
   sla!: string;
-
-  @Column()
-  age!: string;
-
-  @Column()
-  ago!: string;
 
   /** What the request is about — drives HQ triage. Nullable: legacy + manually
    * created tickets have no category. */
@@ -81,6 +89,15 @@ export class Ticket {
   /** Origin of the ticket, e.g. 'kelasi-owner-app'. Nullable for legacy rows. */
   @Column({ type: 'varchar', nullable: true })
   source!: string | null;
+
+  /**
+   * The producing app's own upstream due date (e.g. Vantelis IT's
+   * `meta.dueAt`), when it sends one — display/context only, never HQ's
+   * SLA source of truth. Null for kelasi/yekoli (no upstream commitment)
+   * and any manually-created ticket.
+   */
+  @Column({ type: 'timestamp', name: 'due_at', nullable: true })
+  dueAt!: Date | null;
 
   @Column({ type: 'simple-json', default: '[]' })
   replies!: TicketReply[];

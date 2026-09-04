@@ -1,10 +1,12 @@
-import { Body, Controller, Post, Req } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Inject, Param, Patch, Post, Req, forwardRef } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { IsIn, IsObject, IsOptional, IsString, MaxLength } from 'class-validator';
 import { NotificationsService } from './notifications.service';
 import { IsRecipientForChannel } from './dto/recipient-for-channel.validator';
 import { HqRoles } from '../common/auth/hq-roles.decorator';
 import { HqRole } from '../common/auth/hq-role.enum';
+import { CurrentUser, type AuthenticatedUser } from '../common/auth/current-user.decorator';
+import { TeamService } from '../team/team.service';
 
 class SendTestNotificationDto {
   @IsIn(['email', 'sms', 'whatsapp'])
@@ -40,7 +42,11 @@ class SendTestNotificationDto {
 @ApiTags('notifications')
 @Controller('notifications')
 export class NotificationsController {
-  constructor(private readonly svc: NotificationsService) {}
+  constructor(
+    private readonly svc: NotificationsService,
+    @Inject(forwardRef(() => TeamService))
+    private readonly teamService: TeamService,
+  ) {}
 
   /**
    * Operator test: publishes `nola.commands.notify.send` on the cross-app
@@ -58,5 +64,49 @@ export class NotificationsController {
       variables: dto.variables,
       issuedBy: req.user?.email,
     });
+  }
+
+  @Get()
+  @HqRoles(HqRole.Viewer)
+  @ApiOperation({ summary: "List the caller's own notifications" })
+  async list(@CurrentUser() user: AuthenticatedUser) {
+    const recipientId = await this.recipientId(user);
+    return this.svc.list(recipientId);
+  }
+
+  @Patch(':id/read')
+  @HqRoles(HqRole.Viewer)
+  @ApiOperation({ summary: 'Mark one of the caller’s own notifications as read' })
+  async markRead(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    const recipientId = await this.recipientId(user);
+    return this.svc.markRead(id, recipientId);
+  }
+
+  @Post('read-all')
+  @HqRoles(HqRole.Viewer)
+  @ApiOperation({ summary: "Mark all of the caller's unread notifications as read" })
+  async markAllRead(@CurrentUser() user: AuthenticatedUser) {
+    const recipientId = await this.recipientId(user);
+    return this.svc.markAllRead(recipientId);
+  }
+
+  @Patch(':id/clear')
+  @HqRoles(HqRole.Viewer)
+  @ApiOperation({ summary: "Clear one of the caller's own notifications" })
+  async clear(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    const recipientId = await this.recipientId(user);
+    return this.svc.clear(id, recipientId);
+  }
+
+  /**
+   * "Who am I" for the notifications feature — a caller only ever manages
+   * their own notifications, never someone else's, so every route here
+   * resolves the current TeamMember via TeamService rather than trusting
+   * an id in the request.
+   */
+  private async recipientId(user: AuthenticatedUser): Promise<string> {
+    const member = await this.teamService.findByEmail(user.email);
+    if (!member) throw new BadRequestException('Aucun membre d’équipe associé à ce compte');
+    return member.id;
   }
 }
