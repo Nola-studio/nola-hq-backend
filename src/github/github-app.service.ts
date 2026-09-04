@@ -227,6 +227,63 @@ export class GithubAppService {
     }
   }
 
+  /**
+   * Tous les dépôts que cette App peut voir, toutes installations confondues.
+   *
+   * C'est GitHub qui sait ce à quoi il donne accès — le demander évite de
+   * faire recopier des URL une par une, et évite surtout d'enregistrer un
+   * dépôt sur lequel l'App n'a aucun droit, ce qui ne se découvrirait qu'au
+   * premier « Start Work ».
+   *
+   * La pagination est suivie jusqu'au bout : une organisation de cinquante
+   * dépôts ne doit pas en livrer trente.
+   */
+  async listInstallationRepositories(): Promise<GithubRepositoryFacts[]> {
+    const found: GithubRepositoryFacts[] = [];
+
+    for (const installation of await this.listInstallations()) {
+      const token = await this.installationToken(installation.id);
+      let page = 1;
+
+      // Garde-fou : cent pages, soit dix mille dépôts. Au-delà, c'est une
+      // boucle, pas une organisation.
+      for (; page <= 100; page += 1) {
+        const batch = await this.request<{
+          repositories: {
+            id: number;
+            name: string;
+            owner: { login: string };
+            default_branch: string;
+            visibility?: string;
+            private: boolean;
+            archived: boolean;
+            html_url: string;
+            description: string | null;
+          }[];
+        }>(`/installation/repositories?per_page=100&page=${page}`, token, {});
+
+        if (!batch.repositories?.length) break;
+        for (const raw of batch.repositories) {
+          found.push({
+            externalId: String(raw.id),
+            owner: raw.owner.login,
+            name: raw.name,
+            defaultBranch: raw.default_branch,
+            visibility:
+              (raw.visibility as GithubRepositoryFacts['visibility']) ??
+              (raw.private ? 'private' : 'public'),
+            archived: raw.archived,
+            htmlUrl: raw.html_url,
+            description: raw.description,
+          });
+        }
+        if (batch.repositories.length < 100) break;
+      }
+    }
+
+    return found;
+  }
+
   /** Un appel REST authentifié comme l'installation qui couvre ce dépôt. */
   async installationRequest<T>(
     owner: string,
@@ -304,6 +361,13 @@ export class GithubAppService {
         'X-GitHub-Api-Version': '2022-11-28',
         'User-Agent': 'nolaa-hq',
         Authorization: `Bearer ${token}`,
+        /**
+         * Sans ce type, `fetch` déclare un corps chaîne en
+         * `text/plain;charset=UTF-8`, et GitHub n'en tire aucun champ : la
+         * création de branche partait alors sans `ref` ni `sha`. L'échec
+         * n'était pas silencieux, mais son motif ne désignait pas sa cause.
+         */
+        ...(init.body ? { 'Content-Type': 'application/json' } : {}),
         ...(init.headers ?? {}),
       },
     });

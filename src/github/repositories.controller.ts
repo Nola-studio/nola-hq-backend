@@ -66,6 +66,15 @@ export class RepositoriesController {
     return this.svc.projectsOf(id);
   }
 
+  @Post('discover')
+  @HqRoles(HqRole.Operator)
+  @ApiOperation({
+    summary: 'Enregistre tous les dépôts où la GitHub App est installée, sans en recopier les URL.',
+  })
+  discover() {
+    return this.svc.discover();
+  }
+
   @Post()
   @HqRoles(HqRole.Operator)
   @ApiOperation({ summary: 'Enregistre un dépôt depuis « owner/name » ou une URL GitHub.' })

@@ -33,13 +33,21 @@ function configure() {
 
 /** Un faux GitHub : chaque appel est enregistré, chaque route rend ce qu'on veut. */
 function fakeGithub(routes: Record<string, { status?: number; body: unknown }>) {
-  const calls: { path: string; method: string; auth: string }[] = [];
+  const calls: {
+    path: string;
+    method: string;
+    auth: string;
+    headers: Record<string, string>;
+    body?: string;
+  }[] = [];
   globalThis.fetch = mock(async (url: any, init: any = {}) => {
     const path = String(url).replace('https://api.github.com', '');
     calls.push({
       path,
       method: init.method ?? 'GET',
       auth: String(init.headers?.Authorization ?? ''),
+      headers: init.headers ?? {},
+      body: init.body,
     });
     const route = routes[`${init.method ?? 'GET'} ${path}`] ?? routes[path];
     if (!route) return new Response(JSON.stringify({ message: 'Not Found' }), { status: 404 });
@@ -315,5 +323,125 @@ describe('fetchRepository', () => {
     expect(facts.name).toBe('Nola-HQ');
     expect(facts.defaultBranch).toBe('trunk');
     expect(facts.visibility).toBe('public');
+  });
+});
+
+/**
+ * Le défaut qui empêchait toute création de branche : sans type déclaré,
+ * `fetch` envoie un corps chaîne en `text/plain`, GitHub n'en tire aucun
+ * champ, et la requête part sans `ref` ni `sha`.
+ */
+describe('corps des requêtes', () => {
+  test('un POST avec corps déclare application/json', async () => {
+    const svc = configure();
+    const calls = fakeGithub({
+      '/repos/o/r/installation': { body: { id: 5 } },
+      'POST /app/installations/5/access_tokens': { body: { token: 't', expires_at: IN_AN_HOUR() } },
+      'POST /repos/o/r/git/refs': { body: { ref: 'refs/heads/x' } },
+    });
+
+    await svc.createBranch('o', 'r', 'feature/GOV-01-x', 'a'.repeat(40));
+
+    const post = calls.find((c) => c.path === '/repos/o/r/git/refs')!;
+    expect(post.headers['Content-Type']).toBe('application/json');
+    expect(JSON.parse(post.body!)).toEqual({ ref: 'refs/heads/feature/GOV-01-x', sha: 'a'.repeat(40) });
+  });
+
+  /** Un GET sans corps n'a rien à déclarer. */
+  test('un GET ne déclare pas de type de corps', async () => {
+    const svc = configure();
+    const calls = fakeGithub({ '/app': { body: { id: 1, slug: 's' } }, '/app/installations': { body: [] } });
+
+    await svc.status();
+    expect(calls[0].headers['Content-Type']).toBeUndefined();
+  });
+});
+
+describe('createBranch', () => {
+  /** Deux personnes sur le même ticket, ou un double clic : même résultat. */
+  test('une branche déjà existante est signalée, pas levée', async () => {
+    const svc = configure();
+    fakeGithub({
+      '/repos/o/r/installation': { body: { id: 5 } },
+      'POST /app/installations/5/access_tokens': { body: { token: 't', expires_at: IN_AN_HOUR() } },
+      'POST /repos/o/r/git/refs': { status: 422, body: { message: 'Reference already exists' } },
+    });
+
+    expect(await svc.createBranch('o', 'r', 'feature/x', 'a'.repeat(40))).toEqual({ created: false });
+  });
+
+  /** Un autre 422 est une vraie erreur : ne pas la faire passer pour un doublon. */
+  test('un autre 422 remonte', async () => {
+    const svc = configure();
+    fakeGithub({
+      '/repos/o/r/installation': { body: { id: 5 } },
+      'POST /app/installations/5/access_tokens': { body: { token: 't', expires_at: IN_AN_HOUR() } },
+      'POST /repos/o/r/git/refs': { status: 422, body: { message: 'Object does not exist' } },
+    });
+
+    await expect(svc.createBranch('o', 'r', 'feature/x', 'b'.repeat(40))).rejects.toThrow(/422/);
+  });
+});
+
+describe('listInstallationRepositories', () => {
+  test('rend les dépôts de chaque installation', async () => {
+    const svc = configure();
+    fakeGithub({
+      '/app/installations': { body: [{ id: 5, account: { login: 'Nola-studio' }, repository_selection: 'all' }] },
+      'POST /app/installations/5/access_tokens': { body: { token: 't', expires_at: IN_AN_HOUR() } },
+      '/installation/repositories?per_page=100&page=1': {
+        body: {
+          repositories: [
+            {
+              id: 1, name: 'nola-hq', owner: { login: 'nola-studio' }, default_branch: 'main',
+              visibility: 'private', private: true, archived: false,
+              html_url: 'https://github.com/nola-studio/nola-hq', description: 'Console',
+            },
+          ],
+        },
+      },
+    });
+
+    expect(await svc.listInstallationRepositories()).toEqual([
+      {
+        externalId: '1',
+        owner: 'nola-studio',
+        name: 'nola-hq',
+        defaultBranch: 'main',
+        visibility: 'private',
+        archived: false,
+        htmlUrl: 'https://github.com/nola-studio/nola-hq',
+        description: 'Console',
+      },
+    ]);
+  });
+
+  /** Une organisation de cinquante dépôts ne doit pas en livrer trente. */
+  test('la pagination est suivie jusqu’au bout', async () => {
+    const svc = configure();
+    const page = (n: number, count: number) => ({
+      body: {
+        repositories: Array.from({ length: count }, (_, i) => ({
+          id: n * 100 + i, name: `r${n}-${i}`, owner: { login: 'o' }, default_branch: 'main',
+          private: true, archived: false, html_url: 'u', description: null,
+        })),
+      },
+    });
+    fakeGithub({
+      '/app/installations': { body: [{ id: 5, account: { login: 'o' }, repository_selection: 'all' }] },
+      'POST /app/installations/5/access_tokens': { body: { token: 't', expires_at: IN_AN_HOUR() } },
+      '/installation/repositories?per_page=100&page=1': page(1, 100),
+      '/installation/repositories?per_page=100&page=2': page(2, 7),
+    });
+
+    expect(await svc.listInstallationRepositories()).toHaveLength(107);
+  });
+
+  test('sans installation, aucun dépôt et aucun jeton demandé', async () => {
+    const svc = configure();
+    const calls = fakeGithub({ '/app/installations': { body: [] } });
+
+    expect(await svc.listInstallationRepositories()).toEqual([]);
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0);
   });
 });

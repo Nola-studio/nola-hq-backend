@@ -438,9 +438,24 @@ export class StudioProjectsProxyService {
 
   async updateTask(id: string, dto: UpdateTaskDto, actor: string) {
     const workItemId = this.parseId(id);
-    const previous = dto.assigneeEmail !== undefined ? await this.findWorkItem(id) : null;
+    const previous =
+      dto.assigneeEmail !== undefined || dto.projectId !== undefined
+        ? await this.findWorkItem(id)
+        : null;
     const previousAssigneeEmail =
       previous?.assignee ? (await this.emailById()).get(previous.assignee) ?? null : null;
+    /**
+     * Un sprint appartient à un projet. Rattacher le ticket à un autre projet
+     * sans le sortir de son sprint ferait refuser l'écriture pour
+     * incohérence — et le message parlerait du sprint, pas du projet, là où
+     * l'utilisateur croit avoir fait un geste simple. On l'en sort donc, et
+     * l'écran le dit avant le clic.
+     */
+    const leavesSprint =
+      dto.projectId !== undefined &&
+      previous !== null &&
+      previous.sprintId !== null &&
+      previous.projectId !== dto.projectId;
     const assignee =
       dto.assigneeEmail === undefined
         ? undefined
@@ -450,6 +465,8 @@ export class StudioProjectsProxyService {
     const updated = await this.workItems.update(
       workItemId,
       compact({
+        projectId: dto.projectId,
+        sprintId: leavesSprint ? null : undefined,
         title: dto.title,
         description: dto.description,
         status: dto.status ? STUDIO_STATUS_TO_WORK_ITEM_STATUS[dto.status] : undefined,

@@ -24,6 +24,19 @@ import { DATE_PATTERN, TASK_CATEGORIES, TASK_PRIORITIES, TASK_STATUSES } from '.
  * `POST /studio/tasks/:id/move` for that.
  */
 export class UpdateTaskDto {
+  /**
+   * Rattacher le ticket à un projet.
+   *
+   * Ce n'est pas un champ d'inventaire : c'est lui qui relie le ticket au
+   * code. Un projet porte ses dépôts autorisés, et sans projet
+   * « Start Work » n'a aucun dépôt où créer la branche. Un
+   * ticket capturé au vol naissait sans projet et le restait : rien ne
+   * permettait de le rattacher après coup.
+   *
+   * Détacher n'est pas offert. Un ticket sans projet retombe dans le cas
+   * que ce champ existe précisément pour réparer.
+   */
+  @IsOptional() @IsUUID() projectId?: string;
   @IsOptional() @IsString() @MinLength(1) @MaxLength(500) title?: string;
   @IsOptional() @IsString() description?: string | null;
   @IsOptional() @IsIn(TASK_STATUSES as unknown as string[]) status?: StudioTaskStatus;

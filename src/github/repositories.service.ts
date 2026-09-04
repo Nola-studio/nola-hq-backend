@@ -1,4 +1,10 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { RoadmapInitiative } from '../roadmap/roadmap-initiative.entity';
@@ -26,6 +32,8 @@ import type {
  */
 @Injectable()
 export class RepositoriesService {
+  private readonly logger = new Logger(RepositoriesService.name);
+
   constructor(
     @InjectRepository(CodeRepository)
     private readonly repos: Repository<CodeRepository>,
@@ -140,6 +148,99 @@ export class RepositoriesService {
         updatedAt: now,
       }),
     );
+  }
+
+  /**
+   * Enregistre d'un coup tous les dépôts que la GitHub App peut voir.
+   *
+   * C'est GitHub qui fait autorité sur ce à quoi il donne accès : le lui
+   * demander évite de recopier des URL une par une, et évite surtout
+   * d'enregistrer un dépôt sur lequel l'App n'a aucun droit — ce qui ne se
+   * découvrirait qu'au premier « Start Work ».
+   *
+   * Idempotent : un dépôt déjà connu est rafraîchi, pas dupliqué. Le
+   * rapprochement passe par l'identifiant GitHub quand on l'a, par
+   * `owner/name` sinon — un dépôt enregistré à la main avant la première
+   * synchronisation n'a pas encore d'identifiant.
+   *
+   * Ce que HQ est seul à savoir n'est jamais écrasé : produit, domaine,
+   * responsable et projets autorisés restent tels quels.
+   */
+  async discover(): Promise<{
+    added: CodeRepository[];
+    updated: CodeRepository[];
+    unchanged: number;
+  }> {
+    const seen = await this.github.listInstallationRepositories();
+    const added: CodeRepository[] = [];
+    const updated: CodeRepository[] = [];
+    let unchanged = 0;
+    const now = new Date();
+
+    for (const facts of seen) {
+      const existing =
+        (await this.repos.findOne({ where: { externalId: facts.externalId } })) ??
+        (await this.findByRef({ owner: facts.owner, name: facts.name }));
+
+      if (!existing) {
+        added.push(
+          await this.repos.save(
+            this.repos.create({
+              provider: 'github',
+              owner: facts.owner,
+              name: facts.name,
+              externalId: facts.externalId,
+              defaultBranch: facts.defaultBranch,
+              visibility: facts.visibility,
+              archived: facts.archived,
+              htmlUrl: facts.htmlUrl,
+              description: facts.description,
+              productId: null,
+              domainId: null,
+              steward: null,
+              lastSyncedAt: now,
+              createdAt: now,
+              updatedAt: now,
+            }),
+          ),
+        );
+        continue;
+      }
+
+      const changed =
+        existing.externalId !== facts.externalId ||
+        existing.owner !== facts.owner ||
+        existing.name !== facts.name ||
+        existing.defaultBranch !== facts.defaultBranch ||
+        existing.visibility !== facts.visibility ||
+        existing.htmlUrl !== facts.htmlUrl ||
+        existing.description !== facts.description ||
+        (facts.archived && !existing.archived);
+
+      Object.assign(existing, {
+        externalId: facts.externalId,
+        owner: facts.owner,
+        name: facts.name,
+        defaultBranch: facts.defaultBranch,
+        visibility: facts.visibility,
+        // L'archivage descend de GitHub, il ne remonte pas : archiver dans HQ
+        // reste une décision locale.
+        archived: existing.archived || facts.archived,
+        htmlUrl: facts.htmlUrl,
+        description: facts.description,
+        lastSyncedAt: now,
+        updatedAt: now,
+      });
+      await this.repos.save(existing);
+
+      if (changed) updated.push(existing);
+      else unchanged += 1;
+    }
+
+    this.logger.log(
+      `Découverte GitHub : ${added.length} ajouté(s), ${updated.length} mis à jour, ${unchanged} inchangé(s).`,
+    );
+    return { added, updated, unchanged };
   }
 
   async update(id: string, dto: UpdateRepositoryDto): Promise<CodeRepository> {
