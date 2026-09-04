@@ -227,6 +227,7 @@ export const MODULE_DOMAIN: Record<string, DomainCode> = {
 
   domains: 'D12',
   'execution-references': 'D12',
+  'public-api': 'D12',
   manifest: 'D12',
   config: 'D12',
 };
