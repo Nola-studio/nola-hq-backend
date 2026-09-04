@@ -40,6 +40,13 @@ export class StudioExpensesController {
     return this.svc.generateMonthlyRecurring(targetDate);
   }
 
+  @Post('sync-railway')
+  @HqRoles(HqRole.Operator)
+  @ApiOperation({ summary: 'Sync settled paid invoices from Railway API and update rolling average forecast' })
+  syncRailway() {
+    return this.svc.syncRailwayInvoices();
+  }
+
   @Post()
   @HqRoles(HqRole.Operator)
   create(@Body() dto: CreateExpenseDto) {

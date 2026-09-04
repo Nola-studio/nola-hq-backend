@@ -1,40 +1,159 @@
-﻿import { test, expect, describe, mock } from 'bun:test';
-import { RailwayService } from './railway.service';
+﻿import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
+import { RailwayService, RAILWAY_PRO_RATES } from './railway.service';
+import { ConfigService } from '@nestjs/config';
 
-describe('RailwayService', () => {
-  test('returns configured: false when RAILWAY_API_TOKEN is not set', async () => {
-    const config = { get: mock(() => null) } as any;
-    const svc = new RailwayService(config);
+describe('RailwayService (Workspace Token & Real Metrics)', () => {
+  let service: RailwayService;
+  let originalFetch: typeof globalThis.fetch;
 
-    const result = await svc.getUsage();
-    expect(result.configured).toBe(false);
-    expect(result.projects).toEqual([]);
-    expect(result.totalCostUsd).toBe(0);
-    expect(result.error).toContain('RAILWAY_API_TOKEN');
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    delete process.env.RAILWAY_TOKEN;
+    delete process.env.RAILWAY_API_TOKEN;
+    delete process.env.RAILWAY_WORKSPACE_TOKEN;
   });
 
-  test('caches the response when called multiple times within TTL', async () => {
-    const config = { get: mock(() => 'fake-token') } as any;
-    const svc = new RailwayService(config);
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
 
-    // Mock internal fetchProjects
-    (svc as any).fetchProjects = mock(async () => [
-      {
-        id: 'proj-1',
-        name: 'Nola Studio Prod',
-        servicesCount: 2,
-        estimatedCostUsd: 15.5,
-        services: [{ id: 'srv-1', name: 'api' }, { id: 'srv-2', name: 'db' }],
-      },
-    ]);
+  it('exposes verifiable pricing source URL and date', () => {
+    expect(RAILWAY_PRO_RATES.source).toBe('https://railway.com/pricing');
+    expect(RAILWAY_PRO_RATES.asOf).toBe('2026-09-03');
+  });
 
-    const res1 = await svc.getUsage();
-    expect(res1.configured).toBe(true);
-    expect(res1.totalCostUsd).toBe(15.5);
-    expect(res1.projects.length).toBe(1);
+  it('reports "unconfigured" when no RAILWAY_TOKEN is present', async () => {
+    const config = new ConfigService();
+    service = new RailwayService(config);
 
-    const res2 = await svc.getUsage();
-    expect((svc as any).fetchProjects).toHaveBeenCalledTimes(1);
-    expect(res2).toBe(res1);
+    const res = await service.getUsage(true);
+    expect(res.status).toBe('unconfigured');
+    expect(res.configured).toBe(false);
+    expect(res.totalCostUsd).toBe(0);
+    expect(res.projects).toEqual([]);
+    expect(res.error).toContain('non configuré');
+  });
+
+  it('reports "error" loudly when Railway API rejects the token', async () => {
+    process.env.RAILWAY_TOKEN = 'mock_bad_token';
+    const config = new ConfigService();
+    service = new RailwayService(config);
+
+    globalThis.fetch = mock(async () => {
+      return new Response(
+        JSON.stringify({
+          errors: [{ message: 'Not Authorized', path: ['apiToken'] }],
+          data: null,
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }) as any;
+
+    const res = await service.getUsage(true);
+    expect(res.status).toBe('error');
+    expect(res.configured).toBe(true);
+    expect(res.error).toBe('Not Authorized');
+    expect(res.projects).toEqual([]);
+  });
+
+  it('reports "connected" with workspace name, billing total, and computed project estimates', async () => {
+    process.env.RAILWAY_TOKEN = 'mock_valid_workspace_token';
+    const config = new ConfigService();
+    service = new RailwayService(config);
+
+    globalThis.fetch = mock(async (_url, opts: any) => {
+      const body = JSON.parse(opts.body);
+      if (body.query.includes('GetWorkspaceData')) {
+        return new Response(
+          JSON.stringify({
+            data: {
+              apiToken: {
+                workspaces: [
+                  {
+                    id: 'ws-123',
+                    name: 'NolaaStudio-npr',
+                  },
+                ],
+              },
+              projects: {
+                edges: [
+                  {
+                    node: {
+                      id: 'proj-1',
+                      name: 'Nola-Core',
+                      services: {
+                        edges: [{ node: { id: 'svc-1', name: 'nola-hq-backend' } }],
+                      },
+                    },
+                  },
+                ],
+              },
+              estimatedUsage: [
+                { projectId: 'proj-1', measurement: 'CPU_USAGE_2', estimatedValue: 100.0 },
+                { projectId: 'proj-1', measurement: 'MEMORY_USAGE_GB', estimatedValue: 200000.0 },
+                { projectId: 'proj-1', measurement: 'DISK_USAGE_GB', estimatedValue: 50000.0 },
+                { projectId: 'proj-1', measurement: 'NETWORK_TX_GB', estimatedValue: 1.0 },
+              ],
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      if (body.query.includes('GetWorkspaceBillingDetails')) {
+        return new Response(
+          JSON.stringify({
+            data: {
+              workspace: {
+                id: 'ws-123',
+                name: 'NolaaStudio-npr',
+                plan: 'PRO',
+                customer: {
+                  currentUsage: 45.39,
+                  creditBalance: 0,
+                  billingPeriod: {
+                    start: '2026-08-19T04:44:50.000Z',
+                    end: '2026-09-19T04:44:50.000Z',
+                  },
+                  usageLimit: {
+                    hardLimit: 75,
+                    softLimit: 70,
+                    isOverLimit: false,
+                  },
+                  subscriptions: [
+                    {
+                      nextInvoiceCurrentTotal: 4515,
+                      nextInvoiceDate: '2026-09-19T04:44:50.000Z',
+                      status: 'active',
+                      items: [{ priceDollars: 20 }],
+                    },
+                  ],
+                },
+              },
+              agentUsage: {
+                totalUsedCents: 0,
+                hardLimitCents: 2000,
+                softLimitCents: 0,
+              },
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      return new Response('{}', { status: 200 });
+    }) as any;
+
+    const res = await service.getUsage(true);
+    expect(res.status).toBe('connected');
+    expect(res.configured).toBe(true);
+    expect(res.workspaceName).toBe('NolaaStudio-npr');
+    expect(res.totalCostUsd).toBe(45.39);
+    expect(res.billing?.plan).toBe('PRO');
+    expect(res.billing?.baseFeeUsd).toBe(20);
+    expect(res.billing?.computeLimit?.hardLimitUsd).toBe(75);
+    expect(res.billing?.agentLimit?.hardLimitUsd).toBe(20);
+    expect(res.projects.length).toBe(1);
+    expect(res.projects[0].name).toBe('Nola-Core');
+    expect(res.projects[0].estimatedCostUsd).toBeGreaterThan(20);
+    expect(res.error).toBeNull();
   });
 });

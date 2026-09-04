@@ -66,6 +66,33 @@ export class StudioExpense {
   @Column({ type: 'varchar', length: 64, nullable: true, name: 'template_id' })
   templateId!: string | null;
 
+  /** Provenance of the expense record: 'manual' by an operator, or 'railway' synced from live billing invoices. */
+  @Column({ type: 'varchar', default: 'manual' })
+  source!: 'manual' | 'railway';
+
+  /** External provider invoice ID (e.g. 'in_1U61NRCJoPsRzQsdgTsARAzX' for Railway/Stripe). */
+  @Column({ type: 'varchar', nullable: true, name: 'external_invoice_id' })
+  externalInvoiceId!: string | null;
+
+  /** Direct receipt PDF download URL from external provider. */
+  @Column({ type: 'varchar', nullable: true, name: 'receipt_url' })
+  receiptUrl!: string | null;
+
+  /**
+   * For recurring template rows: array of recent invoice snapshots that formed the rolling average forecast amount.
+   * e.g. [{ invoiceId, date, amountUsd }]
+   */
+  @Column({ type: 'jsonb', nullable: true, name: 'forecast_basis' })
+  forecastBasis!: Array<{
+    invoiceId: string;
+    date: string;
+    amountUsd: number;
+  }> | null;
+
+  /** Audit trail reason explaining why an expense was marked void. */
+  @Column({ type: 'varchar', nullable: true, name: 'void_reason' })
+  voidReason!: string | null;
+
   @Column({ name: 'created_at' })
   createdAt!: Date;
 }
