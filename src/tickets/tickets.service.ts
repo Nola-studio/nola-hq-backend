@@ -17,6 +17,8 @@ import { TeamService } from '../team/team.service';
 import { SlaPolicy } from '../sla/sla-policy.entity';
 import { NotificationsService } from '../notifications/notifications.service';
 
+import { Product } from '../company/product.entity';
+
 /** Reserved sentinel for "nobody yet" — the ingest listener creates tickets
  * this way. The only `assignee` value exempt from the team_members check. */
 const UNASSIGNED = 'unassigned';
@@ -35,15 +37,21 @@ export interface TicketsListQuery extends PaginationDto {
   assignee?: string;
   priority?: string;
   category?: string;
+  productId?: string;
 }
 
-/** `Ticket` as the API returns it: `businessUnit` trimmed to `{code, name}` rather than the full joined row. */
-export type TicketResponse = Omit<Ticket, 'businessUnit'> & {
+/** `Ticket` as the API returns it: `businessUnit` and `product` trimmed rather than the full joined row. */
+export type TicketResponse = Omit<Ticket, 'businessUnit' | 'product'> & {
   businessUnit: { code: string; name: string };
+  product?: { id: string; code: string; name: string } | null;
 };
 
 function toTicketResponse(t: Ticket): TicketResponse {
-  return { ...t, businessUnit: { code: t.businessUnit!.code, name: t.businessUnit!.name } };
+  return {
+    ...t,
+    businessUnit: { code: t.businessUnit!.code, name: t.businessUnit!.name },
+    product: t.product ? { id: t.product.id, code: t.product.code, name: t.product.name } : null,
+  };
 }
 
 @Injectable()
@@ -55,6 +63,7 @@ export class TicketsService {
     @InjectRepository(TicketEvent) private readonly events: Repository<TicketEvent>,
     @InjectRepository(TeamMember) private readonly team: Repository<TeamMember>,
     @InjectRepository(SlaPolicy) private readonly slaPolicies: Repository<SlaPolicy>,
+    @InjectRepository(Product) private readonly products: Repository<Product>,
     private readonly push: PushService,
     private readonly notify: TicketsNotifyService,
     private readonly businessUnits: BusinessUnitResolverService,
@@ -69,7 +78,10 @@ export class TicketsService {
     if (allowedUnitIds.length === 0) {
       return { items: [], total: 0, page, limit };
     }
-    const qb = this.repo.createQueryBuilder('t').leftJoinAndSelect('t.businessUnit', 'businessUnit');
+    const qb = this.repo
+      .createQueryBuilder('t')
+      .leftJoinAndSelect('t.businessUnit', 'businessUnit')
+      .leftJoinAndSelect('t.product', 'product');
     qb.andWhere('t.businessUnitId IN (:...allowedUnitIds)', { allowedUnitIds });
     if (query.tenant) qb.andWhere('t.tenant = :tenant', { tenant: query.tenant });
     if (query.status) qb.andWhere('t.status = :status', { status: query.status });
@@ -79,6 +91,8 @@ export class TicketsService {
       qb.andWhere('t.priority = :priority', { priority: query.priority });
     if (query.category)
       qb.andWhere('t.category = :category', { category: query.category });
+    if (query.productId)
+      qb.andWhere('t.productId = :productId', { productId: query.productId });
     if (query.q) {
       qb.andWhere('(LOWER(t.subject) LIKE :q OR LOWER(t.body) LIKE :q)', {
         q: `%${query.q.toLowerCase()}%`,
@@ -100,7 +114,7 @@ export class TicketsService {
     }
     const t = await this.repo.findOne({
       where: { id, businessUnitId: In(allowedUnitIds) },
-      relations: ['businessUnit'],
+      relations: ['businessUnit', 'product'],
     });
     if (!t) throw new NotFoundException(`Ticket ${id} introuvable`);
     return toTicketResponse(t);
@@ -125,6 +139,7 @@ export class TicketsService {
     const businessUnitCode = dto.businessUnitCode ?? DEFAULT_BUSINESS_UNIT_CODE;
     const businessUnitId = await this.businessUnits.resolve(businessUnitCode);
     const sla = await this.deriveSla(businessUnitId, dto.priority);
+    const resolvedProduct = await this.resolveProduct(businessUnitId, dto.productId, dto.source);
     const ticket = this.repo.create({
       tenant: dto.tenant,
       subject: dto.subject,
@@ -138,6 +153,7 @@ export class TicketsService {
       sla,
       category: dto.category ?? null,
       source: dto.source ?? null,
+      productId: resolvedProduct?.id ?? null,
       dueAt: dto.dueAt ? new Date(dto.dueAt) : null,
       businessUnitId,
       replies: [],
@@ -313,6 +329,23 @@ export class TicketsService {
       ticket.category = dto.category;
     }
 
+    if (dto.productId !== undefined) {
+      if (dto.productId === null) {
+        if (ticket.productId !== null) {
+          changes.fromProductId = ticket.productId;
+          changes.toProductId = null;
+          ticket.productId = null;
+        }
+      } else {
+        const prod = await this.resolveProduct(ticket.businessUnitId, dto.productId);
+        if (prod?.id !== ticket.productId) {
+          changes.fromProductId = ticket.productId;
+          changes.toProductId = prod?.id ?? null;
+          ticket.productId = prod?.id ?? null;
+        }
+      }
+    }
+
     if (Object.keys(changes).length > 0) {
       ticket.updatedAt = new Date();
       const saved = await this.repo.save(ticket);
@@ -323,6 +356,49 @@ export class TicketsService {
     }
 
     return ticket;
+  }
+
+  private async resolveProduct(
+    businessUnitId: string,
+    productId?: string | null,
+    source?: string | null,
+  ): Promise<Product | null> {
+    if (productId) {
+      const product = await this.products.findOne({ where: { id: productId } });
+      if (!product) {
+        throw new BadRequestException(`Produit '${productId}' introuvable.`);
+      }
+      if (product.businessUnitId !== businessUnitId) {
+        throw new BadRequestException(
+          `Le produit '${product.name}' (${product.code}) n'appartient pas à l'unité d'affaires spécifiée.`,
+        );
+      }
+      return product;
+    }
+
+    if (source) {
+      const normalizedSource = source.trim().toLowerCase();
+      let product = await this.products.findOne({ where: { code: normalizedSource } });
+      if (!product) {
+        const allProducts = await this.products.find();
+        product =
+          allProducts.find((p) => {
+            if (!p.sourceAliases) return false;
+            const aliases = Array.isArray(p.sourceAliases)
+              ? p.sourceAliases
+              : typeof p.sourceAliases === 'string'
+              ? JSON.parse(p.sourceAliases)
+              : [];
+            return aliases.map((a: string) => a.toLowerCase()).includes(normalizedSource);
+          }) ?? null;
+      }
+
+      if (product && product.businessUnitId === businessUnitId) {
+        return product;
+      }
+    }
+
+    return null;
   }
 
   /**
