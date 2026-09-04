@@ -18,6 +18,7 @@ export type StudioTaskStatus = WorkItemStatus;
 export type StudioTaskPriority = 'none' | 'low' | 'medium' | 'high' | 'urgent';
 
 export const STUDIO_STATUS_TO_WORK_ITEM_STATUS: Record<StudioTaskStatus, WorkItemStatus> = {
+  triage: 'triage',
   todo: 'todo',
   in_progress: 'in_progress',
   blocked: 'blocked',
@@ -27,6 +28,7 @@ export const STUDIO_STATUS_TO_WORK_ITEM_STATUS: Record<StudioTaskStatus, WorkIte
 };
 
 export const WORK_ITEM_STATUS_TO_STUDIO_STATUS: Record<WorkItemStatus, StudioTaskStatus> = {
+  triage: 'triage',
   todo: 'todo',
   in_progress: 'in_progress',
   blocked: 'blocked',

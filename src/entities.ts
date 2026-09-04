@@ -1,5 +1,6 @@
 import { ActivityEvent } from './activity/activity.entity';
 import { Capability, Domain } from './domains/domain.entity';
+import { ExecutionManifest, ExecutionManifestItem } from './execution-references/execution-manifest.entity';
 import { ExecutionReference, ExecutionReferenceVersion } from './execution-references/execution-reference.entity';
 import { AuditEntry } from './audit/audit.entity';
 import { Broadcast } from './broadcast/broadcast.entity';
@@ -130,4 +131,6 @@ export const entities = [
   Capability,
   ExecutionReference,
   ExecutionReferenceVersion,
+  ExecutionManifest,
+  ExecutionManifestItem,
 ];

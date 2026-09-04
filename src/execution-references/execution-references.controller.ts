@@ -1,6 +1,7 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ExecutionReferencesService } from './execution-references.service';
+import { ExecutionImportService } from './execution-import.service';
 import {
   AddExecutionReferenceVersionDto,
   CreateExecutionReferenceDto,
@@ -27,7 +28,10 @@ import { CurrentUser, type AuthenticatedUser } from '../common/auth/current-user
 @ApiTags('execution-references')
 @Controller('execution-references')
 export class ExecutionReferencesController {
-  constructor(private readonly svc: ExecutionReferencesService) {}
+  constructor(
+    private readonly svc: ExecutionReferencesService,
+    private readonly imports: ExecutionImportService,
+  ) {}
 
   @Get()
   @HqRoles(HqRole.Viewer)
@@ -72,6 +76,43 @@ export class ExecutionReferencesController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.svc.addVersion(key, dto, user.email);
+  }
+
+
+  @Post(':key/versions/:version/parse')
+  @HqRoles(HqRole.Operator)
+  @ApiOperation({
+    summary: "Lit le document et enregistre son Execution Manifest — ne crée aucun objet opérationnel",
+  })
+  parse(
+    @Param('key') key: string,
+    @Param('version') version: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.imports.parse(key, version, user.email);
+  }
+
+  @Get(':key/versions/:version/manifest')
+  @HqRoles(HqRole.Viewer)
+  @ApiOperation({ summary: "L'arbre extrait : domaines, capacités, epics et user stories" })
+  manifest(@Param('key') key: string, @Param('version') version: string) {
+    return this.imports.findManifest(key, version);
+  }
+
+  @Post(':key/versions/:version/import')
+  @HqRoles(HqRole.Operator)
+  @ApiOperation({
+    summary:
+      "Crée le backlog proposé par le manifest, chaque epic sur son domaine et sa capacité. " +
+      "`?dryRun=true` rejoue exactement le même chemin sans rien écrire.",
+  })
+  import(
+    @Param('key') key: string,
+    @Param('version') version: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('dryRun') dryRun?: string,
+  ) {
+    return this.imports.import(key, version, user.email, dryRun === 'true');
   }
 
   @Patch(':key')

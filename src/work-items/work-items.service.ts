@@ -45,6 +45,7 @@ import {
 } from './dto/work-item.dto';
 
 const STATUS_LABELS: Record<WorkItemStatus, string> = {
+  triage: 'Boîte de réception',
   todo: 'À faire',
   in_progress: 'En cours',
   blocked: 'Bloqué',
@@ -53,7 +54,11 @@ const STATUS_LABELS: Record<WorkItemStatus, string> = {
   closed: 'Fermé',
 };
 
+/** Board columns — every status except the `triage` inbox. See `board()`. */
+const BOARD_STATUSES = WORK_ITEM_STATUSES.filter((status) => status !== 'triage');
+
 const STATUS_TONES: Record<WorkItemStatus, string> = {
+  triage: '#8A5C12',
   todo: '#64748B',
   in_progress: '#4F46E5',
   blocked: '#DC2626',
@@ -121,9 +126,15 @@ export class WorkItemsService implements OnModuleInit {
     return { items, total, page, limit };
   }
 
+  /**
+   * The Kanban keeps its six columns. `triage` is an inbox, not a stage of
+   * work: a manifest can drop dozens of proposals into it at once, and they
+   * would swamp the board before anyone accepted them. It is reachable by
+   * filtering on the status explicitly.
+   */
   async board(query: ListWorkItemsDto) {
     const result = await this.list({ ...query, page: 1, limit: 200 } as ListWorkItemsDto);
-    return WORK_ITEM_STATUSES.map((status) => ({
+    return BOARD_STATUSES.map((status) => ({
       id: status,
       label: STATUS_LABELS[status],
       tone: STATUS_TONES[status],
