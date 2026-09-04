@@ -344,14 +344,34 @@ sourceKind!: 'manual' | 'request' | 'manifest' | 'support' | 'github';
 @Column({ type: 'varchar', length: 160, name: 'approved_by', nullable: true }) approvedBy!: string | null;
 ```
 
-**b. Le statut `triage`**, en amont de `todo`, exclu du Kanban par défaut et
-exposé comme colonne « Boîte de réception ».
+**b. Le statut `triage` ne s'applique qu'aux lots générés par une machine.**
 
-**c. Les demandes basculent** : capture à un champ, déduction automatique
-(`bug→bug`, `suggestion→feature`, `demande→task`, priorité par la table
-`REQUEST_PRIORITY_TO_TASK_PRIORITY` déjà écrite), acceptation à un clic. La table
-`studio_requests` est migrée puis retirée, `/studio/requests` redirige vers la
-file de triage.
+Un humain qui saisit un besoin écrit **directement dans le backlog** : un champ,
+un enregistrement, l'item est un `work_item` en `todo` dès la première seconde. Il
+n'y a **rien à convertir**, parce qu'il n'y a jamais eu deux objets. Personne ne
+clique pour « accepter » ce qu'un collègue a écrit.
+
+`triage` sert au seul cas où une validation humaine est réellement exigée : un
+manifest qui déverse soixante items d'un coup (EXE-05 — « aucune mutation
+importante sans respecter les règles d'approbation »). Là, un gate a un sens ;
+sur une phrase tapée par un collègue, il n'en a aucun.
+
+| Source | Statut d'arrivée | Clics avant d'être dans le backlog |
+|---|---|---:|
+| Humain (ex-« demande ») | `todo` | **0** |
+| Ingestion support (event-bus) | `todo` | **0** |
+| Manifest, lot de N items | `triage` | 1 pour le lot entier |
+
+**c. La table `studio_requests` disparaît**, et avec elle l'écran. Capture à un
+champ depuis n'importe où (palette de commandes, bouton du Kanban), déduction
+automatique du type et de la priorité par la table
+`REQUEST_PRIORITY_TO_TASK_PRIORITY` déjà écrite, projet et catégorie laissés nuls
+— les deux colonnes le sont déjà sur `WorkItem`. `/studio/requests` redirige vers
+le Kanban filtré sur `source_kind='request'` : « ce qui est arrivé cette semaine »
+devient un filtre du backlog, pas une file séparée.
+
+L'entrée de menu « Demandes » disparaît donc du domaine D6 à ce moment-là — elle
+n'est conservée aujourd'hui que parce que l'écran existe encore.
 
 **d. La prévisualisation du backlog** compare le manifest à l'existant et
 annonce, comme l'exige EXE-05 : à créer, à modifier, inchangé, à déprécier,
@@ -363,12 +383,16 @@ POST /execution-references/:id/versions/:vid/backlog/apply
 ```
 
 `apply` écrit des `work_items` en `triage` avec `source_kind='manifest'` et la
-provenance complète. **Aucune mutation directe du backlog canonique** : la porte
-d'entrée reste la file de triage, pour un manifest comme pour une demande.
+provenance complète — c'est le seul chemin qui passe par un gate.
 
-*À la fin du lot :* le v1.3 génère lui-même son backlog de transformation, et les
-demandes de l'équipe atterrissent dans la même file. Le produit a un point
-d'entrée unique.
+*À la fin du lot :* le v1.3 génère son propre backlog de transformation, et un
+besoin saisi par l'équipe est un élément de backlog immédiatement. Un seul objet,
+un seul tableau, un seul cycle de vie.
+
+> **Le test de recette du lot.** Écrire un besoin et le voir dans le backlog doit
+> coûter **un champ et une validation**. Si la recette demande un deuxième écran,
+> une conversion ou une réassignation, le lot a manqué sa cible — le défaut de
+> l'écran Demandes aurait simplement changé de nom.
 
 ### Lot 1.4 — Taxonomie complète (ENG-01) · ~3 semaines
 
@@ -457,7 +481,7 @@ S18+    ── chantiers 2 à 7
 | Fin lot 1.0 | La navigation affiche 12 domaines ; deux sont vides et le disent |
 | Fin lot 1.1 | Le v1.3 est dans HQ, versionné, avec son empreinte SHA-256 |
 | Fin lot 1.2 | L'arbre des 12 domaines et des ~60 epics est lisible à l'écran, sans saisie manuelle |
-| Fin lot 1.3 | Une demande de l'équipe et un epic du référentiel arrivent dans la **même** file de triage |
+| Fin lot 1.3 | Un besoin saisi par l'équipe est dans le backlog en un champ, sans conversion ni deuxième écran |
 | Fin lot 1.5 | Un v1.4 déposé ne recrée aucun epic existant |
 | Fin chantier 1 | Depuis un `work_item`, on remonte à la ligne du référentiel qui l'a produit |
 
