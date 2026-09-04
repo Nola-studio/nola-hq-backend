@@ -204,6 +204,7 @@ export const MODULE_DOMAIN: Record<string, DomainCode> = {
   'work-items': 'D06',
   studio: 'D06',
   deploys: 'D06',
+  github: 'D06',
 
   business: 'D07',
   pipeline: 'D07',
