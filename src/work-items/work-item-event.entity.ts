@@ -12,7 +12,8 @@ export type WorkItemEventAction =
   | 'attachment_added'
   | 'attachment_removed'
   | 'accepted'
-  | 'dismissed';
+  | 'dismissed'
+  | 'branch_created';
 
 @Entity('work_item_events')
 export class WorkItemEvent {
