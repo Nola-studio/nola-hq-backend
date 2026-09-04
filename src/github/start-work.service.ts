@@ -116,18 +116,28 @@ export class StartWorkService {
         "Ce ticket n'a pas de clé stable — sans elle, la branche ne pourrait pas le désigner.",
       );
     }
-    if (!item.projectId) {
+    /**
+     * Un projet, ou à défaut un domaine. Les cent-six items du référentiel
+     * v1.3 arrivent classés par domaine et sans projet — exiger un projet les
+     * bloquerait tous, et ce sont ceux sur lesquels on veut travailler.
+     */
+    if (!item.projectId && !item.domainId) {
       return blocked(
         'no-project',
-        "Ce ticket n'est rattaché à aucun projet — rattachez-le pour choisir un dépôt.",
+        "Ce ticket n'a ni projet ni domaine — rattachez-le pour choisir un dépôt.",
       );
     }
 
-    const repositories = await this.repositories.allowedFor(item.projectId);
+    const repositories = await this.repositories.allowedForWorkItem({
+      projectId: item.projectId,
+      domainId: item.domainId,
+    });
     if (repositories.length === 0) {
       return blocked(
         'no-repository',
-        "Aucun dépôt n'est autorisé pour ce projet — rattachez-en un depuis « Dépôts de code ».",
+        item.projectId
+          ? "Aucun dépôt n'est autorisé pour ce projet — rattachez-en un depuis « Dépôts de code »."
+          : "Aucun dépôt n'est classé dans le domaine de ce ticket — classez-en un depuis « Dépôts de code ».",
       );
     }
 

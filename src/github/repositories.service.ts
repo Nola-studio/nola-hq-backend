@@ -73,6 +73,26 @@ export class RepositoriesService {
     return this.list({ projectId });
   }
 
+  /**
+   * Les dépôts qu'un ticket peut viser.
+   *
+   * Le projet d'abord — c'est l'autorisation la plus explicite. À défaut, le
+   * domaine : les items d'un référentiel arrivent classés par domaine et sans
+   * projet, et ce sont précisément ceux sur lesquels on veut démarrer du
+   * travail. Exiger un projet les bloquerait tous.
+   *
+   * Pas de repli quand un projet existe mais n'a aucun dépôt : un rattachement
+   * explicite est une décision, et l'élargir en douce la viderait de son sens.
+   */
+  async allowedForWorkItem(scope: {
+    projectId?: string | null;
+    domainId?: string | null;
+  }): Promise<CodeRepository[]> {
+    if (scope.projectId) return this.allowedFor(scope.projectId);
+    if (scope.domainId) return this.list({ domainId: scope.domainId });
+    return [];
+  }
+
   async findOne(id: string): Promise<CodeRepository> {
     const found = await this.repos.findOne({ where: { id }, relations: ['product', 'domain'] });
     if (!found) throw new NotFoundException(`Dépôt ${id} introuvable`);

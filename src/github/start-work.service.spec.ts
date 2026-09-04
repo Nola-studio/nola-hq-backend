@@ -9,6 +9,7 @@ function item(over: Partial<WorkItem> = {}): WorkItem {
     id: 1,
     reference: 'GOV-01',
     projectId: 'p1',
+    domainId: null,
     title: 'Registre canonique des entités',
     type: 'story',
     status: 'todo',
@@ -59,7 +60,12 @@ function makeService({
     }),
   } as never;
 
-  const repositories = { allowedFor: mock(async () => allowed) } as never;
+  const repositories = {
+    allowedFor: mock(async () => allowed),
+    allowedForWorkItem: mock(async (scope: { projectId?: string | null; domainId?: string | null }) =>
+      scope.projectId || scope.domainId ? allowed : [],
+    ),
+  } as never;
 
   const github = {
     branchSha: mock(async () => {
@@ -112,11 +118,30 @@ describe('readiness', () => {
       expect(r.reason).toContain('clé stable');
     });
 
-    test('un ticket sans projet renvoie vers le rattachement', async () => {
-      const { svc } = makeService({ workItem: item({ projectId: null }) });
+    test('un ticket sans projet ni domaine renvoie vers le rattachement', async () => {
+      const { svc } = makeService({ workItem: item({ projectId: null, domainId: null }) });
       const r = await svc.readiness(1);
       expect(r.blocker).toBe('no-project');
-      expect(r.reason).toContain('rattachez-le');
+      expect(r.reason).toContain('ni projet ni domaine');
+    });
+
+    /**
+     * Les cent-six items du référentiel arrivent classés par domaine et sans
+     * projet. Exiger un projet les bloquerait tous — et ce sont ceux sur
+     * lesquels on veut travailler.
+     */
+    test('un ticket du référentiel, classé par domaine et sans projet, peut démarrer', async () => {
+      const { svc } = makeService({ workItem: item({ projectId: null, domainId: 'd6' }) });
+      const r = await svc.readiness(1);
+      expect(r.ready).toBe(true);
+      expect(r.branchName).toBe('feature/GOV-01-registre-canonique-des-entites');
+    });
+
+    test('sans dépôt dans le domaine, le message parle du domaine', async () => {
+      const { svc } = makeService({ workItem: item({ projectId: null, domainId: 'd6' }), allowed: [] });
+      const r = await svc.readiness(1);
+      expect(r.blocker).toBe('no-repository');
+      expect(r.reason).toContain('domaine');
     });
 
     test('un projet sans dépôt autorisé renvoie vers l’écran des dépôts', async () => {
