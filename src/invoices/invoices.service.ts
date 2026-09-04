@@ -17,6 +17,7 @@ import { BusinessInvoice } from '../business/business-invoice.entity';
 import { Product } from '../company/product.entity';
 import { nextBusinessNumber } from '../business/business-number-sequence';
 import type { PaginatedResult } from '../common/dto/pagination.dto';
+import type { BillingSubscriptionRow } from '../subscriptions/subscriptions.service';
 
 /**
  * Raw shape emitted by nola-billing's admin `invoice.list` command — mirrors
@@ -299,6 +300,185 @@ export class InvoicesService {
       pdfBuffer,
       notificationDispatched,
     };
+  }
+
+  /**
+   * Scans active subscriptions across all tenants and generates upcoming
+   * invoices for any subscription renewing in 3 days.
+   *
+   * Idempotent: enforces that only 1 non-cancelled invoice exists per
+   * (subscriptionId, due) pair.
+   * Fail-closed: if product or brand cannot be resolved, logs error and skips (no mock fabrication).
+   */
+  async generateUpcomingSubscriptionInvoices(targetDate?: Date): Promise<Invoice[]> {
+    const now = new Date();
+    const upcomingDate = targetDate ?? new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+    const targetDateStr = upcomingDate.toISOString().slice(0, 10);
+
+    const reply = await this.commands
+      .send<{ status: string; limit: number }, BillingSubscriptionRow[]>(
+        'nola.commands.billing.admin.subscription.list',
+        { status: 'active', limit: 500 },
+        { issuedBy: 'nola-hq', timeoutMs: 5_000 },
+      )
+      .catch((err: Error) => {
+        this.logger.warn(`subscription.list NATS call failed: ${err.message}`);
+        throw new ServiceUnavailableException({
+          code: 'BILLING_UNAVAILABLE',
+          message: 'nola-billing is unreachable',
+        });
+      });
+
+    if (!reply.success) {
+      this.logger.warn(
+        `subscription.list returned error: ${reply.error?.code} ${reply.error?.message}`,
+      );
+      throw new ServiceUnavailableException({
+        code: reply.error?.code ?? 'BILLING_ERROR',
+        message: reply.error?.message ?? 'subscription.list failed',
+      });
+    }
+
+    const subscriptions = reply.data ?? [];
+    if (subscriptions.length === 500) {
+      this.logger.warn(
+        'subscription.list returned exactly 500 active subscriptions — ceiling reached, potential silent truncation',
+      );
+    }
+
+    const matchingSubs = subscriptions.filter(
+      (s) => s.status === 'active' && s.nextBillingDate?.slice(0, 10) === targetDateStr,
+    );
+
+    const createdInvoices: Invoice[] = [];
+
+    for (const sub of matchingSubs) {
+      // Idempotency: skip if non-cancelled invoice already exists for this subscription & due date
+      const existing = await this.repo.findOne({
+        where: {
+          subscriptionId: sub.id,
+          due: targetDateStr,
+        },
+      });
+
+      if (existing && existing.status !== 'cancelled') {
+        this.logger.debug(
+          `Upcoming invoice already exists for subscription ${sub.id} due on ${targetDateStr} (invoice=${existing.id})`,
+        );
+        continue;
+      }
+
+      // Brand resolution: Product -> BusinessUnit -> LegalEntity
+      let product = await this.products.findOne({
+        where: { code: sub.app },
+        relations: ['businessUnit', 'businessUnit.legalEntity'],
+      });
+
+      if (!product) {
+        const allProducts = await this.products.find({
+          relations: ['businessUnit', 'businessUnit.legalEntity'],
+        });
+        product =
+          allProducts.find(
+            (p) => Array.isArray(p.sourceAliases) && p.sourceAliases.includes(sub.app),
+          ) ?? null;
+      }
+
+      if (!product || !product.businessUnit) {
+        this.logger.error(
+          `CRITICAL: upcoming invoice rejected — unresolvable brand for app '${sub.app}' (tenant=${sub.tenantId}). Zero mock fabrication allowed.`,
+        );
+        continue;
+      }
+
+      const businessUnit = product.businessUnit;
+      const rawPrice = sub.plan?.price ?? 0;
+      const price = typeof rawPrice === 'string' ? parseFloat(rawPrice) : rawPrice;
+      const currency = (sub.plan?.currency || 'USD').toUpperCase();
+
+      // Sequential invoice number
+      const invoiceNumber = await nextBusinessNumber(this.repo.manager, 'FAC', upcomingDate);
+
+      // Render PDF
+      const invoiceEntity: BusinessInvoice = {
+        id: invoiceNumber,
+        number: invoiceNumber,
+        receiptNumber: null as any,
+        businessUnitId: businessUnit.id,
+        businessUnit,
+        amountCdf: price,
+        paidAmountCdf: 0,
+        taxRate: 0,
+        taxCdf: 0,
+        taxLabel: null,
+        currency: currency as any,
+        issuedOn: now.toISOString().slice(0, 10),
+        dueOn: targetDateStr,
+        paidAt: null,
+        status: 'pending',
+        description: `Abonnement ${product.name} — ${sub.tenantId}`,
+        paymentMethod: 'mobile_money',
+        paymentReference: null,
+        verificationToken: null as any,
+        client: {
+          name: sub.tenantId,
+          email: `admin@${sub.tenantId}.nola.cd`,
+          phone: null,
+        } as any,
+      } as BusinessInvoice;
+
+      try {
+        await this.pdfService.invoice(invoiceEntity);
+      } catch (err: any) {
+        this.logger.error(
+          `Failed to render upcoming invoice PDF for ${invoiceNumber}: ${err.message}`,
+        );
+      }
+
+      // Persist Invoice row in HQ
+      const invoice = this.repo.create({
+        id: invoiceNumber,
+        tenant: sub.tenantId,
+        subscriptionId: sub.id,
+        amt: Math.round(price),
+        currency,
+        status: 'pending',
+        method: 'mobile_money',
+        issued: now.toISOString().slice(0, 10),
+        due: targetDateStr,
+      });
+
+      const saved = await this.repo.save(invoice);
+      createdInvoices.push(saved);
+
+      // Dispatch notification (fire-and-forget)
+      const recipient = `admin@${sub.tenantId}.nola.cd`;
+      if (recipient && this.nolaClient.isReady()) {
+        try {
+          await this.nolaClient.getClient().publish('nola.commands.notify.send', {
+            channel: 'email',
+            to: recipient,
+            template: '_inline',
+            variables: {
+              subject: `Facture à venir ${invoiceNumber} — ${businessUnit.name}`,
+              body: `Votre facture de renouvellement pour ${product.name} (${sub.tenantId}) d'un montant de ${price} ${currency} arrive à échéance le ${targetDateStr}. Facture n° ${invoiceNumber}.`,
+            },
+            idempotencyKey: `upcoming-invoice-${sub.id}-${targetDateStr}`,
+            realm: 'nola-hq',
+            tenantId: sub.tenantId || 'nola-studio',
+          });
+          this.logger.log(
+            `Upcoming invoice notification dispatched — invoice=${invoiceNumber} to=${recipient}`,
+          );
+        } catch (err: any) {
+          this.logger.error(
+            `Failed to publish notify.send for upcoming invoice ${invoiceNumber}: ${err.message}`,
+          );
+        }
+      }
+    }
+
+    return createdInvoices;
   }
 
   private async fetchBillingInvoices(filter: {

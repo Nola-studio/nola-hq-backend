@@ -1,4 +1,5 @@
-import { IsDateString, IsIn, IsInt, IsOptional, IsString } from 'class-validator';
+import { IsDateString, IsIn, IsInt, IsOptional, IsString, IsUUID } from 'class-validator';
+import { TICKET_RESOLUTION_CODES, type TicketResolutionCode } from '../ticket.entity';
 
 const PRIORITIES = ['P1', 'P2', 'P3'] as const;
 const STATUSES = ['open', 'pending', 'closed', 'resolved'] as const;
@@ -29,6 +30,8 @@ export class CreateTicketDto {
   category?: (typeof CATEGORIES)[number];
   /** Where the ticket came from, e.g. 'kelasi-owner-app'. */
   @IsOptional() @IsString() source?: string;
+  /** Nullable product FK id. Resolved on ingest from source / sourceAliases if omitted. */
+  @IsOptional() @IsUUID() productId?: string | null;
   /** BusinessUnit code, e.g. 'khi-lab' — not a UUID. Defaults to 'khi-lab' when omitted. */
   @IsOptional() @IsString() businessUnitCode?: string;
   /** Producing app's own upstream due date (e.g. Vantelis IT's meta.dueAt) — display only, never HQ's SLA source of truth. */
@@ -53,6 +56,16 @@ export class UpdateTicketStatusDto {
   /** Only meaningful when `status === 'pending'`; ignored otherwise. Omitted/null means 'client'. */
   @IsOptional() @IsIn(PENDING_REASONS as unknown as string[])
   pendingReason?: (typeof PENDING_REASONS)[number];
+
+  /** Required when status is 'resolved' or 'closed'. */
+  @IsOptional()
+  @IsIn(TICKET_RESOLUTION_CODES as unknown as string[])
+  resolutionCode?: TicketResolutionCode;
+
+  /** Required when resolutionCode is 'doublon' or 'transfere'. */
+  @IsOptional()
+  @IsString()
+  resolutionNotes?: string;
 }
 
 export class AssignTicketDto {
@@ -67,6 +80,10 @@ export class UpdateTicketDto {
   @IsOptional()
   @IsIn(CATEGORIES as unknown as string[])
   category?: (typeof CATEGORIES)[number] | null;
+
+  @IsOptional()
+  @IsUUID()
+  productId?: string | null;
 
   @IsOptional()
   @IsInt()

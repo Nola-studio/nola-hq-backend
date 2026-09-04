@@ -1,6 +1,6 @@
 import { Column, Entity, Index, PrimaryColumn } from 'typeorm';
 
-export type InvoiceStatus = 'paid' | 'pending' | 'late' | 'overdue';
+export type InvoiceStatus = 'paid' | 'pending' | 'late' | 'overdue' | 'cancelled';
 
 @Entity('invoices')
 export class Invoice {
@@ -10,6 +10,11 @@ export class Invoice {
   @Column()
   @Index()
   tenant!: string;
+
+  /** Associated subscription ID in nola-billing (when generated from a subscription). */
+  @Column({ type: 'varchar', length: 64, name: 'subscription_id', nullable: true })
+  @Index()
+  subscriptionId!: string | null;
 
   @Column({ type: 'integer' })
   amt!: number;
