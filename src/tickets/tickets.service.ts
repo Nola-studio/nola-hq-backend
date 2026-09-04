@@ -38,6 +38,7 @@ export interface TicketsListQuery extends PaginationDto {
   priority?: string;
   category?: string;
   productId?: string;
+  workItemId?: number;
 }
 
 /** `Ticket` as the API returns it: `businessUnit` and `product` trimmed rather than the full joined row. */
@@ -81,7 +82,8 @@ export class TicketsService {
     const qb = this.repo
       .createQueryBuilder('t')
       .leftJoinAndSelect('t.businessUnit', 'businessUnit')
-      .leftJoinAndSelect('t.product', 'product');
+      .leftJoinAndSelect('t.product', 'product')
+      .leftJoinAndSelect('t.workItem', 'workItem');
     qb.andWhere('t.businessUnitId IN (:...allowedUnitIds)', { allowedUnitIds });
     if (query.tenant) qb.andWhere('t.tenant = :tenant', { tenant: query.tenant });
     if (query.status) qb.andWhere('t.status = :status', { status: query.status });
@@ -93,6 +95,8 @@ export class TicketsService {
       qb.andWhere('t.category = :category', { category: query.category });
     if (query.productId)
       qb.andWhere('t.productId = :productId', { productId: query.productId });
+    if (query.workItemId)
+      qb.andWhere('t.workItemId = :workItemId', { workItemId: query.workItemId });
     if (query.q) {
       qb.andWhere('(LOWER(t.subject) LIKE :q OR LOWER(t.body) LIKE :q)', {
         q: `%${query.q.toLowerCase()}%`,
@@ -114,7 +118,7 @@ export class TicketsService {
     }
     const t = await this.repo.findOne({
       where: { id, businessUnitId: In(allowedUnitIds) },
-      relations: ['businessUnit', 'product'],
+      relations: ['businessUnit', 'product', 'workItem'],
     });
     if (!t) throw new NotFoundException(`Ticket ${id} introuvable`);
     return toTicketResponse(t);
@@ -155,6 +159,7 @@ export class TicketsService {
       source: dto.source ?? null,
       productId: resolvedProduct?.id ?? null,
       dueAt: dto.dueAt ? new Date(dto.dueAt) : null,
+      workItemId: dto.workItemId ?? null,
       businessUnitId,
       replies: [],
       createdAt: now,
@@ -344,6 +349,12 @@ export class TicketsService {
           ticket.productId = prod?.id ?? null;
         }
       }
+    }
+
+    if (dto.workItemId !== undefined && dto.workItemId !== ticket.workItemId) {
+      changes.fromWorkItemId = ticket.workItemId;
+      changes.toWorkItemId = dto.workItemId;
+      ticket.workItemId = dto.workItemId;
     }
 
     if (Object.keys(changes).length > 0) {

@@ -440,6 +440,15 @@ describe('TicketsService (Brand Scope Filtering)', () => {
       expect(res.category).toBe('billing');
     });
 
+    test('operator can link and unlink workItemId on ticket', async () => {
+      const svc = makeService(sampleTickets);
+      const res = await svc.update(1, { workItemId: 42 }, ['hq:operator', 'hq:bu:khi-lab']);
+      expect(res.workItemId).toBe(42);
+
+      const unlinked = await svc.update(1, { workItemId: null }, ['hq:operator', 'hq:bu:khi-lab']);
+      expect(unlinked.workItemId).toBeNull();
+    });
+
     test('unscoped operator is denied (404) on all mutations', async () => {
       const svc = makeService(sampleTickets);
       expect(
@@ -529,6 +538,12 @@ describe('TicketsService (Brand Scope Filtering)', () => {
       ]);
       const t = await svc.create({ ...baseDto, priority: 'P3' });
       expect(t.sla).toBe('24h');
+    });
+
+    test('create preserves workItemId', async () => {
+      const svc = makeService([], []);
+      const t = await svc.create({ ...baseDto, workItemId: 99 });
+      expect(t.workItemId).toBe(99);
     });
   });
 
