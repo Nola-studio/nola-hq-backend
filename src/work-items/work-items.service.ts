@@ -9,7 +9,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, LessThanOrEqual, Repository } from 'typeorm';
+import { In, LessThanOrEqual, Not, Repository } from 'typeorm';
 import { PaginationDto, type PaginatedResult } from '../common/dto/pagination.dto';
 import { Domain } from '../domains/domain.entity';
 import { RoadmapInitiative } from '../roadmap/roadmap-initiative.entity';
@@ -35,6 +35,7 @@ import { planMove } from './work-items.board';
 import {
   WORK_ITEM_STATUSES,
   WorkItem,
+  isDoneStatus,
   type WorkItemStatus,
 } from './work-item.entity';
 import {
@@ -142,11 +143,18 @@ export class WorkItemsService implements OnModuleInit {
    */
   async board(query: ListWorkItemsDto) {
     const result = await this.list({ ...query, page: 1, limit: 200 } as ListWorkItemsDto);
+    /**
+     * Les epics ne sont pas des cartes. Un référentiel en apporte des
+     * dizaines, et un epic ne se prend pas en main dans la journée : sa place
+     * est dans la vue Epics, où on lit l'avancement de ce qu'il porte. Le
+     * tableau garde le travail qu'on déplace vraiment.
+     */
+    const cards = result.items.filter((item) => item.type !== 'epic');
     return BOARD_STATUSES.map((status) => ({
       id: status,
       label: STATUS_LABELS[status],
       tone: STATUS_TONES[status],
-      items: result.items.filter((item) => item.status === status),
+      items: cards.filter((item) => item.status === status),
     }));
   }
 
@@ -159,31 +167,98 @@ export class WorkItemsService implements OnModuleInit {
    * epics viennent avant leurs stories pour qu'accepter un epic sans ses
    * stories reste une décision visible plutôt qu'un accident de tri.
    */
+  /**
+   * Range des items sous leur domaine.
+   *
+   * `ZZ` n'est pas un code de domaine : c'est la clé qui pousse les non
+   * classés en fin de liste, là où on les cherche. Le tri alphabétique sur
+   * les codes fait le reste — D01 avant D02, et les orphelins après D12.
+   */
+  private async groupByDomain<T>(
+    items: (WorkItem & { domainId: string | null })[],
+    shape: (item: WorkItem) => T,
+  ): Promise<{ code: string; name: string; items: T[] }[]> {
+    const domains = new Map((await this.domains.find({ order: { position: 'ASC' } })).map((d) => [d.id, d]));
+    const groups = new Map<string, { code: string; name: string; items: T[] }>();
+
+    for (const item of items) {
+      const domain = item.domainId ? domains.get(item.domainId) : undefined;
+      const key = domain?.code ?? 'ZZ';
+      let group = groups.get(key);
+      if (!group) {
+        group = { code: key, name: domain?.name ?? 'Sans domaine', items: [] };
+        groups.set(key, group);
+      }
+      group.items.push(shape(item));
+    }
+
+    return [...groups.values()].sort((a, b) => a.code.localeCompare(b.code));
+  }
+
   async inbox() {
     const items = await this.repo.find({
       where: { status: 'triage' },
       order: { domainId: 'ASC', parentId: 'ASC', id: 'ASC' },
     });
-    const domains = new Map((await this.domains.find({ order: { position: 'ASC' } })).map((d) => [d.id, d]));
-
-    const groups = new Map<string, { code: string; name: string; items: WorkItem[] }>();
-    for (const item of items) {
-      const domain = item.domainId ? domains.get(item.domainId) : undefined;
-      const key = domain?.code ?? 'ZZ';
-      if (!groups.has(key)) {
-        groups.set(key, {
-          code: key,
-          name: domain?.name ?? 'Sans domaine',
-          items: [],
-        });
-      }
-      groups.get(key)!.items.push(item);
-    }
-
     return {
       total: items.length,
-      groups: [...groups.values()].sort((a, b) => a.code.localeCompare(b.code)),
+      groups: await this.groupByDomain(items, (item) => item),
     };
+  }
+
+  /**
+   * La vue Epics : le pilotage du référentiel, par domaine.
+   *
+   * Un epic n'a pas sa place dans une colonne de Kanban — il couvre un
+   * trimestre et n'est terminé que quand ses enfants le sont, donc le glisser
+   * vers « En cours » n'affirme rien de vrai. Il lui faut sa propre vue, où ce
+   * qui compte est l'avancement de ce qu'il porte, pas sa position dans une
+   * file.
+   *
+   * Les epics encore en `triage` restent dans la boîte de réception : ils ne
+   * sont pas du backlog tant que personne ne les a acceptés.
+   */
+  async epics() {
+    const epics = await this.repo.find({
+      where: { type: 'epic', status: Not('triage' as WorkItemStatus) },
+      order: { domainId: 'ASC', priority: 'ASC', id: 'ASC' },
+    });
+
+    // Deux requêtes quel que soit le nombre d'epics : les enfants sont
+    // chargés en une fois et répartis en mémoire.
+    const children = epics.length
+      ? await this.repo.find({
+          where: { parentId: In(epics.map((e) => e.id)) },
+          order: { position: 'ASC', id: 'ASC' },
+        })
+      : [];
+
+    const childrenOf = new Map<number, WorkItem[]>();
+    for (const child of children) {
+      const bucket = childrenOf.get(child.parentId!);
+      if (bucket) bucket.push(child);
+      else childrenOf.set(child.parentId!, [child]);
+    }
+
+    const groups = await this.groupByDomain(epics, (epic) => {
+      const own = childrenOf.get(epic.id) ?? [];
+      return {
+        ...epic,
+        children: own,
+        /**
+         * L'avancement se lit sur les enfants, pas sur le statut de l'epic.
+         * Un epic sans enfant n'a pas d'avancement à montrer — 0/0 vaut
+         * « rien de découpé », pas « rien de fait ».
+         */
+        progress: {
+          total: own.length,
+          done: own.filter((c) => isDoneStatus(c.status)).length,
+          inProgress: own.filter((c) => c.status === 'in_progress' || c.status === 'review').length,
+        },
+      };
+    });
+
+    return { total: epics.length, groups };
   }
 
   /**
@@ -233,15 +308,25 @@ export class WorkItemsService implements OnModuleInit {
         skipped.push({ id, reason: `Déjà sorti de la boîte de réception (« ${item.status} »).` });
         continue;
       }
-      item.status = decision === 'accept' ? 'todo' : 'closed';
-      item.approvedBy = actor;
-      item.updatedAt = now;
-      if (decision === 'dismiss') item.closedAt = now;
       moved.push(id);
     }
 
     if (moved.length > 0) {
-      await this.repo.save(found.filter((item) => moved.includes(item.id)));
+      /**
+       * Un seul UPDATE, pas un par ticket. `save()` sur un tableau émet une
+       * requête par entité — cent allers-retours sur une même connexion pour
+       * une décision que l'utilisateur a prise en un geste, et un
+       * avertissement du pilote `pg` au passage.
+       */
+      await this.repo.update(
+        { id: In(moved) },
+        {
+          status: decision === 'accept' ? 'todo' : 'closed',
+          approvedBy: actor,
+          updatedAt: now,
+          ...(decision === 'dismiss' ? { closedAt: now } : {}),
+        },
+      );
       await this.events.save(
         moved.map((workItemId) =>
           this.events.create({

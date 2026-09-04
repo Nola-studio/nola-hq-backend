@@ -64,6 +64,15 @@ export class WorkItemsController {
     return this.svc.inbox();
   }
 
+  @Get('epics')
+  @HqRoles(HqRole.Viewer)
+  @ApiOperation({
+    summary: 'Les epics du backlog, par domaine, avec l’avancement de ce qu’ils portent.',
+  })
+  epics() {
+    return this.svc.epics();
+  }
+
   @Post('inbox/accept')
   @HqRoles(HqRole.Operator)
   @ApiOperation({ summary: 'Accepte un lot de propositions : triage → todo.' })
