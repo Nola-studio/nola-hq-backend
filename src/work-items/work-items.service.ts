@@ -15,6 +15,7 @@ import { RoadmapInitiative } from '../roadmap/roadmap-initiative.entity';
 import { slugifyProjectName, taskReference } from '../roadmap/roadmap-identifier';
 import { TeamMember } from '../team/team-member.entity';
 import { PushService } from '../push/push.service';
+import { checkParent, lineageOf, type HierarchyNode } from './work-item-hierarchy';
 import { WorkItemAttachment } from './work-item-attachment.entity';
 import {
   ALLOWED_ATTACHMENT_MIME_TYPES,
@@ -42,9 +43,11 @@ import {
   AddWorkItemCommentDto,
   AddWorkItemSubtaskDto,
   UpdateWorkItemSubtaskDto,
+  CaptureWorkItemDto,
 } from './dto/work-item.dto';
 
 const STATUS_LABELS: Record<WorkItemStatus, string> = {
+  triage: 'Boîte de réception',
   todo: 'À faire',
   in_progress: 'En cours',
   blocked: 'Bloqué',
@@ -53,7 +56,11 @@ const STATUS_LABELS: Record<WorkItemStatus, string> = {
   closed: 'Fermé',
 };
 
+/** Board columns — every status except the `triage` inbox. See `board()`. */
+const BOARD_STATUSES = WORK_ITEM_STATUSES.filter((status) => status !== 'triage');
+
 const STATUS_TONES: Record<WorkItemStatus, string> = {
+  triage: '#8A5C12',
   todo: '#64748B',
   in_progress: '#4F46E5',
   blocked: '#DC2626',
@@ -109,6 +116,7 @@ export class WorkItemsService implements OnModuleInit {
     if (query.status) qb.andWhere('w.status = :status', { status: query.status });
     if (query.priority) qb.andWhere('w.priority = :priority', { priority: query.priority });
     if (query.type) qb.andWhere('w.type = :type', { type: query.type });
+    if (query.sourceKind) qb.andWhere('w.sourceKind = :sourceKind', { sourceKind: query.sourceKind });
     if (query.assignee) qb.andWhere('w.assignee = :assignee', { assignee: query.assignee });
     if (query.q) {
       qb.andWhere('(LOWER(w.title) LIKE :q OR LOWER(w.description) LIKE :q OR LOWER(w.reference) LIKE :q)', {
@@ -121,14 +129,84 @@ export class WorkItemsService implements OnModuleInit {
     return { items, total, page, limit };
   }
 
+  /**
+   * The Kanban keeps its six columns. `triage` is an inbox, not a stage of
+   * work: a manifest can drop dozens of proposals into it at once, and they
+   * would swamp the board before anyone accepted them. It is reachable by
+   * filtering on the status explicitly.
+   */
   async board(query: ListWorkItemsDto) {
     const result = await this.list({ ...query, page: 1, limit: 200 } as ListWorkItemsDto);
-    return WORK_ITEM_STATUSES.map((status) => ({
+    return BOARD_STATUSES.map((status) => ({
       id: status,
       label: STATUS_LABELS[status],
       tone: STATUS_TONES[status],
       items: result.items.filter((item) => item.status === status),
     }));
+  }
+
+  /**
+   * Applique un rattachement après l'avoir vérifié.
+   *
+   * La vérification a besoin de remonter la chaîne des parents, donc elle
+   * charge les ancêtres un par un plutôt que tout le backlog : une chaîne fait
+   * trois niveaux dans la taxonomie, et lire cent mille tickets pour en
+   * valider un serait absurde.
+   */
+  private async assertParentAllowed(child: WorkItem, parentId: number | null): Promise<void> {
+    if (parentId === null) return;
+    const parent = await this.repo.findOne({ where: { id: parentId } });
+    if (!parent) throw new NotFoundException(`Élément parent ${parentId} introuvable`);
+
+    const cache = new Map<number, HierarchyNode>();
+    const toNode = (item: WorkItem): HierarchyNode => ({ id: item.id, type: item.type, parentId: item.parentId });
+    cache.set(parent.id, toNode(parent));
+
+    // Pré-charge la chaîne ascendante : `checkParent` est synchrone à dessein
+    // (c'est une règle pure), donc la résolution se fait avant l'appel.
+    let cursor = parent.parentId;
+    const seen = new Set<number>([parent.id]);
+    while (cursor !== null && !seen.has(cursor)) {
+      seen.add(cursor);
+      const ancestor = await this.repo.findOne({ where: { id: cursor } });
+      if (!ancestor) break;
+      cache.set(ancestor.id, toNode(ancestor));
+      cursor = ancestor.parentId;
+    }
+
+    const violation = checkParent(toNode(child), toNode(parent), (id) => cache.get(id) ?? null);
+    if (violation) throw new BadRequestException(violation.message);
+  }
+
+  /**
+   * Où se situe un élément : ses ancêtres, son domaine et sa capacité.
+   *
+   * C'est la question « d'où vient ce ticket ? » posée au niveau de la
+   * taxonomie, là où `source_*` y répond au niveau du document.
+   */
+  async lineage(id: number) {
+    const item = await this.findOne(id);
+    const cache = new Map<number, HierarchyNode>();
+    let cursor = item.parentId;
+    const seen = new Set<number>([item.id]);
+    while (cursor !== null && !seen.has(cursor)) {
+      seen.add(cursor);
+      const ancestor = await this.repo.findOne({ where: { id: cursor } });
+      if (!ancestor) break;
+      cache.set(ancestor.id, { id: ancestor.id, type: ancestor.type, parentId: ancestor.parentId });
+      cursor = ancestor.parentId;
+    }
+    const chain = lineageOf({ id: item.id, type: item.type, parentId: item.parentId }, (i) => cache.get(i) ?? null);
+    return {
+      id: item.id,
+      type: item.type,
+      title: item.title,
+      domainId: item.domainId,
+      capabilityId: item.capabilityId,
+      projectId: item.projectId,
+      /** Le plus proche d'abord. */
+      ancestors: chain,
+    };
   }
 
   async findOne(id: number) {
@@ -184,6 +262,48 @@ export class WorkItemsService implements OnModuleInit {
     return (result.raw[0] as { task_seq: number }).task_seq;
   }
 
+  /**
+   * Files a need in one field (REQ-01).
+   *
+   * The retired `StudioRequest` made this a four-step ritual — capture, triage,
+   * a conversion modal re-asking a title and a priority it already held, then
+   * an assignment. Here the item *is* the backlog entry from the first second,
+   * so there is nothing to convert.
+   *
+   * It lands in `todo`, not `triage`: `triage` gates machine-generated batches
+   * that a human has to accept, and putting a colleague's sentence behind an
+   * approval would rebuild the ceremony this replaces. `projectId` stays
+   * optional — the column is nullable, and demanding a project up front is
+   * exactly the friction that made people stop filing.
+   */
+  async capture(dto: CaptureWorkItemDto, reporter: string) {
+    const now = new Date();
+    const project = dto.projectId ? await this.findProject(dto.projectId) : null;
+    const item = this.repo.create({
+      // A human-readable reference needs a project to draw its sequence from;
+      // an unassigned capture gets one when it is filed under a project.
+      reference: project ? taskReference(this.projectPrefix(project), await this.nextTaskSeq(project.id)) : null,
+      projectId: project?.id ?? null,
+      title: dto.title.trim(),
+      description: dto.description?.trim() || null,
+      type: dto.type ?? 'task',
+      status: 'todo',
+      priority: dto.priority ?? 'P2',
+      reporter,
+      sourceKind: 'request',
+      sourceAuthor: reporter,
+      position: await this.repo.count({ where: { status: 'todo' } }),
+      estimatePoints: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const saved = await this.repo.save(item);
+    await this.events.save(
+      this.events.create({ workItemId: saved.id, actor: reporter, action: 'created', meta: { via: 'capture' }, createdAt: now }),
+    );
+    return saved;
+  }
+
   async create(dto: CreateWorkItemDto, reporter: string) {
     const project = await this.findProject(dto.projectId);
     if (dto.sprintId) await this.planning.assertSprint(dto.sprintId, project.id);
@@ -234,6 +354,11 @@ export class WorkItemsService implements OnModuleInit {
     const nextProjectId = dto.projectId ?? item.projectId;
     const nextSprintId = dto.sprintId === undefined ? item.sprintId : dto.sprintId;
     if (nextProjectId && nextSprintId) await this.planning.assertSprint(nextSprintId, nextProjectId);
+    // Vérifié avant l'écriture : un rattachement refusé ne doit laisser aucune
+    // trace, pas même dans le journal des changements construit plus bas.
+    if (dto.parentId !== undefined && dto.parentId !== item.parentId) {
+      await this.assertParentAllowed(item, dto.parentId ?? null);
+    }
     const changes: Record<string, { from: unknown; to: unknown }> = {};
     const current = item as unknown as Record<string, unknown>;
     for (const [key, value] of Object.entries(dto)) {

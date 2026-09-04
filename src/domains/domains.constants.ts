@@ -226,6 +226,7 @@ export const MODULE_DOMAIN: Record<string, DomainCode> = {
   broadcast: 'D10',
 
   domains: 'D12',
+  'execution-references': 'D12',
   manifest: 'D12',
   config: 'D12',
 };

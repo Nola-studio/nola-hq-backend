@@ -22,7 +22,6 @@ import { BusinessInvoice } from '../business/business-invoice.entity';
 import { BusinessOpportunity } from '../business/business-opportunity.entity';
 import { BusinessContract } from '../business/business-contract.entity';
 import { BusinessQuote } from '../business/business-quote.entity';
-import { StudioRequest } from './studio-request.entity';
 import {
   STUDIO_PRIORITY_TO_WORK_ITEM_PRIORITY,
   STUDIO_STATUS_TO_WORK_ITEM_STATUS,
@@ -105,8 +104,6 @@ export class StudioProjectsProxyService {
     private readonly businessContracts: Repository<BusinessContract>,
     @InjectRepository(BusinessQuote)
     private readonly businessQuotes: Repository<BusinessQuote>,
-    @InjectRepository(StudioRequest)
-    private readonly studioRequests: Repository<StudioRequest>,
     private readonly roadmap: RoadmapService,
     private readonly workItems: WorkItemsService,
     private readonly notify: StudioNotifyService,
@@ -237,7 +234,6 @@ export class StudioProjectsProxyService {
       opportunityCount,
       contractCount,
       quoteCount,
-      requestCount,
     ] = await Promise.all([
       this.milestones.count({ where: { initiativeId: id } }),
       this.projectRisks.count({ where: { projectId: id } }),
@@ -250,7 +246,6 @@ export class StudioProjectsProxyService {
       this.businessOpportunities.count({ where: { projectId: id } }),
       this.businessContracts.count({ where: { projectId: id } }),
       this.businessQuotes.count({ where: { projectId: id } }),
-      this.studioRequests.count({ where: { projectId: id } }),
     ]);
 
     const blockers: string[] = [];
@@ -265,7 +260,8 @@ export class StudioProjectsProxyService {
     if (opportunityCount > 0) blockers.push(`${opportunityCount} opportunité(s)`);
     if (contractCount > 0) blockers.push(`${contractCount} contrat(s)`);
     if (quoteCount > 0) blockers.push(`${quoteCount} devis`);
-    if (requestCount > 0) blockers.push(`${requestCount} demande(s)`);
+    // No separate request count: a filed need *is* a work item since REQ-01,
+    // so `taskCount` already covers what `studio_requests` used to hold.
 
     if (blockers.length > 0) {
       throw new ConflictException(

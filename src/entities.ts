@@ -1,5 +1,7 @@
 import { ActivityEvent } from './activity/activity.entity';
 import { Capability, Domain } from './domains/domain.entity';
+import { ExecutionManifest, ExecutionManifestItem } from './execution-references/execution-manifest.entity';
+import { ExecutionReference, ExecutionReferenceVersion } from './execution-references/execution-reference.entity';
 import { AuditEntry } from './audit/audit.entity';
 import { Broadcast } from './broadcast/broadcast.entity';
 import { BusinessUnit } from './company/business-unit.entity';
@@ -26,7 +28,6 @@ import { StudioExpense } from './studio/studio-expense.entity';
 import { StudioMeeting } from './studio/studio-meeting.entity';
 import { StudioNotificationDedup } from './studio/studio-notification-dedup.entity';
 import { StudioRecurring } from './studio/studio-recurring.entity';
-import { StudioRequest } from './studio/studio-request.entity';
 import { TeamMember } from './team/team-member.entity';
 import { Tenant } from './tenants/tenant.entity';
 import { TenantCrm } from './tenants/tenant-crm.entity';
@@ -96,7 +97,6 @@ export const entities = [
   StudioMeeting,
   StudioNotificationDedup,
   StudioRecurring,
-  StudioRequest,
   TeamMember,
   Tenant,
   TenantCrm,
@@ -127,4 +127,8 @@ export const entities = [
   Notification,
   Domain,
   Capability,
+  ExecutionReference,
+  ExecutionReferenceVersion,
+  ExecutionManifest,
+  ExecutionManifestItem,
 ];
