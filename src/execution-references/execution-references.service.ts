@@ -76,6 +76,26 @@ export class ExecutionReferencesService {
     return row;
   }
 
+  /** Résolution par id — la provenance part d'un `source_ref_id`, pas d'une clé. */
+  findVersionById(id: string): Promise<ExecutionReferenceVersion | null> {
+    return this.versions.findOne({ where: { id } });
+  }
+
+  findById(id: string): Promise<ExecutionReference | null> {
+    return this.references.findOne({ where: { id } });
+  }
+
+  /**
+   * Ids of every version of a reference. The import uses them to recognise
+   * what earlier versions produced: `WorkItem.source_ref_id` holds a version
+   * id, not a reference id, so scoping a diff to one document means gathering
+   * its versions first.
+   */
+  async listVersionIds(referenceId: string): Promise<string[]> {
+    const rows = await this.versions.find({ where: { referenceId }, select: ['id'] });
+    return rows.map((row) => row.id);
+  }
+
   async create(dto: CreateExecutionReferenceDto, actorEmail: string): Promise<ExecutionReference> {
     const key = normalizeKey(dto.key);
     if (await this.references.findOne({ where: { key } })) {

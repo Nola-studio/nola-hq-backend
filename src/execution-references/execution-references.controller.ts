@@ -40,7 +40,16 @@ export class ExecutionReferencesController {
     return this.svc.list();
   }
 
+  /* Déclaré avant `:key` : sinon « provenance » serait pris pour une clé. */
+  @Get('provenance/:workItemId')
+  @HqRoles(HqRole.Viewer)
+  @ApiOperation({ summary: "Pourquoi ce ticket existe : référentiel, version, section source" })
+  provenance(@Param('workItemId') workItemId: string) {
+    return this.imports.provenance(Number(workItemId));
+  }
+
   @Get(':key')
+
   @HqRoles(HqRole.Viewer)
   findOne(@Param('key') key: string) {
     return this.svc.findByKey(key);
@@ -113,6 +122,13 @@ export class ExecutionReferencesController {
     @Query('dryRun') dryRun?: string,
   ) {
     return this.imports.import(key, version, user.email, dryRun === 'true');
+  }
+
+  @Get(':key/traceability')
+  @HqRoles(HqRole.Viewer)
+  @ApiOperation({ summary: "Tout ce que ce référentiel a produit, et l'état de chaque élément" })
+  traceability(@Param('key') key: string) {
+    return this.imports.traceability(key);
   }
 
   @Patch(':key')
