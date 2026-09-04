@@ -22,18 +22,29 @@ function item(over: Partial<WorkItem>): WorkItem {
  * cher que ce qu'on y gagnerait.
  */
 function makeService(rows: WorkItem[], domains: { id: string; code: string; name: string; position: number }[] = []) {
-  const saved: WorkItem[][] = [];
+  const saved: { ids: number[]; patch: Partial<WorkItem> }[] = [];
   const events: any[] = [];
   const repo = {
     find: mock(async (opts: any = {}) => {
       const where = opts.where ?? {};
+      if (where.type) {
+        // `Not('triage')` arrive comme un FindOperator ; on n'en lit que la valeur.
+        const excluded = where.status?._value;
+        return rows.filter((r) => r.type === where.type && (!excluded || r.status !== excluded));
+      }
+      if (where.parentId) {
+        const ids = where.parentId._value ?? where.parentId;
+        return rows.filter((r) => ids.includes(r.parentId));
+      }
       if (where.status) return rows.filter((r) => r.status === where.status);
       if (where.id) return rows.filter((r) => (where.id._value ?? where.id).includes(r.id));
       return rows;
     }),
-    save: mock(async (batch: WorkItem[]) => {
-      saved.push(batch);
-      return batch;
+    update: mock(async (where: any, patch: any) => {
+      const ids = where.id._value ?? where.id;
+      saved.push({ ids, patch });
+      for (const row of rows) if (ids.includes(row.id)) Object.assign(row, patch);
+      return { affected: ids.length };
     }),
   } as any;
   const eventRepo = {
@@ -96,7 +107,9 @@ describe('acceptTriage', () => {
     expect(result.skipped).toEqual([]);
     expect(rows.every((r) => r.status === 'todo')).toBe(true);
     expect(rows[0].approvedBy).toBe('moi@nolaa.dev');
-    expect(saved[0]).toHaveLength(2);
+    // Une décision, une requête — pas une par ticket.
+    expect(saved).toHaveLength(1);
+    expect(saved[0].ids).toEqual([1, 2]);
     expect(events.map((e) => e.action)).toEqual(['accepted', 'accepted']);
   });
 
@@ -154,5 +167,79 @@ describe('dismissTriage', () => {
     expect(rows[0].status).toBe('closed');
     expect(rows[0].closedAt).toBeInstanceOf(Date);
     expect(events[0].action).toBe('dismissed');
+  });
+});
+
+describe('vue Epics', () => {
+  const D01 = { id: 'd1', code: 'D01', name: 'Groupe et gouvernance', position: 1 };
+
+  test('les epics sont rangés par domaine avec leurs enfants', async () => {
+    const { svc } = makeService(
+      [
+        item({ id: 1, type: 'epic', status: 'todo', domainId: 'd1' }),
+        item({ id: 2, type: 'story', status: 'todo', parentId: 1, domainId: 'd1' }),
+        item({ id: 3, type: 'story', status: 'closed', parentId: 1, domainId: 'd1' }),
+      ],
+      [D01],
+    );
+
+    const view = await svc.epics();
+
+    expect(view.total).toBe(1);
+    expect(view.groups[0].code).toBe('D01');
+    expect(view.groups[0].items[0].children.map((c: WorkItem) => c.id)).toEqual([2, 3]);
+  });
+
+  /** L'avancement se lit sur les enfants, jamais sur le statut de l'epic. */
+  test('l’avancement compte les enfants terminés', async () => {
+    const { svc } = makeService(
+      [
+        item({ id: 1, type: 'epic', status: 'todo', domainId: 'd1' }),
+        item({ id: 2, type: 'story', status: 'closed', parentId: 1 }),
+        item({ id: 3, type: 'story', status: 'resolved', parentId: 1 }),
+        item({ id: 4, type: 'story', status: 'in_progress', parentId: 1 }),
+        item({ id: 5, type: 'story', status: 'todo', parentId: 1 }),
+      ],
+      [D01],
+    );
+
+    expect((await svc.epics()).groups[0].items[0].progress).toEqual({
+      total: 4,
+      done: 2,
+      inProgress: 1,
+    });
+  });
+
+  /** 0/0 veut dire « rien de découpé », pas « rien de fait ». */
+  test('un epic sans enfant a un avancement vide, pas nul', async () => {
+    const { svc } = makeService([item({ id: 1, type: 'epic', status: 'todo', domainId: 'd1' })], [D01]);
+    const epic = (await svc.epics()).groups[0].items[0];
+
+    expect(epic.children).toEqual([]);
+    expect(epic.progress).toEqual({ total: 0, done: 0, inProgress: 0 });
+  });
+
+  /** Un epic non accepté appartient encore à la boîte de réception. */
+  test('les epics en triage sont exclus', async () => {
+    const { svc } = makeService(
+      [item({ id: 1, type: 'epic', status: 'triage', domainId: 'd1' }), item({ id: 2, type: 'epic', status: 'todo', domainId: 'd1' })],
+      [D01],
+    );
+
+    const view = await svc.epics();
+    expect(view.total).toBe(1);
+    expect(view.groups[0].items[0].id).toBe(2);
+  });
+
+  test('un epic non classé se range en fin de liste, pas avant D01', async () => {
+    const { svc } = makeService(
+      [
+        item({ id: 1, type: 'epic', status: 'todo', domainId: null }),
+        item({ id: 2, type: 'epic', status: 'todo', domainId: 'd1' }),
+      ],
+      [D01],
+    );
+
+    expect((await svc.epics()).groups.map((g) => g.code)).toEqual(['D01', 'ZZ']);
   });
 });
