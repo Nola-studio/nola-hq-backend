@@ -144,6 +144,13 @@ export class ExecutionImportService {
     };
   }
 
+  /** Comme `findManifest`, mais `null` plutôt qu'un 404 : `/status` répond
+   *  « pas encore analysé » au lieu de faire échouer la requête. */
+  async findManifestOrNull(key: string, version: string) {
+    const row = await this.references.findVersion(key, version);
+    return this.manifests.findOne({ where: { versionId: row.id } });
+  }
+
   async findManifest(key: string, version: string) {
     const row = await this.references.findVersion(key, version);
     const manifest = await this.manifests.findOne({
