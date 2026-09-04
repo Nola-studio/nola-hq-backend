@@ -394,17 +394,24 @@ un seul tableau, un seul cycle de vie.
 > une conversion ou une réassignation, le lot a manqué sa cible — le défaut de
 > l'écran Demandes aurait simplement changé de nom.
 
-### Lot 1.4 — Taxonomie complète (ENG-01) · ~3 semaines
+### Lot 1.4 — Taxonomie complète (ENG-01) · ~1 semaine
 
-Le manifest produit des `epic` et des `story` que `work_items` ne sait pas encore
-représenter : `WorkItemType` vaut `bug | feature | task | ops | debt`.
+*Révisé à la baisse en cours de route : deux des quatre points étaient déjà
+passés avec le lot 1.2, et un troisième était déjà tranché dans le code.*
 
-- ajouter `epic`, `story`, `spike` à `WorkItemType` ;
-- ajouter `parent_id` sur `work_items` pour la hiérarchie epic → story →
-  sous-tâche ;
-- relier `roadmap_initiatives` (scope `initiative`) au-dessus des epics ;
-- trancher `RoadmapInitiative.scope` : soit deux entités, soit le champ documenté
-  comme un discriminant assumé — mais décidé (audit §5).
+- ~~ajouter `epic`, `story`, `spike` à `WorkItemType`~~ — fait au lot 1.2 ;
+- ~~ajouter `parent_id` sur `work_items`~~ — fait au lot 1.2, mais **la colonne
+  n'était contrainte par rien** : seul l'importeur l'écrivait, aucune règle ne
+  disait quel type peut pendre de quel type, et aucune route ne permettait à un
+  humain de rattacher quoi que ce soit. C'est le vrai contenu du lot ;
+- ~~trancher `RoadmapInitiative.scope`~~ — **déjà tranché**. L'entité documente
+  que `'project'` est un produit durable (`/projects`) et `'initiative'` du
+  travail borné (`/roadmap`), que le scope est forcé côté serveur par
+  l'endpoint créateur, immuable ensuite sauf `updateScope` en `hq:owner`. Trois
+  tests tiennent déjà la frontière. L'audit §5 surestimait ce point : ce n'est
+  pas un doublon non résolu, c'est un discriminant assumé et gardé ;
+- reste à faire : relier explicitement `roadmap_initiatives` au-dessus des
+  epics, quand un epic importé devra rejoindre une initiative.
 
 *Note de séquence :* ce lot vient **après** le 1.3 délibérément. Le lot 1.3
 fonctionne avec la taxonomie actuelle (un epic du manifest atterrit en `task`

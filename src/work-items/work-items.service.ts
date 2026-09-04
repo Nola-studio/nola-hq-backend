@@ -15,6 +15,7 @@ import { RoadmapInitiative } from '../roadmap/roadmap-initiative.entity';
 import { slugifyProjectName, taskReference } from '../roadmap/roadmap-identifier';
 import { TeamMember } from '../team/team-member.entity';
 import { PushService } from '../push/push.service';
+import { checkParent, lineageOf, type HierarchyNode } from './work-item-hierarchy';
 import { WorkItemAttachment } from './work-item-attachment.entity';
 import {
   ALLOWED_ATTACHMENT_MIME_TYPES,
@@ -142,6 +143,70 @@ export class WorkItemsService implements OnModuleInit {
       tone: STATUS_TONES[status],
       items: result.items.filter((item) => item.status === status),
     }));
+  }
+
+  /**
+   * Applique un rattachement après l'avoir vérifié.
+   *
+   * La vérification a besoin de remonter la chaîne des parents, donc elle
+   * charge les ancêtres un par un plutôt que tout le backlog : une chaîne fait
+   * trois niveaux dans la taxonomie, et lire cent mille tickets pour en
+   * valider un serait absurde.
+   */
+  private async assertParentAllowed(child: WorkItem, parentId: number | null): Promise<void> {
+    if (parentId === null) return;
+    const parent = await this.repo.findOne({ where: { id: parentId } });
+    if (!parent) throw new NotFoundException(`Élément parent ${parentId} introuvable`);
+
+    const cache = new Map<number, HierarchyNode>();
+    const toNode = (item: WorkItem): HierarchyNode => ({ id: item.id, type: item.type, parentId: item.parentId });
+    cache.set(parent.id, toNode(parent));
+
+    // Pré-charge la chaîne ascendante : `checkParent` est synchrone à dessein
+    // (c'est une règle pure), donc la résolution se fait avant l'appel.
+    let cursor = parent.parentId;
+    const seen = new Set<number>([parent.id]);
+    while (cursor !== null && !seen.has(cursor)) {
+      seen.add(cursor);
+      const ancestor = await this.repo.findOne({ where: { id: cursor } });
+      if (!ancestor) break;
+      cache.set(ancestor.id, toNode(ancestor));
+      cursor = ancestor.parentId;
+    }
+
+    const violation = checkParent(toNode(child), toNode(parent), (id) => cache.get(id) ?? null);
+    if (violation) throw new BadRequestException(violation.message);
+  }
+
+  /**
+   * Où se situe un élément : ses ancêtres, son domaine et sa capacité.
+   *
+   * C'est la question « d'où vient ce ticket ? » posée au niveau de la
+   * taxonomie, là où `source_*` y répond au niveau du document.
+   */
+  async lineage(id: number) {
+    const item = await this.findOne(id);
+    const cache = new Map<number, HierarchyNode>();
+    let cursor = item.parentId;
+    const seen = new Set<number>([item.id]);
+    while (cursor !== null && !seen.has(cursor)) {
+      seen.add(cursor);
+      const ancestor = await this.repo.findOne({ where: { id: cursor } });
+      if (!ancestor) break;
+      cache.set(ancestor.id, { id: ancestor.id, type: ancestor.type, parentId: ancestor.parentId });
+      cursor = ancestor.parentId;
+    }
+    const chain = lineageOf({ id: item.id, type: item.type, parentId: item.parentId }, (i) => cache.get(i) ?? null);
+    return {
+      id: item.id,
+      type: item.type,
+      title: item.title,
+      domainId: item.domainId,
+      capabilityId: item.capabilityId,
+      projectId: item.projectId,
+      /** Le plus proche d'abord. */
+      ancestors: chain,
+    };
   }
 
   async findOne(id: number) {
@@ -289,6 +354,11 @@ export class WorkItemsService implements OnModuleInit {
     const nextProjectId = dto.projectId ?? item.projectId;
     const nextSprintId = dto.sprintId === undefined ? item.sprintId : dto.sprintId;
     if (nextProjectId && nextSprintId) await this.planning.assertSprint(nextSprintId, nextProjectId);
+    // Vérifié avant l'écriture : un rattachement refusé ne doit laisser aucune
+    // trace, pas même dans le journal des changements construit plus bas.
+    if (dto.parentId !== undefined && dto.parentId !== item.parentId) {
+      await this.assertParentAllowed(item, dto.parentId ?? null);
+    }
     const changes: Record<string, { from: unknown; to: unknown }> = {};
     const current = item as unknown as Record<string, unknown>;
     for (const [key, value] of Object.entries(dto)) {
