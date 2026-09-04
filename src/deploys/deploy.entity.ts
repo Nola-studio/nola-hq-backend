@@ -1,7 +1,7 @@
 import { Column, Entity, Index, JoinColumn, ManyToOne, PrimaryColumn } from 'typeorm';
 import { Ticket } from '../tickets/ticket.entity';
 
-export type DeployStatus = 'success' | 'rolled-back';
+export type DeployStatus = 'pending' | 'success' | 'failed' | 'rolled-back';
 
 @Entity('deploys')
 export class Deploy {
