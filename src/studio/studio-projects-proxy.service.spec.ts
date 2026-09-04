@@ -114,6 +114,9 @@ describe('StudioProjectsProxyService (Brand Scope Filtering)', () => {
       workItemsMock,
       notifyMock,
       businessUnitsMock,
+      // Dépôt des domaines fonctionnels : ces tests ne classent rien, mais le
+      // laisser indéfini rendrait le harnais dépendant d'un court-circuit.
+      { find: mock(async () => []) } as any,
     );
   }
 
