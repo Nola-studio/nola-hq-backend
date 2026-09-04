@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { RoadmapInitiative } from '../roadmap/roadmap-initiative.entity';
 import { TeamMember } from '../team/team-member.entity';
 import { PushModule } from '../push/push.module';
+import { GithubModule } from '../github/github.module';
 import { WorkItem } from './work-item.entity';
 import { WorkItemAttachment } from './work-item-attachment.entity';
 import { WorkItemComment } from './work-item-comment.entity';
@@ -33,6 +34,7 @@ import { WorkItemsService } from './work-items.service';
       Domain,
     ]),
     PushModule,
+    GithubModule,
   ],
   controllers: [WorkItemsController, WorkPlanningController],
   providers: [WorkItemsService, WorkPlanningService],

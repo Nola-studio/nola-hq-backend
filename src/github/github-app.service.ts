@@ -143,6 +143,46 @@ export class GithubAppService {
     };
   }
 
+  /** Le commit sur lequel pointe une branche — le point de départ d'une nouvelle. */
+  async branchSha(owner: string, name: string, branch: string): Promise<string> {
+    const ref = await this.installationRequest<{ object: { sha: string } }>(
+      owner,
+      name,
+      `/repos/${owner}/${name}/git/ref/heads/${encodeURIComponent(branch)}`,
+    );
+    return ref.object.sha;
+  }
+
+  /**
+   * Crée une branche.
+   *
+   * GitHub répond 422 « Reference already exists » quand elle existe déjà.
+   * Ce n'est pas une erreur ici : deux personnes qui démarrent le même
+   * ticket, ou un double clic, doivent aboutir au même endroit. On le
+   * signale plutôt que de le masquer, pour que l'appelant sache s'il a créé
+   * ou retrouvé.
+   */
+  async createBranch(
+    owner: string,
+    name: string,
+    branch: string,
+    sha: string,
+  ): Promise<{ created: boolean }> {
+    try {
+      await this.installationRequest(owner, name, `/repos/${owner}/${name}/git/refs`, {
+        method: 'POST',
+        body: JSON.stringify({ ref: `refs/heads/${branch}`, sha }),
+      });
+      return { created: true };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes('422') && /already exists/i.test(message)) {
+        return { created: false };
+      }
+      throw err;
+    }
+  }
+
   /** Un appel REST authentifié comme l'installation qui couvre ce dépôt. */
   async installationRequest<T>(
     owner: string,

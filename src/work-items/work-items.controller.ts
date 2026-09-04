@@ -33,6 +33,8 @@ import {
 import { AddWorkItemDependencyDto } from './dto/work-planning.dto';
 import { WorkItemsService } from './work-items.service';
 import { WorkPlanningService } from './work-planning.service';
+import { StartWorkService } from '../github/start-work.service';
+import { StartWorkDto } from '../github/dto/start-work.dto';
 
 @ApiBearerAuth()
 @ApiTags('work-items')
@@ -41,6 +43,7 @@ export class WorkItemsController {
   constructor(
     private readonly svc: WorkItemsService,
     private readonly planning: WorkPlanningService,
+    private readonly startWork: StartWorkService,
   ) {}
 
   @Get()
@@ -91,6 +94,32 @@ export class WorkItemsController {
   @HqRoles(HqRole.Viewer)
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.svc.findDetail(id);
+  }
+
+  @Get(':id/start-work')
+  @HqRoles(HqRole.Viewer)
+  @ApiOperation({
+    summary: 'Ce ticket peut-il démarrer un travail technique, et sous quel nom de branche ?',
+  })
+  startWorkReadiness(@Param('id', ParseIntPipe) id: number) {
+    return this.startWork.readiness(id);
+  }
+
+  @Post(':id/start-work')
+  @HqRoles(HqRole.Operator)
+  @ApiOperation({ summary: 'Crée la branche, la relie au ticket et le passe en cours.' })
+  start(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: StartWorkDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.startWork.startWork(id, dto, user.email);
+  }
+
+  @Get(':id/branches')
+  @HqRoles(HqRole.Viewer)
+  branches(@Param('id', ParseIntPipe) id: number) {
+    return this.startWork.branchesOf(id);
   }
 
   @Get(':id/lineage')
