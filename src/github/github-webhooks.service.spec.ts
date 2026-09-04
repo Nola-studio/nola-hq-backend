@@ -30,7 +30,12 @@ const PUSH = {
   pusher: { name: 'greg' },
 };
 
-function makeService({ repos = [] as any[], duplicate = false } = {}) {
+function makeService({
+  repos = [] as any[],
+  duplicate = false,
+  branches = [] as any[],
+  items = [] as any[],
+} = {}) {
   const rows: GithubWebhookDelivery[] = [];
   const deliveries = {
     create: mock((r: any) => ({ ...r })),
@@ -65,9 +70,60 @@ function makeService({ repos = [] as any[], duplicate = false } = {}) {
     }),
   } as any;
 
+  const branchRows: any[] = [...branches];
+  const branchRepo = {
+    findOne: mock(async ({ where }: any) =>
+      branchRows.find((b) => b.repositoryId === where.repositoryId && b.name === where.name) ?? null,
+    ),
+    create: mock((b: any) => b),
+    save: mock(async (b: any) => {
+      branchRows.push(b);
+      return b;
+    }),
+    update: mock(async (where: any, patch: any) => {
+      let affected = 0;
+      for (const b of branchRows) {
+        if (
+          b.repositoryId === where.repositoryId &&
+          b.name === where.name &&
+          (!where.state || b.state === where.state)
+        ) {
+          Object.assign(b, patch);
+          affected += 1;
+        }
+      }
+      return { affected };
+    }),
+  } as any;
+
+  const itemRows = [...items];
+  const itemRepo = {
+    count: mock(async ({ where }: any) => itemRows.filter((i) => i.reference === where.reference).length),
+    findOne: mock(async ({ where }: any) => itemRows.find((i) => i.reference === where.reference) ?? null),
+  } as any;
+
+  const eventRows: any[] = [];
+  const eventRepo = {
+    create: mock((e: any) => e),
+    save: mock(async (e: any) => {
+      eventRows.push(e);
+      return e;
+    }),
+  } as any;
+
   return {
-    svc: new GithubWebhooksService(deliveries, repositories, new ConfigService()),
+    svc: new GithubWebhooksService(
+      deliveries,
+      repositories,
+      branchRepo,
+      itemRepo,
+      eventRepo,
+      new ConfigService(),
+    ),
     rows,
+    branchRows,
+    itemRows,
+    eventRows,
   };
 }
 
@@ -235,7 +291,15 @@ describe('déduplication', () => {
     } as any;
     const svc = new GithubWebhooksService(
       deliveries,
-      { findOne: async () => null, createQueryBuilder: () => ({ where: () => ({ andWhere: () => ({ getOne: async () => null }) }) }) } as any,
+      {
+        findOne: async () => null,
+        createQueryBuilder: () => ({
+          where: () => ({ andWhere: () => ({ getOne: async () => null }) }),
+        }),
+      } as any,
+      {} as any,
+      {} as any,
+      {} as any,
       new ConfigService(),
     );
     const raw = body(PUSH);
@@ -243,5 +307,186 @@ describe('déduplication', () => {
     await expect(
       svc.receive({ rawBody: raw, signature: sign(raw), deliveryId: 'd1', event: 'push' }),
     ).rejects.toThrow(QueryFailedError);
+  });
+});
+
+const TICKET = { id: 42, reference: 'GOV-01' };
+const KNOWN_REPO = { id: 'r1', owner: 'nola-studio', name: 'nola-hq', externalId: '987654321', defaultBranch: 'main' };
+
+function deliver(
+  svc: GithubWebhooksService,
+  event: string,
+  payload: Record<string, unknown>,
+  deliveryId = `d-${Math.random()}`,
+) {
+  const raw = body({ repository: { id: 987654321, full_name: 'nola-studio/nola-hq' }, ...payload });
+  return svc.receive({ rawBody: raw, signature: sign(raw), deliveryId, event });
+}
+
+describe('une branche poussée depuis un terminal', () => {
+  /**
+   * La moitié automatique d'ENG-08 : la convention de nommage ne sert à rien
+   * si seul le bouton sait s'en servir.
+   */
+  test('est reconnue et rattachée à son ticket', async () => {
+    const { svc, branchRows } = makeService({ repos: [KNOWN_REPO], items: [TICKET] });
+
+    await deliver(svc, 'create', { ref_type: 'branch', ref: 'feature/GOV-01-registre-canonique' });
+
+    expect(branchRows).toHaveLength(1);
+    expect(branchRows[0]).toMatchObject({
+      workItemId: 42,
+      name: 'feature/GOV-01-registre-canonique',
+      state: 'open',
+      createdBy: 'github',
+    });
+  });
+
+  /** Reconnue, pas créée — la provenance ne se devine pas après coup. */
+  test('est marquée comme reconnue, pas comme créée par HQ', async () => {
+    const { svc, branchRows } = makeService({ repos: [KNOWN_REPO], items: [TICKET] });
+    await deliver(svc, 'create', { ref_type: 'branch', ref: 'feature/GOV-01-x' });
+    expect(branchRows[0].createdByHq).toBe(false);
+  });
+
+  test('la reconnaissance est tracée dans l’historique du ticket', async () => {
+    const { svc, eventRows } = makeService({ repos: [KNOWN_REPO], items: [TICKET] });
+    await deliver(svc, 'create', { ref_type: 'branch', ref: 'feature/GOV-01-x' });
+
+    expect(eventRows[0]).toMatchObject({ workItemId: 42, actor: 'github', action: 'branch_created' });
+  });
+
+  /** La user story l'emporte sur l'epic dont elle porte la clé. */
+  test('la clé la plus longue gagne', async () => {
+    const { svc, branchRows } = makeService({
+      repos: [KNOWN_REPO],
+      items: [{ id: 1, reference: 'US-GOV-01' }, { id: 2, reference: 'US-GOV-01-1' }],
+    });
+
+    await deliver(svc, 'create', { ref_type: 'branch', ref: 'feature/US-GOV-01-1-consulter' });
+    expect(branchRows[0].workItemId).toBe(2);
+  });
+
+  test('une branche sans clé connue n’est pas rattachée', async () => {
+    const { svc, branchRows } = makeService({ repos: [KNOWN_REPO], items: [TICKET] });
+
+    await deliver(svc, 'create', { ref_type: 'branch', ref: 'feature/refonte-du-menu' });
+    await deliver(svc, 'create', { ref_type: 'branch', ref: 'feature/ZZZ-99-inconnu' });
+
+    expect(branchRows).toHaveLength(0);
+  });
+
+  /** Celle que « Start Work » vient de créer arrive aussi par webhook. */
+  test('une branche déjà liée n’est pas dupliquée', async () => {
+    const { svc, branchRows } = makeService({
+      repos: [KNOWN_REPO],
+      items: [TICKET],
+      branches: [{ repositoryId: 'r1', name: 'feature/GOV-01-x', state: 'open' }],
+    });
+
+    await deliver(svc, 'create', { ref_type: 'branch', ref: 'feature/GOV-01-x' });
+    expect(branchRows).toHaveLength(1);
+  });
+
+  test('une étiquette créée n’est pas une branche', async () => {
+    const { svc, branchRows } = makeService({ repos: [KNOWN_REPO], items: [TICKET] });
+    await deliver(svc, 'create', { ref_type: 'tag', ref: 'v1.2.3' });
+    expect(branchRows).toHaveLength(0);
+  });
+});
+
+describe('une branche supprimée', () => {
+  /** Le lien n'est jamais effacé : son historique reste. */
+  test('passe à « deleted » sans disparaître', async () => {
+    const { svc, branchRows } = makeService({
+      repos: [KNOWN_REPO],
+      branches: [{ repositoryId: 'r1', name: 'feature/GOV-01-x', state: 'open' }],
+    });
+
+    await deliver(svc, 'delete', { ref_type: 'branch', ref: 'feature/GOV-01-x' });
+
+    expect(branchRows).toHaveLength(1);
+    expect(branchRows[0].state).toBe('deleted');
+  });
+
+  /** Fusionnée est plus précis que supprimée : on ne recule pas. */
+  test('une branche déjà fusionnée le reste', async () => {
+    const { svc, branchRows } = makeService({
+      repos: [KNOWN_REPO],
+      branches: [{ repositoryId: 'r1', name: 'feature/GOV-01-x', state: 'merged' }],
+    });
+
+    await deliver(svc, 'delete', { ref_type: 'branch', ref: 'feature/GOV-01-x' });
+    expect(branchRows[0].state).toBe('merged');
+  });
+});
+
+describe('une pull request', () => {
+  test('fusionnée marque sa branche comme fusionnée', async () => {
+    const { svc, branchRows } = makeService({
+      repos: [KNOWN_REPO],
+      branches: [{ repositoryId: 'r1', name: 'feature/GOV-01-x', state: 'open' }],
+    });
+
+    await deliver(svc, 'pull_request', {
+      action: 'closed',
+      pull_request: { merged: true, head: { ref: 'feature/GOV-01-x' } },
+    });
+
+    expect(branchRows[0].state).toBe('merged');
+  });
+
+  /** Fermée sans fusion : la branche existe encore, le travail peut reprendre. */
+  test('fermée sans fusion ne change rien', async () => {
+    const { svc, branchRows } = makeService({
+      repos: [KNOWN_REPO],
+      branches: [{ repositoryId: 'r1', name: 'feature/GOV-01-x', state: 'open' }],
+    });
+
+    await deliver(svc, 'pull_request', {
+      action: 'closed',
+      pull_request: { merged: false, head: { ref: 'feature/GOV-01-x' } },
+    });
+
+    expect(branchRows[0].state).toBe('open');
+  });
+
+  test('ouverte ne change rien non plus', async () => {
+    const { svc, branchRows } = makeService({
+      repos: [KNOWN_REPO],
+      branches: [{ repositoryId: 'r1', name: 'feature/GOV-01-x', state: 'open' }],
+    });
+
+    await deliver(svc, 'pull_request', {
+      action: 'opened',
+      pull_request: { merged: false, head: { ref: 'feature/GOV-01-x' } },
+    });
+
+    expect(branchRows[0].state).toBe('open');
+  });
+});
+
+describe('robustesse', () => {
+  /**
+   * Un événement conservé mais mal appliqué doit quand même répondre 200 :
+   * un rejeu serait reconnu comme doublon et n'aurait toujours aucun effet.
+   */
+  test('un échec d’application ne fait pas échouer la réception', async () => {
+    const { svc, rows } = makeService({ repos: [KNOWN_REPO], items: [TICKET] });
+    (svc as unknown as { branches: { findOne: () => Promise<never> } }).branches.findOne = async () => {
+      throw new Error('base indisponible');
+    };
+
+    const out = await deliver(svc, 'create', { ref_type: 'branch', ref: 'feature/GOV-01-x' });
+
+    expect(out.status).toBe('received');
+    expect(rows).toHaveLength(1);
+  });
+
+  /** Un dépôt hors registre n'a aucun lien à mettre à jour. */
+  test('rien n’est appliqué pour un dépôt inconnu', async () => {
+    const { svc, branchRows } = makeService({ repos: [], items: [TICKET] });
+    await deliver(svc, 'create', { ref_type: 'branch', ref: 'feature/GOV-01-x' });
+    expect(branchRows).toHaveLength(0);
   });
 });
