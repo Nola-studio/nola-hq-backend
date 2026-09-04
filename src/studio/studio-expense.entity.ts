@@ -89,6 +89,10 @@ export class StudioExpense {
     amountUsd: number;
   }> | null;
 
+  /** Audit trail reason explaining why an expense was marked void. */
+  @Column({ type: 'varchar', nullable: true, name: 'void_reason' })
+  voidReason!: string | null;
+
   @Column({ name: 'created_at' })
   createdAt!: Date;
 }
