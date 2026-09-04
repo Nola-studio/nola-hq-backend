@@ -1,6 +1,5 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { CompanyService } from './company.service';
-import { PROVISIONABLE_PRODUCT_CODES } from './company.constants';
 
 describe('CompanyService', () => {
   const KHI_LAB_BU = {
@@ -20,6 +19,7 @@ describe('CompanyService', () => {
       businessUnit: KHI_LAB_BU,
       isInternal: false,
       sourceAliases: ['kelasi-owner-app', 'kelasi-web'],
+      isProvisionable: true,
     },
     {
       id: 'prod-2',
@@ -29,6 +29,7 @@ describe('CompanyService', () => {
       businessUnit: KHI_LAB_BU,
       isInternal: false,
       sourceAliases: [],
+      isProvisionable: false,
     },
     {
       id: 'prod-3',
@@ -38,6 +39,7 @@ describe('CompanyService', () => {
       businessUnit: KHI_LAB_BU,
       isInternal: false,
       sourceAliases: [],
+      isProvisionable: false,
     },
     {
       id: 'prod-4',
@@ -47,6 +49,7 @@ describe('CompanyService', () => {
       businessUnit: KHI_LAB_BU,
       isInternal: false,
       sourceAliases: [],
+      isProvisionable: false,
     },
     {
       id: 'prod-5',
@@ -56,6 +59,7 @@ describe('CompanyService', () => {
       businessUnit: KHI_LAB_BU,
       isInternal: true,
       sourceAliases: [],
+      isProvisionable: false,
     },
   ];
 
@@ -169,7 +173,7 @@ describe('CompanyService', () => {
       expect(res.every((p) => !p.isInternal)).toBe(true);
     });
 
-    test('derives provisionable=true for yekoli and false for other products', async () => {
+    test('surfaces the isProvisionable column as provisionable=true for yekoli and false for other products', async () => {
       const svc = makeService();
       const res = await svc.listProducts();
       const yekoli = res.find((p) => p.code === 'yekoli');
@@ -186,12 +190,6 @@ describe('CompanyService', () => {
 
       const nolaaHq = res.find((p) => p.code === 'nolaa-hq');
       expect(nolaaHq?.provisionable).toBe(false);
-    });
-
-    test('provisionable is strictly bound to PROVISIONABLE_PRODUCT_CODES', () => {
-      expect(PROVISIONABLE_PRODUCT_CODES.has('yekoli')).toBe(true);
-      expect(PROVISIONABLE_PRODUCT_CODES.has('kelasi')).toBe(false);
-      expect(PROVISIONABLE_PRODUCT_CODES.has('k-river')).toBe(false);
     });
   });
 

@@ -4,7 +4,6 @@ import { FindOptionsWhere, Repository } from 'typeorm';
 import { BusinessUnit, type BusinessUnitThemeKey } from './business-unit.entity';
 import { LegalEntity } from './legal-entity.entity';
 import { Product } from './product.entity';
-import { PROVISIONABLE_PRODUCT_CODES } from './company.constants';
 import { BusinessUnitResolverService } from './business-unit-resolver.service';
 import { CreateBusinessUnitDto } from './dto/create-business-unit.dto';
 import { UpdateBusinessUnitDto } from './dto/update-business-unit.dto';
@@ -188,6 +187,7 @@ export class CompanyService {
       isInternal: dto.isInternal ?? false,
       sourceAliases: dto.sourceAliases ?? [],
       archived: false,
+      isProvisionable: dto.isProvisionable ?? false,
       createdAt: now,
       updatedAt: now,
     });
@@ -204,6 +204,7 @@ export class CompanyService {
     if (dto.isInternal !== undefined) product.isInternal = dto.isInternal;
     if (dto.sourceAliases !== undefined) product.sourceAliases = dto.sourceAliases;
     if (dto.archived !== undefined) product.archived = dto.archived;
+    if (dto.isProvisionable !== undefined) product.isProvisionable = dto.isProvisionable;
     product.updatedAt = new Date();
 
     const saved = await this.products.save(product);
@@ -234,7 +235,7 @@ export class CompanyService {
       },
       isInternal: p.isInternal,
       archived: p.archived,
-      provisionable: PROVISIONABLE_PRODUCT_CODES.has(p.code),
+      provisionable: p.isProvisionable,
     };
   }
 

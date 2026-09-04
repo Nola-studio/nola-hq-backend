@@ -7,6 +7,7 @@ import { YekoliProvisionClient } from './yekoli-provision.client';
 import { Invoice } from '../invoices/invoice.entity';
 import { MomoEntry } from '../momo/momo-entry.entity';
 import { ActivityEvent } from '../activity/activity.entity';
+import { Product } from '../company/product.entity';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { PlansModule } from '../plans/plans.module';
 import { IamModule } from '../iam/iam.module';
@@ -18,7 +19,12 @@ import { TicketsModule } from '../tickets/tickets.module';
     // TenantCrm = local-only CRM augmentation (city/owner/nps/notes/etc.)
     // + the HQ-driven provisioning state (kcUserId, yekoliSchoolId,
     //   provisionedAt, provisionError).
-    TypeOrmModule.forFeature([TenantCrm, Invoice, MomoEntry, ActivityEvent]),
+    // Product is registered here (not via CompanyModule) purely to read
+    // `isProvisionable` for the provisioning gate below — same
+    // entity-not-module convention as Invoice/MomoEntry above, and it
+    // avoids pulling in CompanyModule (see TicketsModule note below on
+    // keeping this module's dependency graph acyclic).
+    TypeOrmModule.forFeature([TenantCrm, Invoice, MomoEntry, ActivityEvent, Product]),
     // change-plan / app-activation delegate to the canonical billing flow
     // owned by SubscriptionsService (NATS admin.subscription.*).
     SubscriptionsModule,
