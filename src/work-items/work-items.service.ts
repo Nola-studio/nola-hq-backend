@@ -9,8 +9,9 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { LessThanOrEqual, Repository } from 'typeorm';
+import { In, LessThanOrEqual, Repository } from 'typeorm';
 import { PaginationDto, type PaginatedResult } from '../common/dto/pagination.dto';
+import { Domain } from '../domains/domain.entity';
 import { RoadmapInitiative } from '../roadmap/roadmap-initiative.entity';
 import { slugifyProjectName, taskReference } from '../roadmap/roadmap-identifier';
 import { TeamMember } from '../team/team-member.entity';
@@ -99,6 +100,10 @@ export class WorkItemsService implements OnModuleInit {
     private readonly team: Repository<TeamMember>,
     private readonly push: PushService,
     private readonly planning: WorkPlanningService,
+    // Injected last on purpose: the specs that build this service positionally
+    // keep working, and only `inbox()` needs it.
+    @InjectRepository(Domain)
+    private readonly domains: Repository<Domain>,
   ) {}
 
   /** Fails boot rather than letting a bad `ATTACHMENTS_DIR` surface as a 500 on someone's first upload. */
@@ -143,6 +148,118 @@ export class WorkItemsService implements OnModuleInit {
       tone: STATUS_TONES[status],
       items: result.items.filter((item) => item.status === status),
     }));
+  }
+
+  /**
+   * La boîte de réception : ce qu'une machine propose, groupé par domaine.
+   *
+   * Un manifest dépose des dizaines d'items d'un coup. Les lire dans une
+   * liste à plat, dans l'ordre du document, ne dit pas à un humain ce qu'il
+   * accepte — le domaine, si. Chaque groupe porte donc son compte, et les
+   * epics viennent avant leurs stories pour qu'accepter un epic sans ses
+   * stories reste une décision visible plutôt qu'un accident de tri.
+   */
+  async inbox() {
+    const items = await this.repo.find({
+      where: { status: 'triage' },
+      order: { domainId: 'ASC', parentId: 'ASC', id: 'ASC' },
+    });
+    const domains = new Map((await this.domains.find({ order: { position: 'ASC' } })).map((d) => [d.id, d]));
+
+    const groups = new Map<string, { code: string; name: string; items: WorkItem[] }>();
+    for (const item of items) {
+      const domain = item.domainId ? domains.get(item.domainId) : undefined;
+      const key = domain?.code ?? 'ZZ';
+      if (!groups.has(key)) {
+        groups.set(key, {
+          code: key,
+          name: domain?.name ?? 'Sans domaine',
+          items: [],
+        });
+      }
+      groups.get(key)!.items.push(item);
+    }
+
+    return {
+      total: items.length,
+      groups: [...groups.values()].sort((a, b) => a.code.localeCompare(b.code)),
+    };
+  }
+
+  /**
+   * Accepte un lot de propositions : `triage` → `todo`.
+   *
+   * EXE-05 demande qu'aucune mutation du backlog canonique n'ait lieu sans
+   * décision humaine — mais une décision, pas cent. C'est le geste que la
+   * boîte de réception existe pour rendre possible.
+   *
+   * Seuls les items réellement en `triage` bougent. Passer un ticket déjà
+   * accepté de `in_progress` à `todo` parce qu'il figurait dans une sélection
+   * périmée effacerait du travail : ces ids sont rapportés comme ignorés.
+   */
+  async acceptTriage(ids: number[], actor: string) {
+    return this.decideTriage(ids, actor, 'accept');
+  }
+
+  /**
+   * Écarte un lot de propositions : `triage` → `closed`.
+   *
+   * Rien n'est supprimé. La provenance d'un item écarté reste lisible, et une
+   * version ultérieure du référentiel le retrouvera par sa clé stable au lieu
+   * d'en recréer un double.
+   */
+  async dismissTriage(ids: number[], actor: string) {
+    return this.decideTriage(ids, actor, 'dismiss');
+  }
+
+  private async decideTriage(ids: number[], actor: string, decision: 'accept' | 'dismiss') {
+    const unique = [...new Set(ids)];
+    if (unique.length === 0) return { accepted: [], dismissed: [], skipped: [] as { id: number; reason: string }[] };
+
+    const found = await this.repo.find({ where: { id: In(unique) } });
+    const byId = new Map(found.map((item) => [item.id, item]));
+
+    const moved: number[] = [];
+    const skipped: { id: number; reason: string }[] = [];
+    const now = new Date();
+
+    for (const id of unique) {
+      const item = byId.get(id);
+      if (!item) {
+        skipped.push({ id, reason: 'Ticket introuvable.' });
+        continue;
+      }
+      if (item.status !== 'triage') {
+        skipped.push({ id, reason: `Déjà sorti de la boîte de réception (« ${item.status} »).` });
+        continue;
+      }
+      item.status = decision === 'accept' ? 'todo' : 'closed';
+      item.approvedBy = actor;
+      item.updatedAt = now;
+      if (decision === 'dismiss') item.closedAt = now;
+      moved.push(id);
+    }
+
+    if (moved.length > 0) {
+      await this.repo.save(found.filter((item) => moved.includes(item.id)));
+      await this.events.save(
+        moved.map((workItemId) =>
+          this.events.create({
+            workItemId,
+            actor,
+            action: decision === 'accept' ? 'accepted' : 'dismissed',
+            meta: { from: 'triage', batch: moved.length },
+            createdAt: now,
+          }),
+        ),
+      );
+    }
+
+    return {
+      accepted: decision === 'accept' ? moved : [],
+      dismissed: decision === 'dismiss' ? moved : [],
+      skipped,
+    };
   }
 
   /**

@@ -194,6 +194,24 @@ export class ExecutionImportService {
       ).map((w) => [w.sourceKey as string, w]),
     );
 
+    /**
+     * References already spoken for by someone else. `reference` is unique
+     * across the whole backlog, so a second referential reusing `GOV-01`
+     * would otherwise make the import die on a constraint violation halfway
+     * through. A key that is taken simply yields no reference — losing a
+     * display token is a nuisance, losing the import is not.
+     */
+    const takenReferences = new Set(
+      (
+        await this.workItems.find({
+          where: { reference: In(importable.map((i) => i.sourceKey.slice(0, 32))) },
+          select: { id: true, reference: true },
+        })
+      )
+        .filter((w) => existing.get(w.reference ?? '')?.id !== w.id)
+        .map((w) => w.reference as string),
+    );
+
     const report: ImportReport = {
       reference: reference.key,
       version: versionRow.version,
@@ -265,6 +283,14 @@ export class ExecutionImportService {
       const saved = await this.workItems.save(
         this.workItems.create({
           ...(current ? { id: current.id } : {}),
+          // The referential's own key is the identifier. A work item normally
+          // draws its reference from a project's sequence, but an epic of the
+          // referential has no project — and inventing `TNOLAAHQ-42` for
+          // something the document already calls `EXE-05` would throw away the
+          // one token that makes the two sides talk about the same object.
+          reference:
+            current?.reference ??
+            (takenReferences.has(item.sourceKey.slice(0, 32)) ? null : item.sourceKey.slice(0, 32)),
           title: item.title.slice(0, 200),
           description: item.body,
           type: item.kind === 'epic' ? 'epic' : 'story',

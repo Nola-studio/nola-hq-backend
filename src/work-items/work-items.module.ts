@@ -10,6 +10,7 @@ import { WorkItemEvent } from './work-item-event.entity';
 import { WorkItemSubtask } from './work-item-subtask.entity';
 import { WorkSprint } from './work-sprint.entity';
 import { WorkItemDependency } from './work-item-dependency.entity';
+import { Domain } from '../domains/domain.entity';
 import { ProjectRisk } from './project-risk.entity';
 import { WorkPlanningService } from './work-planning.service';
 import { WorkPlanningController } from './work-planning.controller';
@@ -29,6 +30,7 @@ import { WorkItemsService } from './work-items.service';
       WorkSprint,
       WorkItemDependency,
       ProjectRisk,
+      Domain,
     ]),
     PushModule,
   ],

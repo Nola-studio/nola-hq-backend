@@ -1,6 +1,9 @@
 import { Type } from 'class-transformer';
 import {
   IsIn,
+  ArrayMaxSize,
+  ArrayNotEmpty,
+  IsArray,
   IsInt,
   IsNumberString,
   IsOptional,
@@ -125,4 +128,21 @@ export class UpdateWorkItemSubtaskDto {
   @IsOptional() @IsString() @MinLength(2) @MaxLength(240) title?: string;
   @IsOptional() @IsIn([true, false]) done?: boolean;
   @IsOptional() @IsString() @MaxLength(160) assignee?: string | null;
+}
+
+/**
+ * Un lot de propositions à accepter ou à écarter.
+ *
+ * Le plafond est celui d'un geste humain qui reste réversible : un référentiel
+ * complet fait une centaine d'items, et accepter mille tickets d'un clic
+ * n'est plus une décision, c'est un accident.
+ */
+export class DecideTriageDto {
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayMaxSize(500)
+  @Type(() => Number)
+  @IsInt({ each: true })
+  @Min(1, { each: true })
+  ids!: number[];
 }

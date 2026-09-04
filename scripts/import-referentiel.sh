@@ -80,6 +80,24 @@ fi
 
 api() { curl -sS -f "${AUTH[@]}" -H 'Content-Type: application/json' "$@"; }
 
+# Deux générations de l'API nomment ces compteurs différemment : le lot 1.2
+# disait `created`/`updated`, le lot 1.5 les a renommés en `added`/`modified`
+# et a ajouté `deprecated`/`removed`. Un script qui ne connaît qu'un seul
+# vocabulaire affiche « null » face à l'autre — ce qui ressemble à un import
+# raté alors que rien n'a échoué. On accepte donc les deux, et une clé absente
+# vaut zéro plutôt que rien.
+counts() {
+  jq -r --arg verbe "$1" '
+    (.counts // .result.counts // {}) as $c
+    | "\($verbe) \($c.added // $c.created // 0)"
+      + " · à modifier \($c.modified // $c.updated // 0)"
+      + " · inchangés \($c.unchanged // 0)"
+      + " · dépréciés \($c.deprecated // 0)"
+      + " · retirés \($c.removed // 0)"
+      + " · conflits \($c.conflict // 0)"
+      + " · ignorés \($c.skipped // 0)"'
+}
+
 # 1 — déposer. Une clé déjà connue reçoit une nouvelle version plutôt qu'un
 #     second référentiel : l'original n'est jamais remplacé.
 PAYLOAD="$(jq -n --arg k "$HQ_KEY" --arg v "$VERSION" --rawfile c "$FILE" \
@@ -103,17 +121,19 @@ api -X POST "$BASE/execution-references/$HQ_KEY/versions/$VERSION/parse" \
 
 # 3 — prévisualiser, puis demander.
 echo "→ prévisualisation"
-api -X POST "$BASE/execution-references/$HQ_KEY/versions/$VERSION/$PREVIEW_PATH" \
-  | jq -r '(.counts // .result.counts) | "  à créer \(.added) · à modifier \(.modified) · inchangés \(.unchanged) · dépréciés \(.deprecated) · retirés \(.removed) · conflits \(.conflict) · ignorés \(.skipped)"'
+api -X POST "$BASE/execution-references/$HQ_KEY/versions/$VERSION/$PREVIEW_PATH" | counts "  à créer"
 
 read -r -p "Appliquer ? [oui/non] " answer
 [[ "$answer" == "oui" ]] || { echo "Abandonné — rien n'a été écrit dans le backlog."; exit 0; }
 
 echo "→ import"
 api -X POST "$BASE/execution-references/$HQ_KEY/versions/$VERSION/$APPLY_PATH" \
-  -H "Idempotency-Key: $HQ_KEY-$VERSION-apply" \
-  | jq -r '(.counts // .result.counts) | "  créés \(.added) · modifiés \(.modified) · inchangés \(.unchanged) · conflits \(.conflict)"'
+  -H "Idempotency-Key: $HQ_KEY-$VERSION-apply" | counts "  créés"
 
 echo
-echo "Terminé. Les epics et user stories sont dans le backlog, en statut « triage »,"
-echo "rattachés à leur domaine et à leur capacité."
+echo "Terminé. Les epics et user stories sont rattachés à leur domaine et à leur"
+echo "capacité, et portent la clé du document comme identifiant (GOV-01, US-ENG-08-3)."
+echo
+echo "Ils n'apparaissent PAS encore dans le Kanban : ils attendent en « triage »,"
+echo "qui est une boîte de réception, pas une colonne. Ouvrez"
+echo "Backlog → Boîte de réception pour les relire et les accepter par lot."

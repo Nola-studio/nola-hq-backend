@@ -28,6 +28,7 @@ import {
   AddWorkItemCommentDto,
   AddWorkItemSubtaskDto,
   UpdateWorkItemSubtaskDto,
+  DecideTriageDto,
 } from './dto/work-item.dto';
 import { AddWorkItemDependencyDto } from './dto/work-planning.dto';
 import { WorkItemsService } from './work-items.service';
@@ -52,6 +53,29 @@ export class WorkItemsController {
   @HqRoles(HqRole.Viewer)
   board(@Query() query: ListWorkItemsDto) {
     return this.svc.board(query);
+  }
+
+  @Get('inbox')
+  @HqRoles(HqRole.Viewer)
+  @ApiOperation({
+    summary: 'Boîte de réception — les propositions machine en attente, groupées par domaine.',
+  })
+  inbox() {
+    return this.svc.inbox();
+  }
+
+  @Post('inbox/accept')
+  @HqRoles(HqRole.Operator)
+  @ApiOperation({ summary: 'Accepte un lot de propositions : triage → todo.' })
+  accept(@Body() dto: DecideTriageDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.svc.acceptTriage(dto.ids, user.email);
+  }
+
+  @Post('inbox/dismiss')
+  @HqRoles(HqRole.Operator)
+  @ApiOperation({ summary: 'Écarte un lot de propositions : triage → closed, sans rien supprimer.' })
+  dismiss(@Body() dto: DecideTriageDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.svc.dismissTriage(dto.ids, user.email);
   }
 
   @Get(':id')
