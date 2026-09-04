@@ -46,6 +46,7 @@ import { BusinessModule } from './business/business.module';
 import { VerifyModule } from './verify/verify.module';
 import { CompanyModule } from './company/company.module';
 import { DomainsModule } from './domains/domains.module';
+import { ExecutionReferencesModule } from './execution-references/execution-references.module';
 import { SlaModule } from './sla/sla.module';
 
 import { entities } from './entities';
@@ -141,6 +142,7 @@ import { validate } from './config/env.validation';
     VerifyModule,
     CompanyModule,
     DomainsModule,
+    ExecutionReferencesModule,
     InfraModule,
     SlaModule,
   ],
