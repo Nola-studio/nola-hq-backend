@@ -6,6 +6,9 @@ import { RoadmapInitiative } from '../roadmap/roadmap-initiative.entity';
 import { RoadmapMilestone } from '../roadmap/roadmap-milestone.entity';
 import { WorkItemsModule } from '../work-items/work-items.module';
 import { WorkItem } from '../work-items/work-item.entity';
+// Le domaine fonctionnel (§4A) — à ne pas confondre avec `StudioDomain`,
+// qui est un nom de domaine internet.
+import { Domain } from '../domains/domain.entity';
 import { ProjectRisk } from '../work-items/project-risk.entity';
 import { WorkSprint } from '../work-items/work-sprint.entity';
 import { ProjectBudget } from '../business/project-budget.entity';
@@ -41,6 +44,7 @@ import { StudioResolvedCloserScheduler } from './studio-resolved-closer.schedule
 @Module({
   imports: [
     TypeOrmModule.forFeature([
+      Domain,
       RoadmapInitiative,
       RoadmapMilestone,
       WorkItem,
