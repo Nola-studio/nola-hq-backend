@@ -14,10 +14,11 @@ import { TeamModule } from '../team/team.module';
 import { CompanyModule } from '../company/company.module';
 import { SlaPolicy } from '../sla/sla-policy.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { Product } from '../company/product.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Ticket, TicketEvent, TeamMember, SlaPolicy]),
+    TypeOrmModule.forFeature([Ticket, TicketEvent, TeamMember, SlaPolicy, Product]),
     NolaSdkModule,
     PushModule,
     CompanyModule,

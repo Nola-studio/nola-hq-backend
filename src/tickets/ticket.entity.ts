@@ -1,5 +1,6 @@
 import { Column, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
 import { BusinessUnit } from '../company/business-unit.entity';
+import { Product } from '../company/product.entity';
 
 export type TicketPriority = 'P1' | 'P2' | 'P3';
 export type TicketStatus = 'open' | 'pending' | 'closed' | 'resolved';
@@ -12,6 +13,27 @@ export type TicketCategory =
   | 'other';
 
 export type TicketReplyVisibility = 'internal' | 'client';
+
+export type TicketResolutionCode =
+  | 'corrige'
+  | 'contournement'
+  | 'comportement_attendu'
+  | 'non_reproductible'
+  | 'assistance_formation'
+  | 'doublon'
+  | 'transfere'
+  | 'sans_suite';
+
+export const TICKET_RESOLUTION_CODES: readonly TicketResolutionCode[] = [
+  'corrige',
+  'contournement',
+  'comportement_attendu',
+  'non_reproductible',
+  'assistance_formation',
+  'doublon',
+  'transfere',
+  'sans_suite',
+] as const;
 
 /**
  * What a `pending` ticket is actually waiting on. Only 'client' pauses the
@@ -47,6 +69,15 @@ export class Ticket {
   @JoinColumn({ name: 'business_unit_id' })
   businessUnit?: BusinessUnit;
 
+  /** Nullable FK to products (Vantelis tickets have no product). */
+  @Column({ type: 'uuid', name: 'product_id', nullable: true })
+  @Index()
+  productId!: string | null;
+
+  @ManyToOne(() => Product, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'product_id' })
+  product?: Product | null;
+
   @Column()
   subject!: string;
 
@@ -70,6 +101,20 @@ export class Ticket {
   /** Only meaningful while `status === 'pending'`; cleared on any other transition. */
   @Column({ type: 'varchar', length: 16, name: 'pending_reason', nullable: true })
   pendingReason!: TicketPendingReason | null;
+
+  /**
+   * Why the ticket was resolved or closed. Required when status is 'resolved' or 'closed'.
+   * Null while open or pending.
+   */
+  @Column({ type: 'varchar', length: 32, name: 'resolution_code', nullable: true })
+  resolutionCode!: TicketResolutionCode | null;
+
+  /**
+   * Explanation / notes associated with resolution. Required when resolutionCode is
+   * 'doublon' or 'transfere'. Nullable.
+   */
+  @Column({ type: 'text', name: 'resolution_notes', nullable: true })
+  resolutionNotes!: string | null;
 
   @Column()
   assignee!: string;

@@ -113,6 +113,31 @@ describe('TicketsService (Brand Scope Filtering)', () => {
       membersForBusinessUnit: mock(async (code: string) => brandTeams[code] ?? []),
       findByEmail: mock(async (email: string) => teamMembers.find((m) => m.email === email) ?? null),
     } as any;
+    const productsList: any[] = [
+      {
+        id: 'prod-yekoli-uuid',
+        code: 'yekoli',
+        name: 'Yekoli',
+        businessUnitId: KHI_LAB_ID,
+        sourceAliases: ['kelasi-owner-app', 'kelasi-web'],
+      },
+      {
+        id: 'prod-butterfly-uuid',
+        code: 'butterfly',
+        name: 'Butterfly',
+        businessUnitId: KHI_LAB_ID,
+        sourceAliases: [],
+      },
+    ];
+    const productsMock = {
+      findOne: mock(async ({ where }: any) => {
+        if (where.id) return productsList.find((p) => p.id === where.id) ?? null;
+        if (where.code) return productsList.find((p) => p.code === where.code) ?? null;
+        return null;
+      }),
+      find: mock(async () => productsList),
+    } as any;
+
     const notificationsMock = {
       createForRecipients: mock(async () => []),
     } as any;
@@ -125,6 +150,7 @@ describe('TicketsService (Brand Scope Filtering)', () => {
       eventsMock,
       teamMock,
       slaPoliciesMock,
+      productsMock,
       pushMock,
       notifyMock,
       businessUnitsMock,
@@ -299,10 +325,85 @@ describe('TicketsService (Brand Scope Filtering)', () => {
       expect(created.meta).toEqual({ pendingReason: 'vendor' });
     });
 
+    test('resolving a ticket requires a valid resolutionCode', async () => {
+      const svc = makeService(sampleTickets);
+      sampleTickets[0].status = 'open';
+      expect(svc.setStatus(1, 'resolved', ['hq:operator', 'hq:bu:khi-lab'])).rejects.toThrow(
+        /code de résolution/,
+      );
+      expect(
+        svc.setStatus(1, 'resolved', ['hq:operator', 'hq:bu:khi-lab'], 'Alice', undefined, 'invalid_code' as any),
+      ).rejects.toThrow(/invalide/);
+    });
+
+    test('resolving with doublon or transfere requires non-empty resolutionNotes', async () => {
+      const svc = makeService(sampleTickets);
+      sampleTickets[0].status = 'open';
+      expect(
+        svc.setStatus(1, 'resolved', ['hq:operator', 'hq:bu:khi-lab'], 'Alice', undefined, 'doublon', ''),
+      ).rejects.toThrow(/note explicative/);
+      expect(
+        svc.setStatus(1, 'resolved', ['hq:operator', 'hq:bu:khi-lab'], 'Alice', undefined, 'transfere', '   '),
+      ).rejects.toThrow(/note explicative/);
+
+      const res = await svc.setStatus(
+        1,
+        'resolved',
+        ['hq:operator', 'hq:bu:khi-lab'],
+        'Alice',
+        undefined,
+        'doublon',
+        'Doublon de #42',
+      );
+      expect(res.status).toBe('resolved');
+      expect(res.resolutionCode).toBe('doublon');
+      expect(res.resolutionNotes).toBe('Doublon de #42');
+    });
+
+    test('resolving with corrige records resolutionCode and notes in event', async () => {
+      const { svc, eventsRepo } = makeServiceWithEventsRepo(sampleTickets);
+      sampleTickets[0].status = 'open';
+      sampleTickets[0].resolutionCode = null;
+      sampleTickets[0].resolutionNotes = null;
+      const res = await svc.setStatus(
+        1,
+        'resolved',
+        ['hq:operator', 'hq:bu:khi-lab'],
+        'Alice',
+        undefined,
+        'corrige',
+        'Bug corrigé en prod',
+      );
+      expect(res.resolutionCode).toBe('corrige');
+      expect(res.resolutionNotes).toBe('Bug corrigé en prod');
+      const created = eventsRepo.create.mock.calls.at(-1)?.[0] as any;
+      expect(created.action).toBe('status_changed');
+      expect(created.reason).toBe('Bug corrigé en prod');
+      expect(created.meta).toEqual({
+        resolutionCode: 'corrige',
+        resolutionNotes: 'Bug corrigé en prod',
+      });
+    });
+
+    test('reopening a resolved ticket clears resolutionCode and resolutionNotes', async () => {
+      const svc = makeService(sampleTickets);
+      sampleTickets[0].status = 'resolved';
+      sampleTickets[0].resolutionCode = 'corrige';
+      sampleTickets[0].resolutionNotes = 'Fixed';
+      const res = await svc.setStatus(1, 'open', ['hq:operator', 'hq:bu:khi-lab']);
+      expect(res.status).toBe('open');
+      expect(res.resolutionCode).toBeNull();
+      expect(res.resolutionNotes).toBeNull();
+      sampleTickets[0].resolutionCode = null;
+      sampleTickets[0].resolutionNotes = null;
+    });
+
     test('re-submitting unchanged pending status and reason is an idempotent no-op', async () => {
       const { svc, eventsRepo } = makeServiceWithEventsRepo(sampleTickets);
       sampleTickets[0].status = 'pending';
       sampleTickets[0].pendingReason = 'vendor';
+      sampleTickets[0].resolutionCode = null;
+      sampleTickets[0].resolutionNotes = null;
       const prevCalls = eventsRepo.save.mock.calls.length;
       const res = await svc.setStatus(1, 'pending', ['hq:operator', 'hq:bu:khi-lab'], 'Alice', 'vendor');
       expect(res.pendingReason).toBe('vendor');
@@ -495,6 +596,103 @@ describe('TicketsService (Brand Scope Filtering)', () => {
       sampleTickets[0].assignee = 'unassigned';
       await svc.setStatus(1, 'pending', ['hq:operator', 'hq:bu:khi-lab']);
       expect(notifications.createForRecipients).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('productId resolution and business unit constraint', () => {
+    test('create() resolves product from sourceAliases (kelasi-owner-app -> yekoli)', async () => {
+      const svc = makeService([]);
+      const ticket = await svc.create({
+        tenant: 'tenant-1',
+        subject: 'Yekoli bug',
+        body: 'Issue in app',
+        contact: 'dev@nola.dev',
+        priority: 'P2',
+        assignee: 'unassigned',
+        source: 'kelasi-owner-app',
+        businessUnitCode: 'khi-lab',
+      });
+      expect(ticket.productId).toBe('prod-yekoli-uuid');
+    });
+
+    test('create() resolves product from source (butterfly)', async () => {
+      const svc = makeService([]);
+      const ticket = await svc.create({
+        tenant: 'tenant-1',
+        subject: 'Butterfly bug',
+        body: 'Issue in app',
+        contact: 'dev@nola.dev',
+        priority: 'P2',
+        assignee: 'unassigned',
+        source: 'butterfly',
+        businessUnitCode: 'khi-lab',
+      });
+      expect(ticket.productId).toBe('prod-butterfly-uuid');
+    });
+
+    test('create() with explicit valid productId succeeds', async () => {
+      const svc = makeService([]);
+      const ticket = await svc.create({
+        tenant: 'tenant-1',
+        subject: 'Explicit product',
+        body: 'Issue in app',
+        contact: 'dev@nola.dev',
+        priority: 'P2',
+        assignee: 'unassigned',
+        businessUnitCode: 'khi-lab',
+        productId: 'prod-yekoli-uuid',
+      });
+      expect(ticket.productId).toBe('prod-yekoli-uuid');
+    });
+
+    test('create() with productId belonging to another BU throws BadRequestException', async () => {
+      const svc = makeService([]);
+      expect(
+        svc.create({
+          tenant: 'tenant-1',
+          subject: 'Mismatched product',
+          body: 'Issue',
+          contact: 'dev@nola.dev',
+          priority: 'P2',
+          assignee: 'unassigned',
+          businessUnitCode: 'vantelis-it',
+          productId: 'prod-yekoli-uuid', // belongs to khi-lab
+        }),
+      ).rejects.toThrow(/n'appartient pas/);
+    });
+
+    test('create() with unknown productId throws BadRequestException', async () => {
+      const svc = makeService([]);
+      expect(
+        svc.create({
+          tenant: 'tenant-1',
+          subject: 'Unknown product',
+          body: 'Issue',
+          contact: 'dev@nola.dev',
+          priority: 'P2',
+          assignee: 'unassigned',
+          businessUnitCode: 'khi-lab',
+          productId: 'non-existent-uuid',
+        }),
+      ).rejects.toThrow(/introuvable/);
+    });
+
+    test('update() validates BU constraint and records productId changes in event', async () => {
+      const { svc, eventsRepo } = makeServiceWithEventsRepo(sampleTickets);
+      sampleTickets[0].productId = null;
+      const updated = await svc.update(
+        1,
+        { productId: 'prod-butterfly-uuid' },
+        ['hq:operator', 'hq:bu:khi-lab'],
+        'Alice',
+      );
+      expect(updated.productId).toBe('prod-butterfly-uuid');
+      const created = eventsRepo.create.mock.calls.at(-1)?.[0] as any;
+      expect(created.action).toBe('updated');
+      expect(created.meta).toEqual({
+        fromProductId: null,
+        toProductId: 'prod-butterfly-uuid',
+      });
     });
   });
 });
