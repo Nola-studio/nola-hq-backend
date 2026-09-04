@@ -14,7 +14,11 @@ async function bootstrap() {
   const logger = new Logger('Bootstrap');
 
   app.setGlobalPrefix('api/v1', {
-    exclude: ['.well-known/nola-manifest.yaml'],
+    // L'API publique porte déjà sa version dans son chemin — le référentiel
+    // spécifie `POST /public/v1/execution-references`. Sans cette exclusion
+    // elle vivrait sous `/api/v1/public/v1/…`, versionnée deux fois, et
+    // l'adresse publiée ne correspondrait pas au contrat.
+    exclude: ['.well-known/nola-manifest.yaml', 'public/v1/(.*)'],
   });
   app.use(cookieParser());
 
