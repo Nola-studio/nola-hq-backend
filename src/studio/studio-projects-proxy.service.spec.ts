@@ -74,7 +74,6 @@ describe('StudioProjectsProxyService (Brand Scope Filtering)', () => {
     const businessOpportunitiesRepo = zeroCountRepo();
     const businessContractsRepo = zeroCountRepo();
     const businessQuotesRepo = zeroCountRepo();
-    const studioRequestsRepo = zeroCountRepo();
     const roadmapMock = {
       createInitiative: mock(async (dto: any, scope: any) => ({
         id: 'proj-new',
@@ -111,7 +110,6 @@ describe('StudioProjectsProxyService (Brand Scope Filtering)', () => {
       businessOpportunitiesRepo,
       businessContractsRepo,
       businessQuotesRepo,
-      studioRequestsRepo,
       roadmapMock,
       workItemsMock,
       notifyMock,
