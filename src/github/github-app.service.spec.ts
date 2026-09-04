@@ -67,12 +67,63 @@ describe('status', () => {
 
   test('configurée et reconnue, « connected » avec le lien d’installation', async () => {
     const svc = configure();
-    fakeGithub({ '/app': { body: { id: 4831187, slug: 'nolaahq' } } });
+    fakeGithub({
+      '/app': { body: { id: 4831187, slug: 'nolaahq' } },
+      '/app/installations': { body: [] },
+    });
 
     const res = await svc.status();
     expect(res.status).toBe('connected');
     expect(res.appId).toBe('4831187');
     expect(res.installUrl).toBe('https://github.com/apps/nolaahq/installations/new');
+  });
+
+  /**
+   * Le piège le plus courant : une App créée mais jamais installée existe,
+   * s'authentifie, et n'a accès à rien. Une liste vide n'est pas une erreur —
+   * c'est la réponse.
+   */
+  test('une App jamais installée est « connected » avec zéro installation', async () => {
+    const svc = configure();
+    fakeGithub({
+      '/app': { body: { id: 4831187, slug: 'nolaahq' } },
+      '/app/installations': { body: [] },
+    });
+
+    const res = await svc.status();
+    expect(res.status).toBe('connected');
+    expect(res.installations).toEqual([]);
+  });
+
+  /** Installée, oui — mais sur quels dépôts ? C'est l'autre moitié du piège. */
+  test('le périmètre de chaque installation est rapporté', async () => {
+    const svc = configure();
+    fakeGithub({
+      '/app': { body: { id: 4831187, slug: 'nolaahq' } },
+      '/app/installations': {
+        body: [
+          { id: 77, account: { login: 'Nola-studio' }, repository_selection: 'selected' },
+          { id: 78, account: { login: 'greg' }, repository_selection: 'all' },
+        ],
+      },
+    });
+
+    expect((await svc.status()).installations).toEqual([
+      { id: 77, account: 'Nola-studio', repositorySelection: 'selected' },
+      { id: 78, account: 'greg', repositorySelection: 'all' },
+    ]);
+  });
+
+  test('une installation sans compte lisible ne fait pas tomber le statut', async () => {
+    const svc = configure();
+    fakeGithub({
+      '/app': { body: { id: 4831187, slug: 'nolaahq' } },
+      '/app/installations': { body: [{ id: 77, account: null }] },
+    });
+
+    expect((await svc.status()).installations).toEqual([
+      { id: 77, account: '(compte inconnu)', repositorySelection: 'selected' },
+    ]);
   });
 
   /** Une clé refusée doit se voir, pas se confondre avec « pas configuré ». */
@@ -90,7 +141,9 @@ describe('status', () => {
   test('le lien d’installation reste donné même quand GitHub refuse', async () => {
     const svc = configure();
     fakeGithub({ '/app': { status: 401, body: { message: 'nope' } } });
-    expect((await svc.status()).installUrl).toBe('https://github.com/apps/nolaahq/installations/new');
+    const res = await svc.status();
+    expect(res.installUrl).toBe('https://github.com/apps/nolaahq/installations/new');
+    expect(res.installations).toEqual([]);
   });
 });
 

@@ -25,6 +25,15 @@ const TOKEN_REFRESH_MARGIN_MS = 60_000;
 /** L'installation d'un dépôt ne change presque jamais ; une heure suffit. */
 const INSTALLATION_CACHE_TTL_MS = 60 * 60_000;
 
+/** Une installation de l'App, telle que GitHub la décrit. */
+export interface GithubInstallation {
+  id: number;
+  /** L'organisation ou le compte où l'App est installée. */
+  account: string;
+  /** `all` ou `selected` — la source de la moitié des « pourquoi ça ne marche pas ». */
+  repositorySelection: 'all' | 'selected';
+}
+
 export interface GithubAppStatus {
   status: 'connected' | 'unconfigured' | 'error';
   configured: boolean;
@@ -32,6 +41,14 @@ export interface GithubAppStatus {
   slug: string | null;
   /** Où envoyer quelqu'un pour installer l'App sur un dépôt de plus. */
   installUrl: string | null;
+  /**
+   * Où l'App est installée.
+   *
+   * Une App créée mais jamais installée n'a aucun droit, et l'erreur qu'on
+   * obtient alors ne dit pas si le problème est l'absence d'installation ou
+   * un mauvais périmètre. Cette liste répond aux deux sans quitter HQ.
+   */
+  installations: GithubInstallation[];
   error: string | null;
 }
 
@@ -58,7 +75,8 @@ export class GithubAppService {
 
   /** Jetons d'installation en cours de validité. Jamais journalisés. */
   private readonly tokens = new Map<number, CachedToken>();
-  private readonly installations = new Map<string, { id: number; expiresAt: number }>();
+  /** Cache des installations résolues par dépôt. Distinct de `listInstallations()`. */
+  private readonly installationByRepo = new Map<string, { id: number; expiresAt: number }>();
 
   constructor(private readonly config: ConfigService) {}
 
@@ -87,6 +105,7 @@ export class GithubAppService {
         appId,
         slug,
         installUrl,
+        installations: [],
         error: 'GITHUB_APP_ID et GITHUB_APP_PRIVATE_KEY ne sont pas configurés sur ce backend.',
       };
     }
@@ -101,6 +120,7 @@ export class GithubAppService {
         appId: String(app.id),
         slug: app.slug ?? slug,
         installUrl: `https://github.com/apps/${app.slug ?? slug}/installations/new`,
+        installations: await this.listInstallations(),
         error: null,
       };
     } catch (err) {
@@ -110,9 +130,33 @@ export class GithubAppService {
         appId,
         slug,
         installUrl,
+        installations: [],
         error: err instanceof Error ? err.message : 'Erreur inconnue',
       };
     }
+  }
+
+  /**
+   * Où cette App est installée.
+   *
+   * Créer une App et l'installer sont deux gestes distincts, et c'est le
+   * piège le plus courant : une App créée mais jamais installée existe,
+   * s'authentifie, et n'a accès à rien. `repository_selection` répond à la
+   * question suivante — installée sur l'organisation, oui, mais sur quels
+   * dépôts.
+   *
+   * Une liste vide n'est pas une erreur : c'est la réponse.
+   */
+  async listInstallations(): Promise<GithubInstallation[]> {
+    const found = await this.appRequest<
+      { id: number; account: { login?: string } | null; repository_selection?: string }[]
+    >('/app/installations');
+
+    return found.map((i) => ({
+      id: i.id,
+      account: i.account?.login ?? '(compte inconnu)',
+      repositorySelection: i.repository_selection === 'all' ? 'all' : 'selected',
+    }));
   }
 
   /** Les faits qu'on retient d'un dépôt. Lève si l'App n'y a pas accès. */
@@ -204,12 +248,12 @@ export class GithubAppService {
    */
   async installationIdFor(owner: string, name: string): Promise<number> {
     const key = `${owner.toLowerCase()}/${name.toLowerCase()}`;
-    const cached = this.installations.get(key);
+    const cached = this.installationByRepo.get(key);
     if (cached && cached.expiresAt > Date.now()) return cached.id;
 
     try {
       const found = await this.appRequest<{ id: number }>(`/repos/${owner}/${name}/installation`);
-      this.installations.set(key, { id: found.id, expiresAt: Date.now() + INSTALLATION_CACHE_TTL_MS });
+      this.installationByRepo.set(key, { id: found.id, expiresAt: Date.now() + INSTALLATION_CACHE_TTL_MS });
       return found.id;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
