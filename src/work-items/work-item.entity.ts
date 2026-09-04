@@ -134,4 +134,16 @@ export class WorkItem {
   /** Stamped when status enters `closed` (auto, `REOPEN_WINDOW_MS` after `resolvedAt`, or a manual move). */
   @Column({ name: 'closed_at', type: 'timestamp', nullable: true })
   closedAt!: Date | null;
+
+  /**
+   * Functional domain and capability (§4A). Nullable: the referential's
+   * twelve domains were seeded before anything was classified, and
+   * classification happens domain by domain.
+   */
+  @Column({ type: 'uuid', name: 'domain_id', nullable: true })
+  @Index()
+  domainId!: string | null;
+
+  @Column({ type: 'uuid', name: 'capability_id', nullable: true })
+  capabilityId!: string | null;
 }

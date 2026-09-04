@@ -1,4 +1,5 @@
 import { ActivityEvent } from './activity/activity.entity';
+import { Capability, Domain } from './domains/domain.entity';
 import { AuditEntry } from './audit/audit.entity';
 import { Broadcast } from './broadcast/broadcast.entity';
 import { BusinessUnit } from './company/business-unit.entity';
@@ -124,4 +125,6 @@ export const entities = [
   ProjectTimeEntry,
   SlaPolicy,
   Notification,
+  Domain,
+  Capability,
 ];

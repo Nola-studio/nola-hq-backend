@@ -107,4 +107,16 @@ export class Ticket {
 
   @Column({ name: 'updated_at' })
   updatedAt!: Date;
+
+  /**
+   * Functional domain and capability (§4A). Nullable: the referential's
+   * twelve domains were seeded before anything was classified, and
+   * classification happens domain by domain.
+   */
+  @Column({ type: 'uuid', name: 'domain_id', nullable: true })
+  @Index()
+  domainId!: string | null;
+
+  @Column({ type: 'uuid', name: 'capability_id', nullable: true })
+  capabilityId!: string | null;
 }

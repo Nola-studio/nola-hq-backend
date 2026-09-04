@@ -45,6 +45,7 @@ import { WorkItemsModule } from './work-items/work-items.module';
 import { BusinessModule } from './business/business.module';
 import { VerifyModule } from './verify/verify.module';
 import { CompanyModule } from './company/company.module';
+import { DomainsModule } from './domains/domains.module';
 import { SlaModule } from './sla/sla.module';
 
 import { entities } from './entities';
@@ -139,6 +140,7 @@ import { validate } from './config/env.validation';
     BusinessModule,
     VerifyModule,
     CompanyModule,
+    DomainsModule,
     InfraModule,
     SlaModule,
   ],
