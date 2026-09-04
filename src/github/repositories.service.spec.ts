@@ -88,7 +88,20 @@ function makeService(rows: CodeRepository[] = [], projects: { id: string }[] = [
     }),
   } as any;
 
-  return { svc: new RepositoriesService(reposRepo, linksRepo, projectsRepo), links, saved };
+  const github = {
+    fetchRepository: mock(async () => ({
+      externalId: '987654321',
+      owner: 'nola-studio',
+      name: 'nola-hq',
+      defaultBranch: 'trunk',
+      visibility: 'public' as const,
+      archived: false,
+      htmlUrl: 'https://github.com/nola-studio/nola-hq',
+      description: 'Console Nolaa HQ',
+    })),
+  } as any;
+
+  return { svc: new RepositoriesService(reposRepo, linksRepo, projectsRepo, github), links, saved, github };
 }
 
 describe('register', () => {
@@ -204,5 +217,68 @@ describe('list', () => {
   test('on peut les demander', async () => {
     const { svc } = makeService([repo(), repo({ id: 'r2', name: 'vieux', archived: true })]);
     expect((await svc.list({ includeArchived: true })).map((r) => r.id)).toEqual(['r1', 'r2']);
+  });
+});
+
+describe('sync', () => {
+  /** GitHub fait autorité sur ces champs-là ; HQ les reflète. */
+  test('reprend la branche par défaut, la visibilité et la description', async () => {
+    const { svc } = makeService([repo()]);
+    const synced = await svc.sync('r1');
+
+    expect(synced.defaultBranch).toBe('trunk');
+    expect(synced.visibility).toBe('public');
+    expect(synced.description).toBe('Console Nolaa HQ');
+    expect(synced.externalId).toBe('987654321');
+    expect(synced.lastSyncedAt).toBeInstanceOf(Date);
+  });
+
+  /** Et il ne touche pas à ce que HQ est seul à savoir. */
+  test('ne touche ni au produit, ni au domaine, ni au responsable', async () => {
+    const { svc } = makeService([
+      repo({ productId: 'prod-1', domainId: 'dom-1', steward: 'greg@nolaa.dev' }),
+    ]);
+    const synced = await svc.sync('r1');
+
+    expect(synced.productId).toBe('prod-1');
+    expect(synced.domainId).toBe('dom-1');
+    expect(synced.steward).toBe('greg@nolaa.dev');
+  });
+
+  /**
+   * Un `external_id` différent veut dire que `owner/name` désigne maintenant
+   * un autre dépôt — transfert, suppression puis recréation. Écraser
+   * silencieusement ferait pointer tout l'historique de HQ vers un inconnu.
+   */
+  test('un dépôt remplacé sous le même nom est un conflit, pas une mise à jour', async () => {
+    const { svc } = makeService([repo({ externalId: '111' })]);
+    await expect(svc.sync('r1')).rejects.toThrow(ConflictException);
+    await expect(svc.sync('r1')).rejects.toThrow(/111 → 987654321/);
+  });
+
+  test('un dépôt jamais synchronisé accepte l’identifiant qu’on lui découvre', async () => {
+    const { svc } = makeService([repo({ externalId: null })]);
+    expect((await svc.sync('r1')).externalId).toBe('987654321');
+  });
+
+  /** Archivé sur GitHub l'est ici ; archivé ici est une décision locale. */
+  test('l’archivage descend de GitHub, il ne remonte pas', async () => {
+    const { svc, github } = makeService([repo({ archived: true })]);
+    github.fetchRepository = mock(async () => ({
+      externalId: '987654321', owner: 'nola-studio', name: 'nola-hq', defaultBranch: 'main',
+      visibility: 'private' as const, archived: false, htmlUrl: 'u', description: null,
+    }));
+
+    expect((await svc.sync('r1')).archived).toBe(true);
+  });
+
+  test('un dépôt renommé sur GitHub suit son nouveau nom', async () => {
+    const { svc, github } = makeService([repo({ externalId: '987654321', name: 'ancien-nom' })]);
+    github.fetchRepository = mock(async () => ({
+      externalId: '987654321', owner: 'nola-studio', name: 'nouveau-nom', defaultBranch: 'main',
+      visibility: 'private' as const, archived: false, htmlUrl: 'u', description: null,
+    }));
+
+    expect((await svc.sync('r1')).name).toBe('nouveau-nom');
   });
 });

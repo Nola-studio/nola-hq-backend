@@ -8,19 +8,32 @@ import {
   RegisterRepositoryDto,
   UpdateRepositoryDto,
 } from './dto/repository.dto';
+import { GithubAppService } from './github-app.service';
 import { RepositoriesService } from './repositories.service';
 
 @ApiBearerAuth()
 @ApiTags('repositories')
 @Controller('repositories')
 export class RepositoriesController {
-  constructor(private readonly svc: RepositoriesService) {}
+  constructor(
+    private readonly svc: RepositoriesService,
+    private readonly github: GithubAppService,
+  ) {}
 
   @Get()
   @HqRoles(HqRole.Viewer)
   @ApiOperation({ summary: 'Les dépôts connus de HQ, hors archivés par défaut.' })
   list(@Query() query: ListRepositoriesDto) {
     return this.svc.list(query);
+  }
+
+  @Get('github/status')
+  @HqRoles(HqRole.Viewer)
+  @ApiOperation({
+    summary: 'L’état de la GitHub App : configurée, reconnue, et où l’installer.',
+  })
+  githubStatus() {
+    return this.github.status();
   }
 
   @Get('allowed-for/:projectId')
@@ -55,6 +68,15 @@ export class RepositoriesController {
   @HqRoles(HqRole.Operator)
   update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateRepositoryDto) {
     return this.svc.update(id, dto);
+  }
+
+  @Post(':id/sync')
+  @HqRoles(HqRole.Operator)
+  @ApiOperation({
+    summary: 'Rapproche le dépôt de ce que GitHub en dit — branche par défaut, visibilité, description.',
+  })
+  sync(@Param('id', ParseUUIDPipe) id: string) {
+    return this.svc.sync(id);
   }
 
   @Post(':id/archive')

@@ -8,6 +8,7 @@ import {
   repositorySlug,
   type RepositoryRef,
 } from './repository-slug';
+import { GithubAppService } from './github-app.service';
 import { CodeRepository, RepositoryProject } from './repository.entity';
 import type {
   LinkProjectDto,
@@ -32,6 +33,7 @@ export class RepositoriesService {
     private readonly links: Repository<RepositoryProject>,
     @InjectRepository(RoadmapInitiative)
     private readonly projects: Repository<RoadmapInitiative>,
+    private readonly github: GithubAppService,
   ) {}
 
   async list(query: ListRepositoriesDto = {}): Promise<CodeRepository[]> {
@@ -165,6 +167,47 @@ export class RepositoriesService {
     const links = await this.links.find({ where: { repositoryId: id } });
     if (links.length === 0) return [];
     return this.projects.find({ where: { id: In(links.map((l) => l.projectId)) } });
+  }
+
+  /**
+   * Rapproche un dépôt de ce que GitHub en dit (ENG-06).
+   *
+   * GitHub fait autorité sur tout ce qui est repris ici — branche par défaut,
+   * visibilité, archivage, description, casse du nom. HQ ne discute pas ces
+   * champs : il les reflète. Ce qu'il garde en propre, ce sont les
+   * rattachements qu'il est seul à connaître : produit, domaine, responsable,
+   * projets autorisés.
+   *
+   * Un dépôt renommé sur GitHub est reconnu par son `external_id` et suit son
+   * nouveau nom, plutôt que de devenir un doublon au prochain enregistrement.
+   */
+  async sync(id: string): Promise<CodeRepository> {
+    const repo = await this.findOne(id);
+    const facts = await this.github.fetchRepository(repo.owner, repo.name);
+
+    if (repo.externalId && repo.externalId !== facts.externalId) {
+      throw new ConflictException(
+        `${repositorySlug(repo)} pointe désormais vers un autre dépôt (${repo.externalId} → ${facts.externalId}). ` +
+          `Un transfert ou une recréation demande une décision : enregistrez le nouveau dépôt et archivez celui-ci.`,
+      );
+    }
+
+    Object.assign(repo, {
+      externalId: facts.externalId,
+      owner: facts.owner,
+      name: facts.name,
+      defaultBranch: facts.defaultBranch,
+      visibility: facts.visibility,
+      // Un dépôt archivé sur GitHub l'est ici aussi ; l'inverse n'est pas
+      // vrai — archiver dans HQ est une décision locale.
+      archived: repo.archived || facts.archived,
+      htmlUrl: facts.htmlUrl,
+      description: facts.description,
+      lastSyncedAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    return this.repos.save(repo);
   }
 
   private parse(input: string): RepositoryRef {
