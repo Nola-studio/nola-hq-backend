@@ -1,4 +1,4 @@
-import { IsDateString, IsIn, IsOptional, IsString } from 'class-validator';
+import { IsDateString, IsIn, IsInt, IsOptional, IsString } from 'class-validator';
 
 const PRIORITIES = ['P1', 'P2', 'P3'] as const;
 const STATUSES = ['open', 'pending', 'closed', 'resolved'] as const;
@@ -33,6 +33,8 @@ export class CreateTicketDto {
   @IsOptional() @IsString() businessUnitCode?: string;
   /** Producing app's own upstream due date (e.g. Vantelis IT's meta.dueAt) — display only, never HQ's SLA source of truth. */
   @IsOptional() @IsDateString() dueAt?: string;
+  /** Optional linked internal studio work item (task/ticket). */
+  @IsOptional() @IsInt() workItemId?: number | null;
 }
 
 export class AddReplyDto {
@@ -65,4 +67,8 @@ export class UpdateTicketDto {
   @IsOptional()
   @IsIn(CATEGORIES as unknown as string[])
   category?: (typeof CATEGORIES)[number] | null;
+
+  @IsOptional()
+  @IsInt()
+  workItemId?: number | null;
 }

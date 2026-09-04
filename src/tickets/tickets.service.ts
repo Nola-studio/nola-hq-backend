@@ -35,6 +35,7 @@ export interface TicketsListQuery extends PaginationDto {
   assignee?: string;
   priority?: string;
   category?: string;
+  workItemId?: number;
 }
 
 /** `Ticket` as the API returns it: `businessUnit` trimmed to `{code, name}` rather than the full joined row. */
@@ -69,7 +70,10 @@ export class TicketsService {
     if (allowedUnitIds.length === 0) {
       return { items: [], total: 0, page, limit };
     }
-    const qb = this.repo.createQueryBuilder('t').leftJoinAndSelect('t.businessUnit', 'businessUnit');
+    const qb = this.repo
+      .createQueryBuilder('t')
+      .leftJoinAndSelect('t.businessUnit', 'businessUnit')
+      .leftJoinAndSelect('t.workItem', 'workItem');
     qb.andWhere('t.businessUnitId IN (:...allowedUnitIds)', { allowedUnitIds });
     if (query.tenant) qb.andWhere('t.tenant = :tenant', { tenant: query.tenant });
     if (query.status) qb.andWhere('t.status = :status', { status: query.status });
@@ -79,6 +83,8 @@ export class TicketsService {
       qb.andWhere('t.priority = :priority', { priority: query.priority });
     if (query.category)
       qb.andWhere('t.category = :category', { category: query.category });
+    if (query.workItemId)
+      qb.andWhere('t.workItemId = :workItemId', { workItemId: query.workItemId });
     if (query.q) {
       qb.andWhere('(LOWER(t.subject) LIKE :q OR LOWER(t.body) LIKE :q)', {
         q: `%${query.q.toLowerCase()}%`,
@@ -100,7 +106,7 @@ export class TicketsService {
     }
     const t = await this.repo.findOne({
       where: { id, businessUnitId: In(allowedUnitIds) },
-      relations: ['businessUnit'],
+      relations: ['businessUnit', 'workItem'],
     });
     if (!t) throw new NotFoundException(`Ticket ${id} introuvable`);
     return toTicketResponse(t);
@@ -139,6 +145,7 @@ export class TicketsService {
       category: dto.category ?? null,
       source: dto.source ?? null,
       dueAt: dto.dueAt ? new Date(dto.dueAt) : null,
+      workItemId: dto.workItemId ?? null,
       businessUnitId,
       replies: [],
       createdAt: now,
@@ -274,6 +281,12 @@ export class TicketsService {
       changes.fromCategory = ticket.category;
       changes.toCategory = dto.category;
       ticket.category = dto.category;
+    }
+
+    if (dto.workItemId !== undefined && dto.workItemId !== ticket.workItemId) {
+      changes.fromWorkItemId = ticket.workItemId;
+      changes.toWorkItemId = dto.workItemId;
+      ticket.workItemId = dto.workItemId;
     }
 
     if (Object.keys(changes).length > 0) {

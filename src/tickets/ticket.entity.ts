@@ -1,5 +1,6 @@
 import { Column, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
 import { BusinessUnit } from '../company/business-unit.entity';
+import { WorkItem } from '../work-items/work-item.entity';
 
 export type TicketPriority = 'P1' | 'P2' | 'P3';
 export type TicketStatus = 'open' | 'pending' | 'closed' | 'resolved';
@@ -98,6 +99,15 @@ export class Ticket {
    */
   @Column({ type: 'timestamp', name: 'due_at', nullable: true })
   dueAt!: Date | null;
+
+  /** Set when this ticket is linked to an internal studio work item (task/ticket). */
+  @Column({ type: 'integer', name: 'work_item_id', nullable: true })
+  @Index()
+  workItemId!: number | null;
+
+  @ManyToOne(() => WorkItem, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'work_item_id' })
+  workItem?: WorkItem | null;
 
   @Column({ type: 'simple-json', default: '[]' })
   replies!: TicketReply[];
