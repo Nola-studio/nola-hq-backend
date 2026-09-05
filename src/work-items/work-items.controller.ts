@@ -77,6 +77,18 @@ export class WorkItemsController {
     return this.svc.epics();
   }
 
+  @Get('hierarchy')
+  @HqRoles(HqRole.Viewer)
+  @ApiOperation({
+    summary: 'L’arbre du référentiel : domaine › capacité › objectif › initiative › epic.',
+    description:
+      'Les niveaux que le référentiel ne renseigne pas se referment — rien n’est déduit. ' +
+      'Un niveau qui ne porte aucun epic n’apparaît pas : la vue répond à « où se trouve le travail ».',
+  })
+  hierarchy() {
+    return this.svc.hierarchy();
+  }
+
   @Post('inbox/accept')
   @HqRoles(HqRole.Operator)
   @ApiOperation({ summary: 'Accepte un lot de propositions : triage → todo.' })
