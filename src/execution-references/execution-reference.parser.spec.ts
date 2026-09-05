@@ -502,3 +502,122 @@ describe('un titre trop long', () => {
     expect(parsed.issues).toEqual([]);
   });
 });
+
+/**
+ * La story déclarée en section, avec sa clé écrite.
+ *
+ * La liste numérotée dérive la clé du rang — ce que le parser s'interdit trois
+ * lignes plus haut dans son propre commentaire. Insérer une story y décale
+ * toutes les suivantes, et le rapprochement par `sourceKey` donne au ticket de
+ * la troisième le texte de la quatrième. La clé écrite supprime la classe.
+ */
+describe('la story en section', () => {
+  const DOC = `# EPIC GOV-01 — Registre canonique
+
+Priorité : P0
+Côté : backend
+Version cible : 0.3
+
+##### US-GOV-01-1 — Consulter la structure du groupe
+
+En tant que dirigeant, je veux consulter la structure complète du groupe
+afin de comprendre les liens entre la mère et ses filiales.
+
+##### US-GOV-01-2 — Enregistrer les données légales
+
+En tant que juriste, je veux enregistrer les données légales d'une entité.
+`;
+
+  test('la clé vient du document, pas du rang', () => {
+    const stories = parseExecutionReference(DOC).items.filter((i) => i.kind === 'story');
+    expect(stories.map((s) => s.sourceKey)).toEqual(['US-GOV-01-1', 'US-GOV-01-2']);
+    expect(stories[0]?.title).toBe('Consulter la structure du groupe');
+  });
+
+  /** Le cœur du correctif : l'ordre du document cesse de porter du sens. */
+  test('réordonner les sections ne déplace aucune clé', () => {
+    const [a, b] = DOC.split('##### ').slice(1);
+    const inverse = `${DOC.split('##### ')[0]}##### ${b.trimEnd()}\n\n##### ${a.trimEnd()}\n`;
+    const cles = (doc: string) =>
+      Object.fromEntries(
+        parseExecutionReference(doc)
+          .items.filter((i) => i.kind === 'story')
+          .map((s) => [s.title, s.sourceKey]),
+      );
+    expect(Object.keys(cles(DOC))).toHaveLength(2);
+    expect(cles(inverse)).toEqual(cles(DOC));
+  });
+
+  test('elle hérite de la priorité, du côté et de la version de son epic', () => {
+    const story = parseExecutionReference(DOC).items.find((i) => i.kind === 'story');
+    expect(story?.parentKey).toBe('GOV-01');
+    expect(story?.priority).toBe('P0');
+    expect(story?.surface).toBe('backend');
+    expect(story?.targetVersion).toBe('0.3');
+  });
+
+  /** « Côté : » écrit dans la section parle pour la story — pas pour l'epic,
+   *  dont il changerait alors le côté de toutes les stories suivantes. */
+  test('« Côté : » dans la section ne déteint pas sur l’epic', () => {
+    const parsed = parseExecutionReference(
+      '# EPIC GOV-01 — T\n\nCôté : backend\n\n##### US-GOV-01-1 — Une vue\n\nCôté : frontend\n\n##### US-GOV-01-2 — Autre chose\n\nDu texte.\n',
+    );
+    const [epic, un, deux] = [
+      parsed.items.find((i) => i.kind === 'epic'),
+      ...parsed.items.filter((i) => i.kind === 'story'),
+    ];
+    expect(un?.surface).toBe('frontend');
+    expect(deux?.surface).toBe('backend');
+    expect(epic?.surface).toBe('backend');
+  });
+
+  test('un côté inconnu dans la section nomme la story, pas l’epic', () => {
+    const parsed = parseExecutionReference(
+      '# EPIC GOV-01 — T\n\n##### US-GOV-01-1 — Une vue\n\nCôté : mobile\n',
+    );
+    expect(parsed.issues[0]?.sourceKey).toBe('US-GOV-01-1');
+  });
+
+  /**
+   * La version se déclare sur l'epic — on ne livre pas la moitié d'un epic.
+   * Écrite dans une section de story, elle changeait silencieusement celle de
+   * l'epic, donc celle de toutes les stories suivantes.
+   */
+  test('« Version cible : » dans une section est refusée, pas appliquée', () => {
+    const parsed = parseExecutionReference(
+      '# EPIC GOV-01 — T\n\nVersion cible : 0.3\n\n##### US-GOV-01-1 — Une vue\n\nVersion cible : 9.9\n\n##### US-GOV-01-2 — Autre\n\nTexte.\n',
+    );
+    const epic = parsed.items.find((i) => i.kind === 'epic');
+    expect(epic?.targetVersion).toBe('0.3');
+    for (const story of parsed.items.filter((i) => i.kind === 'story'))
+      expect(story.targetVersion).toBe('0.3');
+    expect(parsed.issues).toHaveLength(1);
+    expect(parsed.issues[0]?.level).toBe('warning');
+    expect(parsed.issues[0]?.sourceKey).toBe('US-GOV-01-1');
+  });
+
+  test('le corps de la section devient celui de la story', () => {
+    const story = parseExecutionReference(DOC).items.find((i) => i.kind === 'story');
+    expect(story?.body).toContain('En tant que dirigeant');
+  });
+
+  /** Les onze documents non convertis doivent continuer d'être lus. */
+  test('les deux formats cohabitent dans un même document', () => {
+    const parsed = parseExecutionReference(
+      '# EPIC ONE-01 — T\n\nStories :\n\n1. Première story numérotée.\n\n# EPIC TWO-02 — T\n\n##### US-TWO-02-1 — En section\n\nDu texte.\n',
+    );
+    expect(parsed.items.filter((i) => i.kind === 'story').map((s) => s.sourceKey)).toEqual([
+      'US-ONE-01-1',
+      'US-TWO-02-1',
+    ]);
+    expect(parsed.issues).toEqual([]);
+  });
+
+  test('une clé de section déjà prise est une erreur', () => {
+    const parsed = parseExecutionReference(
+      '# EPIC ONE-01 — T\n\n##### US-ONE-01-1 — Une\n\nTexte.\n\n##### US-ONE-01-1 — Deux\n\nTexte.\n',
+    );
+    expect(parsed.issues.some((i) => i.level === 'error')).toBe(true);
+    expect(parsed.items.filter((i) => i.kind === 'story')).toHaveLength(1);
+  });
+});
