@@ -241,10 +241,22 @@ ignorait ce qui suivait la coupe.
 Nommés pour qu'ils ne reviennent pas par la porte de derrière :
 
 - **Sub-task** — créée à l'exécution, pas déclarée.
-- **Objectif et Initiative** — `RoadmapObjective` et `RoadmapInitiative`
-  existent, mais `work_items` n'a ni `objective_id` ni `initiative_id`, et
-  aucun document ne les déclare. Deux colonnes, une migration, un format : un
-  lot à part entière.
+- **Objectif** — seul maillon que les documents ne déclarent pas. Rien à
+  migrer pour autant : `roadmap_objectives` porte déjà `domain_id` et
+  `capability_id`. Il manque une façon de l'écrire dans un document, et c'est
+  tout.
+
+  > **Correction du 5 septembre.** Cette section affirmait d'abord qu'Objectif
+  > et Initiative étaient hors de portée, faute d'`objective_id` et
+  > d'`initiative_id` sur `work_items` — « deux colonnes, une migration ». Les
+  > deux moitiés étaient fausses. La chaîne existe entière en base :
+  > `capabilities.domain_id`, `roadmap_objectives.capability_id`,
+  > `roadmap_initiatives.objective_id`, et `work_items.project_id` qui est une
+  > clé étrangère vers `roadmap_initiatives`. Mieux : la ligne `Projet :` d'un
+  > document résout contre `Repository<RoadmapInitiative>` — vos référentiels
+  > **déclarent déjà l'initiative**. `src/work-items/hierarchy.ts`, arrivé le
+  > même jour, remonte l'arbre complet. Sur les cinq niveaux, quatre sont donc
+  > alimentés par le document ; seul l'objectif ne l'est pas.
 - **Bug, Spike** — les types existent, aucun document n'en déclare.
 - **Risque, Décision** — n'existent pas comme types de ticket. La décision est
   précisément ce que GOV-04 propose de construire.
