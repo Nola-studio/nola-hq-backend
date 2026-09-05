@@ -15,7 +15,7 @@ import type { PaymentSucceededEventPayload } from './dto/payment-succeeded.dto';
  * Flow:
  *   nola-billing (or payment gateway)
  *     → NolaEventsService.emit('billing.payment.succeeded', payload)
- *       → nola.events.billing.payment.succeeded  (JetStream, NOLA_HQ_EVENTS)
+ *       → nola.events.billing.payment.succeeded  (JetStream, cf. NOLA_HQ_EVENTS_STREAM)
  *         → THIS listener → InvoicesService.processPaymentSucceeded(...)
  *
  * NOTE ON NATS PERMISSIONS:
@@ -41,7 +41,18 @@ export class PaymentEventsListener implements OnApplicationBootstrap {
   private eventBus: EventBus | null = null;
   private readonly enabled: boolean;
 
-  private static readonly STREAM = 'NOLA_HQ_EVENTS';
+  /**
+   * Le flux JetStream d'où viennent les paiements.
+   *
+   * Configurable pour la même raison que dans `SupportIngestListener` : sur un
+   * compte NATS où un flux de plateforme couvre déjà `nola.events.>`, en créer
+   * un second est refusé — « subjects overlap with an existing stream ». Là,
+   * HQ doit consommer celui qui existe (`NOLA_HQ_EVENTS_STREAM=NOLA_EVENTS`)
+   * plutôt que réclamer le sien. Une seule variable règle les quatre
+   * écouteurs.
+   */
+  private readonly stream: string;
+  private static readonly DEFAULT_STREAM = 'NOLA_HQ_EVENTS';
   private static readonly STREAM_SUBJECTS = ['nola.events.>'];
 
   static readonly SOURCES: ReadonlyArray<{
@@ -65,6 +76,9 @@ export class PaymentEventsListener implements OnApplicationBootstrap {
   ) {
     this.enabled =
       (this.config.get<string>('NOLA_HQ_PAYMENT_INGEST') ?? 'true') !== 'false';
+    this.stream =
+      this.config.get<string>('NOLA_HQ_EVENTS_STREAM') ??
+      PaymentEventsListener.DEFAULT_STREAM;
   }
 
   async onApplicationBootstrap(): Promise<void> {
@@ -89,35 +103,60 @@ export class PaymentEventsListener implements OnApplicationBootstrap {
     try {
       this.eventBus = new EventBus(this.nolaClient.getClient());
       await this.eventBus.init();
+    } catch (err: unknown) {
+      this.logger.error(
+        `CRITICAL: Payment ingestion bus init failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return;
+    }
 
+    /**
+     * Créer le flux est une commodité, pas une condition.
+     *
+     * Un échec ici ne dit pas que rien ne marchera : le flux peut très bien
+     * exister, tenu par la plateforme, et notre `streams.add` être refusé
+     * précisément parce qu'il est déjà là sous un autre nom. On le signale et
+     * on tente quand même de consommer — c'est le binding du consumer qui
+     * tranche.
+     *
+     * Ce qu'on ne fait plus, c'est mourir. Cette exception remontait d'un
+     * `void this.bootstrap()` : rejet non traité, et Node arrête le
+     * processus. Nolaa HQ tout entier tombait parce qu'une ingestion de
+     * paiements ne pouvait pas déclarer son flux.
+     */
+    try {
       await this.eventBus.ensureStream({
-        name: PaymentEventsListener.STREAM,
+        name: this.stream,
         subjects: PaymentEventsListener.STREAM_SUBJECTS,
         max_age: 30 * 24 * 60 * 60 * 1_000_000_000,
       });
     } catch (err: unknown) {
-      this.logger.error(
-        `CRITICAL: Payment ingestion stream init failed for ${PaymentEventsListener.STREAM}: ${err instanceof Error ? err.message : String(err)}`,
+      this.logger.warn(
+        `Payment ingestion could not declare stream ${this.stream} ` +
+          `(${err instanceof Error ? err.message : String(err)}) — ` +
+          "si un flux de plateforme couvre déjà « nola.events.> », pointez HQ dessus " +
+          'avec NOLA_HQ_EVENTS_STREAM. Tentative de consommation malgré tout.',
       );
-      throw err;
     }
 
     for (const { consumer, filter } of PaymentEventsListener.SOURCES) {
       try {
         await this.eventBus.consume<PaymentSucceededEventPayload>(
-          PaymentEventsListener.STREAM,
+          this.stream,
           consumer,
           filter,
           (env) => this.handle(env),
         );
         this.logger.log(
-          `Ingesting payment events from ${filter} (stream=${PaymentEventsListener.STREAM}, consumer=${consumer})`,
+          `Ingesting payment events from ${filter} (stream=${this.stream}, consumer=${consumer})`,
         );
       } catch (err: unknown) {
+        // Une source qui ne se lie pas ne doit emporter ni l'autre ni
+        // l'application : le durable n'est jamais supprimé au boot, donc le
+        // paiement reste dans le flux et le prochain démarrage le reprendra.
         this.logger.error(
-          `CRITICAL: Payment consumer bind failed for ${filter} (consumer=${consumer}, stream=${PaymentEventsListener.STREAM}): ${err instanceof Error ? err.message : String(err)}`,
+          `CRITICAL: Payment consumer bind failed for ${filter} (consumer=${consumer}, stream=${this.stream}): ${err instanceof Error ? err.message : String(err)}`,
         );
-        throw err;
       }
     }
   }
