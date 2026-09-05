@@ -26,4 +26,8 @@ export class ProjectRisk {
   @Column({ type: 'text', nullable: true }) mitigation!: string | null;
   @Column({ name: 'created_at' }) createdAt!: Date;
   @Column({ name: 'updated_at' }) updatedAt!: Date;
+
+  /** Functional domain and capability (§4A) — nullable until classified. */
+  @Column({ type: 'uuid', name: 'domain_id', nullable: true }) @Index() domainId!: string | null;
+  @Column({ type: 'uuid', name: 'capability_id', nullable: true }) capabilityId!: string | null;
 }

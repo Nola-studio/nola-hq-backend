@@ -11,7 +11,6 @@ import {
 import { StudioExpense } from './studio-expense.entity';
 import { StudioDomain } from './studio-domain.entity';
 import { StudioRecurring } from './studio-recurring.entity';
-import { StudioRequest } from './studio-request.entity';
 import { resolvePeriod } from './studio.dashboard-period';
 import {
   buildSectionA,
@@ -68,23 +67,25 @@ export class StudioDashboardService {
     private readonly domains: Repository<StudioDomain>,
     @InjectRepository(StudioRecurring)
     private readonly recurring: Repository<StudioRecurring>,
-    @InjectRepository(StudioRequest)
-    private readonly requests: Repository<StudioRequest>,
   ) {}
 
   async get(query: GetDashboardDto = {}): Promise<StudioDashboard> {
     const today = new Date().toISOString().slice(0, 10);
     const range = resolvePeriod(query, today);
 
-    const [allProjects, allTasks, allTeam, allExpenses, allDomains, allRecurring, allRequests] = await Promise.all([
+    const [allProjects, allTasks, allTeam, allExpenses, allDomains, allRecurring] = await Promise.all([
       this.projects.find(),
       this.tasks.find(),
       this.team.find(),
       this.expenses.find(),
       this.domains.find(),
       this.recurring.find(),
-      this.requests.find(),
     ]);
+
+    // Since REQ-01 a filed need is a work item carrying `source_kind =
+    // 'request'`, so the dashboard's request counters read from the same set
+    // as its task counters instead of a table of their own.
+    const allRequests = allTasks.filter((task) => task.sourceKind === 'request');
     const emailById = new Map(allTeam.map((m) => [m.id, m.email]));
 
     // Both scopes share one archived flag — a task filed under either can be
