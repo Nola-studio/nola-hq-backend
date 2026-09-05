@@ -131,6 +131,23 @@ const PROJECT_LINE = /^\*{0,2}Projet\s*:\s*\*{0,2}\s*(.+?)\*{0,2}\s*$/i;
  * avant d'avoir planifié sa livraison est le cas courant.
  */
 const TARGET_VERSION_LINE = /^\*{0,2}Version cible\s*:\s*\*{0,2}\s*v?(.+?)\*{0,2}\s*$/i;
+/**
+ * « 1.11 — Contrôle et gouvernance avancée » : le numéro, puis le nom que la
+ * version porte. Seul le numéro désigne quelque chose — c'est lui que l'import
+ * résout contre le registre ; le nom est un repère pour qui lit le document.
+ *
+ * Le tiret doit être détaché pour ouvrir un libellé : le registre n'impose pas
+ * le versionnage sémantique, et « 2026-09-05 » est un numéro entier, pas un
+ * numéro suivi d'un commentaire.
+ */
+const VERSION_LABEL_SUFFIX = /\s+[—–]\s+.*$/;
+/**
+ * Ce que le registre accepte comme numéro (REL-00 le borne à 32 caractères).
+ * Au-delà, la ligne dit autre chose qu'une version : le parser le signale et
+ * l'epic n'en vise aucune — un manifeste ne doit pas échouer à s'écrire parce
+ * qu'un document a mis une phrase là où va un numéro.
+ */
+const TARGET_VERSION_MAX = 32;
 /** « Côté : backend » sous un epic, hérité par ses stories. */
 const SURFACE_LINE = /^\*{0,2}(?:C[oô]t[ée]|Surface)\s*:\s*\*{0,2}\s*(.+?)\*{0,2}\s*$/i;
 /** « … #backend » en fin de ligne d'une story, quand un epic mêle les deux. */
@@ -361,7 +378,17 @@ export function parseExecutionReference(markdown: string): ParsedReference {
 
     const targetVersionMatch = TARGET_VERSION_LINE.exec(line);
     if (targetVersionMatch && currentEpic) {
-      currentEpic.targetVersion = targetVersionMatch[1].trim() || null;
+      const declaredVersion = targetVersionMatch[1].replace(VERSION_LABEL_SUFFIX, '').trim();
+      if ([...declaredVersion].length > TARGET_VERSION_MAX) {
+        issues.push({
+          level: 'warning',
+          message: `« ${declaredVersion} » ne peut pas être un numéro de version — ${TARGET_VERSION_MAX} caractères au plus. L’epic entre sans version.`,
+          line: lineNumber,
+          sourceKey: currentEpic.sourceKey,
+        });
+      } else {
+        currentEpic.targetVersion = declaredVersion || null;
+      }
       continue;
     }
 
