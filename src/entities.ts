@@ -30,6 +30,7 @@ import { TeamMember } from './team/team-member.entity';
 import { Tenant } from './tenants/tenant.entity';
 import { TenantCrm } from './tenants/tenant-crm.entity';
 import { Ticket } from './tickets/ticket.entity';
+import { TicketEvent } from './tickets/ticket-event.entity';
 import { WorkItem } from './work-items/work-item.entity';
 import { WorkItemAttachment } from './work-items/work-item-attachment.entity';
 import { WorkItemComment } from './work-items/work-item-comment.entity';
@@ -49,6 +50,8 @@ import { BusinessQuote, BusinessQuoteLine } from './business/business-quote.enti
 import { BusinessDocument } from './business/business-document.entity';
 import { BusinessReminder } from './business/business-reminder.entity';
 import { ProjectTimeEntry } from './business/project-time-entry.entity';
+import { SlaPolicy } from './sla/sla-policy.entity';
+import { Notification } from './notifications/notification.entity';
 
 // Le registry des apps n'a PAS de table — c'est une projection in-memory
 // reconstruite à partir du JetStream NOLA_REGISTRY (cf. AppsService).
@@ -97,6 +100,7 @@ export const entities = [
   Tenant,
   TenantCrm,
   Ticket,
+  TicketEvent,
   WorkItem,
   WorkItemAttachment,
   WorkItemComment,
@@ -118,4 +122,6 @@ export const entities = [
   BusinessDocument,
   BusinessReminder,
   ProjectTimeEntry,
+  SlaPolicy,
+  Notification,
 ];

@@ -59,7 +59,7 @@ const BUCKETS_24H = 24;
 const BUCKET_MS = 60 * 60 * 1000;
 const SAMPLE_INTERVAL_MS = 5 * 60 * 1000;
 const MAX_RECENT_INCIDENTS = 200;
-const HEALTH_STREAM = 'NOLA_EVENTS';
+const HEALTH_STREAM = 'NOLA_HQ_EVENTS';
 const SNAPSHOT_CONSUMER = 'nola-hq-health-snapshot-projection';
 const INCIDENT_CONSUMER = 'nola-hq-health-incident-projection';
 const METRICS_CONSUMER = 'nola-hq-health-metrics-projection';
@@ -176,14 +176,12 @@ export class HealthService
     try {
       this.eventBus = new EventBus(this.nolaClient.getClient());
       await this.eventBus.init();
+      await this.eventBus.ensureStream({
+        name: HEALTH_STREAM,
+        subjects: ['nola.events.>'],
+        max_age: 30 * 24 * 60 * 60 * 1_000_000_000,
+      });
 
-      // Replay history. The NOLA_EVENTS stream is already ensured by
-      // nola-iam / nola-billing at boot (30d retention), so we just
-      // attach consumers filtered to our two health subjects.
-      //
-      // The consumers ARE durable — after a nola-hq restart they pick
-      // up where they left off. We delete + recreate them on every boot
-      // so we always get a fresh replay (cheap on the volume we have).
       await this.recreateConsumers();
 
       await this.eventBus.consume<SnapshotEvent>(

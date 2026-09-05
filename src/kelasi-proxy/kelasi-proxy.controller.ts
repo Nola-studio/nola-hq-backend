@@ -1,6 +1,6 @@
 import { Controller, Get, NotFoundException, Param } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { KelasiProvisionClient } from '../tenants/kelasi-provision.client';
+import { YekoliProvisionClient } from '../tenants/yekoli-provision.client';
 import { HqRoles } from '../common/auth/hq-roles.decorator';
 import { HqRole } from '../common/auth/hq-role.enum';
 
@@ -15,7 +15,7 @@ import { HqRole } from '../common/auth/hq-role.enum';
  * forward.
  *
  * Read-only endpoints only. Anything mutating goes through
- * `TenantsService.create` / `KelasiProvisionClient.provision` which
+ * `TenantsService.create` / `YekoliProvisionClient.provision` which
  * is shared-secret-authed.
  */
 @ApiBearerAuth()
@@ -26,7 +26,7 @@ import { HqRole } from '../common/auth/hq-role.enum';
 @Controller(['yekoli', 'kelasi'])
 @HqRoles(HqRole.Viewer)
 export class KelasiProxyController {
-  constructor(private readonly client: KelasiProvisionClient) {}
+  constructor(private readonly client: YekoliProvisionClient) {}
 
   /**
    * Forwards to `kelasi-gateway:/api/config/countries/:code` — the

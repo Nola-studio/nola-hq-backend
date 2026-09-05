@@ -12,8 +12,8 @@ import { METRIC_KEYS } from '../../analytics/snapshot.metrics';
 import {
   KEY_RESULT_DIRECTIONS,
   KEY_RESULT_UNITS,
-  KeyResultDirection,
-  KeyResultUnit,
+  type KeyResultDirection,
+  type KeyResultUnit,
 } from '../roadmap.trajectory';
 
 /**

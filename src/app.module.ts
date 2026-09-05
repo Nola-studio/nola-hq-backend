@@ -38,12 +38,14 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { KelasiProxyModule } from './kelasi-proxy/kelasi-proxy.module';
 import { AssistModule } from './assist/assist.module';
 import { ModulesModule } from './modules/modules.module';
+import { InfraModule } from './infra/infra.module';
 import { RoadmapModule } from './roadmap/roadmap.module';
 import { StudioModule } from './studio/studio.module';
 import { WorkItemsModule } from './work-items/work-items.module';
 import { BusinessModule } from './business/business.module';
 import { VerifyModule } from './verify/verify.module';
 import { CompanyModule } from './company/company.module';
+import { SlaModule } from './sla/sla.module';
 
 import { entities } from './entities';
 import { validate } from './config/env.validation';
@@ -137,6 +139,8 @@ import { validate } from './config/env.validation';
     BusinessModule,
     VerifyModule,
     CompanyModule,
+    InfraModule,
+    SlaModule,
   ],
   // Guards globaux dans l'ordre de chaîne :
   //   1. JwtAuthGuard — hydrate `req.user` depuis la session.

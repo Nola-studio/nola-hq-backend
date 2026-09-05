@@ -37,7 +37,7 @@ describe('StudioProjectsProxyService (Brand Scope Filtering)', () => {
     }),
   } as any;
 
-  function makeService(rows: Partial<RoadmapInitiative>[]) {
+  function makeService(rows: Partial<RoadmapInitiative>[], opts: { taskCount?: number } = {}) {
     const projectsRepo = {
       find: mock(async ({ where }: any = {}) => {
         let res = [...rows];
@@ -55,13 +55,26 @@ describe('StudioProjectsProxyService (Brand Scope Filtering)', () => {
         return res[0] ?? null;
       }),
       save: mock(async (p: any) => p),
+      remove: mock(async (p: any) => p),
     } as any;
 
     const tasksRepo = {
-      count: mock(async () => 0),
+      count: mock(async () => opts.taskCount ?? 0),
     } as any;
 
     const teamRepo = {} as any;
+    const zeroCountRepo = () => ({ count: mock(async () => 0) }) as any;
+    const milestonesRepo = zeroCountRepo();
+    const projectRisksRepo = zeroCountRepo();
+    const workSprintsRepo = zeroCountRepo();
+    const projectBudgetsRepo = zeroCountRepo();
+    const projectTimeEntriesRepo = zeroCountRepo();
+    const businessExpensesRepo = zeroCountRepo();
+    const businessInvoicesRepo = zeroCountRepo();
+    const businessOpportunitiesRepo = zeroCountRepo();
+    const businessContractsRepo = zeroCountRepo();
+    const businessQuotesRepo = zeroCountRepo();
+    const studioRequestsRepo = zeroCountRepo();
     const roadmapMock = {
       createInitiative: mock(async (dto: any, scope: any) => ({
         id: 'proj-new',
@@ -88,6 +101,17 @@ describe('StudioProjectsProxyService (Brand Scope Filtering)', () => {
       projectsRepo,
       tasksRepo,
       teamRepo,
+      milestonesRepo,
+      projectRisksRepo,
+      workSprintsRepo,
+      projectBudgetsRepo,
+      projectTimeEntriesRepo,
+      businessExpensesRepo,
+      businessInvoicesRepo,
+      businessOpportunitiesRepo,
+      businessContractsRepo,
+      businessQuotesRepo,
+      studioRequestsRepo,
       roadmapMock,
       workItemsMock,
       notifyMock,
@@ -186,6 +210,27 @@ describe('StudioProjectsProxyService (Brand Scope Filtering)', () => {
       ).rejects.toThrow(NotFoundException);
       expect(
         svc.unarchiveProject('proj-1', ['hq:operator']),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('removeProject', () => {
+    test('deletes when nothing references the project', async () => {
+      const svc = makeService(sampleProjects);
+      await expect(svc.removeProject('proj-1', ['hq:operator', 'hq:bu:khi-lab'])).resolves.toBeUndefined();
+    });
+
+    test('409s naming the blocker when a dependent row exists', async () => {
+      const svc = makeService(sampleProjects, { taskCount: 3 });
+      await expect(
+        svc.removeProject('proj-1', ['hq:operator', 'hq:bu:khi-lab']),
+      ).rejects.toThrow(/3 tâche\(s\)/);
+    });
+
+    test('khi-lab operator 404s deleting proj-2 (vantelis)', async () => {
+      const svc = makeService(sampleProjects);
+      await expect(
+        svc.removeProject('proj-2', ['hq:operator', 'hq:bu:khi-lab']),
       ).rejects.toThrow(NotFoundException);
     });
   });

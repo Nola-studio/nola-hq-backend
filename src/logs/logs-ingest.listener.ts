@@ -55,7 +55,8 @@ export class LogsIngestListener
   private eventBus: EventBus | null = null;
   private readonly enabled: boolean;
 
-  private static readonly STREAM = 'NOLA_EVENTS';
+  private static readonly STREAM = 'NOLA_HQ_EVENTS';
+  private static readonly STREAM_SUBJECTS = ['nola.events.>'];
   private static readonly SOURCES: Source[] = [
     {
       category: 'incident',
@@ -112,11 +113,17 @@ export class LogsIngestListener
     try {
       this.eventBus = new EventBus(this.nolaClient.getClient());
       await this.eventBus.init();
+
+      await this.eventBus.ensureStream({
+        name: LogsIngestListener.STREAM,
+        subjects: LogsIngestListener.STREAM_SUBJECTS,
+        max_age: 30 * 24 * 60 * 60 * 1_000_000_000,
+      });
     } catch (err: unknown) {
       this.logger.error(
-        `Log ingestion EventBus init failed: ${err instanceof Error ? err.message : String(err)}`,
+        `CRITICAL: Log ingestion stream init failed for ${LogsIngestListener.STREAM}: ${err instanceof Error ? err.message : String(err)}`,
       );
-      return;
+      throw err;
     }
 
     const jsm = await this.nolaClient
@@ -140,13 +147,12 @@ export class LogsIngestListener
           src.filter,
           (env) => this.handle(src.category, env),
         );
-        this.logger.log(`Ingesting logs from ${src.filter}`);
+        this.logger.log(`Ingesting logs from ${src.filter} (stream=${LogsIngestListener.STREAM}, consumer=${src.consumer})`);
       } catch (err: unknown) {
-        // A single source failing (filter not in stream, perms, …) must
-        // never take down the others or the app.
-        this.logger.warn(
-          `Log ingestion skipped for ${src.filter}: ${err instanceof Error ? err.message : String(err)}`,
+        this.logger.error(
+          `CRITICAL: Log ingestion consumer bind failed for ${src.filter} (consumer=${src.consumer}, stream=${LogsIngestListener.STREAM}): ${err instanceof Error ? err.message : String(err)}`,
         );
+        throw err;
       }
     }
   }

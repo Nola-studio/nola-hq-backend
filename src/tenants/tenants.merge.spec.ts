@@ -15,8 +15,9 @@ import type { Invoice } from '../invoices/invoice.entity';
 import type { MomoEntry } from '../momo/momo-entry.entity';
 import type { Ticket } from '../tickets/ticket.entity';
 import type { ActivityEvent } from '../activity/activity.entity';
+import type { Product } from '../company/product.entity';
 import type { NolaCommandsService } from '@nola-hq/nola-sdk';
-import type { KelasiProvisionClient } from './kelasi-provision.client';
+import type { YekoliProvisionClient } from './yekoli-provision.client';
 import type { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import type { PlansService } from '../plans/plans.service';
 import type { IamClientService } from '../iam/iam-client.service';
@@ -72,8 +73,9 @@ function makeService(opts: {
     {} as Repository<Invoice>,
     {} as Repository<MomoEntry>,
     {} as Repository<ActivityEvent>,
+    {} as Repository<Product>,
     commands,
-    {} as KelasiProvisionClient,
+    {} as YekoliProvisionClient,
     {} as SubscriptionsService,
     {} as PlansService,
     iam,

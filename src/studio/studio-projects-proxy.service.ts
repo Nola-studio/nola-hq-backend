@@ -6,12 +6,23 @@ import {
   type RoadmapInitiativePriority,
   type RoadmapInitiativeScope,
 } from '../roadmap/roadmap-initiative.entity';
+import { RoadmapMilestone } from '../roadmap/roadmap-milestone.entity';
 import { RoadmapService, type RoadmapInitiativeView } from '../roadmap/roadmap.service';
 import { TeamMember } from '../team/team-member.entity';
 import { StudioNotifyService } from './studio-notify.service';
 import { BusinessUnitResolverService } from '../company/business-unit-resolver.service';
 import { WorkItem, type WorkItemStatus } from '../work-items/work-item.entity';
 import { WorkItemsService } from '../work-items/work-items.service';
+import { ProjectRisk } from '../work-items/project-risk.entity';
+import { WorkSprint } from '../work-items/work-sprint.entity';
+import { ProjectBudget } from '../business/project-budget.entity';
+import { ProjectTimeEntry } from '../business/project-time-entry.entity';
+import { BusinessExpense } from '../business/business-expense.entity';
+import { BusinessInvoice } from '../business/business-invoice.entity';
+import { BusinessOpportunity } from '../business/business-opportunity.entity';
+import { BusinessContract } from '../business/business-contract.entity';
+import { BusinessQuote } from '../business/business-quote.entity';
+import { StudioRequest } from './studio-request.entity';
 import {
   STUDIO_PRIORITY_TO_WORK_ITEM_PRIORITY,
   STUDIO_STATUS_TO_WORK_ITEM_STATUS,
@@ -74,6 +85,28 @@ export class StudioProjectsProxyService {
     private readonly tasks: Repository<WorkItem>,
     @InjectRepository(TeamMember)
     private readonly team: Repository<TeamMember>,
+    @InjectRepository(RoadmapMilestone)
+    private readonly milestones: Repository<RoadmapMilestone>,
+    @InjectRepository(ProjectRisk)
+    private readonly projectRisks: Repository<ProjectRisk>,
+    @InjectRepository(WorkSprint)
+    private readonly workSprints: Repository<WorkSprint>,
+    @InjectRepository(ProjectBudget)
+    private readonly projectBudgets: Repository<ProjectBudget>,
+    @InjectRepository(ProjectTimeEntry)
+    private readonly projectTimeEntries: Repository<ProjectTimeEntry>,
+    @InjectRepository(BusinessExpense)
+    private readonly businessExpenses: Repository<BusinessExpense>,
+    @InjectRepository(BusinessInvoice)
+    private readonly businessInvoices: Repository<BusinessInvoice>,
+    @InjectRepository(BusinessOpportunity)
+    private readonly businessOpportunities: Repository<BusinessOpportunity>,
+    @InjectRepository(BusinessContract)
+    private readonly businessContracts: Repository<BusinessContract>,
+    @InjectRepository(BusinessQuote)
+    private readonly businessQuotes: Repository<BusinessQuote>,
+    @InjectRepository(StudioRequest)
+    private readonly studioRequests: Repository<StudioRequest>,
     private readonly roadmap: RoadmapService,
     private readonly workItems: WorkItemsService,
     private readonly notify: StudioNotifyService,
@@ -177,6 +210,70 @@ export class StudioProjectsProxyService {
     const project = await this.findInitiative(id, 'project', roles);
     project.archived = false;
     return this.toStudioProject(await this.projects.save(project));
+  }
+
+  /**
+   * Hard delete only when nothing references the project — 6 of its FKs are
+   * `CASCADE` and 6 are `SET NULL`, so the database would happily delete
+   * through or orphan those rows silently if we didn't check first. Checked
+   * inline against all 12 relations rather than behind a generic
+   * "assert no dependents" helper — this shape is specific to
+   * `RoadmapInitiative`'s FK graph, nothing else in the schema looks like
+   * this. Anything found blocks with a 409 naming what and how many;
+   * archiving remains the only path once a project has real activity on it.
+   */
+  async removeProject(id: string, roles?: string[]) {
+    const project = await this.findInitiative(id, 'project', roles);
+
+    const [
+      milestoneCount,
+      riskCount,
+      budgetCount,
+      expenseCount,
+      invoiceCount,
+      timeEntryCount,
+      sprintCount,
+      taskCount,
+      opportunityCount,
+      contractCount,
+      quoteCount,
+      requestCount,
+    ] = await Promise.all([
+      this.milestones.count({ where: { initiativeId: id } }),
+      this.projectRisks.count({ where: { projectId: id } }),
+      this.projectBudgets.count({ where: { projectId: id } }),
+      this.businessExpenses.count({ where: { projectId: id } }),
+      this.businessInvoices.count({ where: { projectId: id } }),
+      this.projectTimeEntries.count({ where: { projectId: id } }),
+      this.workSprints.count({ where: { projectId: id } }),
+      this.tasks.count({ where: { projectId: id } }),
+      this.businessOpportunities.count({ where: { projectId: id } }),
+      this.businessContracts.count({ where: { projectId: id } }),
+      this.businessQuotes.count({ where: { projectId: id } }),
+      this.studioRequests.count({ where: { projectId: id } }),
+    ]);
+
+    const blockers: string[] = [];
+    if (milestoneCount > 0) blockers.push(`${milestoneCount} jalon(s)`);
+    if (riskCount > 0) blockers.push(`${riskCount} risque(s)`);
+    if (budgetCount > 0) blockers.push(`${budgetCount} budget`);
+    if (expenseCount > 0) blockers.push(`${expenseCount} dépense(s)`);
+    if (invoiceCount > 0) blockers.push(`${invoiceCount} facture(s)`);
+    if (timeEntryCount > 0) blockers.push(`${timeEntryCount} entrée(s) de temps`);
+    if (sprintCount > 0) blockers.push(`${sprintCount} sprint(s)`);
+    if (taskCount > 0) blockers.push(`${taskCount} tâche(s)`);
+    if (opportunityCount > 0) blockers.push(`${opportunityCount} opportunité(s)`);
+    if (contractCount > 0) blockers.push(`${contractCount} contrat(s)`);
+    if (quoteCount > 0) blockers.push(`${quoteCount} devis`);
+    if (requestCount > 0) blockers.push(`${requestCount} demande(s)`);
+
+    if (blockers.length > 0) {
+      throw new ConflictException(
+        `Impossible de supprimer « ${project.keyPrefix ?? project.title} » : ${blockers.join(', ')}. Archivez-le à la place.`,
+      );
+    }
+
+    await this.projects.remove(project);
   }
 
   /**

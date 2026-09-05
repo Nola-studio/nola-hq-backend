@@ -43,6 +43,16 @@ interface SupportRequestPayload {
     personId?: string;
     /** Real email when the sender has one (web matricule users may not). */
     contactEmail?: string;
+    /**
+     * Vantelis IT's own upstream commitment (e.g. '15 min'), computed
+     * against their own business-hours config — display/context only.
+     * HQ's own `sla_policies` (business unit × priority) governs alerting;
+     * this is never parsed or compared against it. Absent from
+     * kelasi/yekoli payloads.
+     */
+    slaTarget?: string;
+    /** ISO timestamp matching `slaTarget`, same source, same caveat. */
+    dueAt?: string;
   };
 }
 
@@ -85,21 +95,38 @@ export class SupportIngestListener implements OnApplicationBootstrap {
   private eventBus: EventBus | null = null;
   private readonly enabled: boolean;
 
-  private static readonly STREAM = 'NOLA_EVENTS';
-  /** Un consumer durable par variante de sujet (voir doc de classe).
-   * Le nom historique reste lié au sujet kelasi pour préserver l'état
-   * (curseur/backlog) du durable déjà déployé. */
+  private static readonly STREAM = 'NOLA_HQ_EVENTS';
+  private static readonly STREAM_SUBJECTS = ['nola.events.>'];
+  /**
+   * Un consumer durable par sujet produit (voir doc de classe). Le nom
+   * historique reste lié au sujet kelasi pour préserver l'état
+   * (curseur/backlog) du durable déjà déployé.
+   *
+   * `businessUnitCode` est déclaré ici, par source — jamais dérivé du
+   * sujet, de `source`, ou d'une normalisation du nom d'app. C'est le
+   * seul endroit qui décide de la marque d'un ticket ingéré ; un sujet
+   * ajouté sans ce champ ne compile pas (le champ est requis sur le
+   * type), plutôt que de silencieusement retomber sur un défaut.
+   */
   static readonly SOURCES: ReadonlyArray<{
     consumer: string;
     filter: string;
+    businessUnitCode: string;
   }> = [
     {
       consumer: 'nola-hq-support-ingest',
       filter: 'nola.events.kelasi.support.requested',
+      businessUnitCode: 'khi-lab',
     },
     {
       consumer: 'nola-hq-support-ingest-yekoli',
       filter: 'nola.events.yekoli.support.requested',
+      businessUnitCode: 'khi-lab',
+    },
+    {
+      consumer: 'nola-hq-support-ingest-vantelisit',
+      filter: 'nola.events.vantelisit.support.requested',
+      businessUnitCode: 'vantelis-it',
     },
   ];
 
@@ -138,35 +165,42 @@ export class SupportIngestListener implements OnApplicationBootstrap {
     try {
       this.eventBus = new EventBus(this.nolaClient.getClient());
       await this.eventBus.init();
+
+      await this.eventBus.ensureStream({
+        name: SupportIngestListener.STREAM,
+        subjects: SupportIngestListener.STREAM_SUBJECTS,
+        max_age: 30 * 24 * 60 * 60 * 1_000_000_000,
+      });
     } catch (err: unknown) {
       this.logger.error(
-        `Support ingestion init failed: ${err instanceof Error ? err.message : String(err)}`,
+        `CRITICAL: Support ingestion stream init failed for ${SupportIngestListener.STREAM}: ${err instanceof Error ? err.message : String(err)}`,
       );
-      return;
+      throw err;
     }
 
-    // Chaque variante est branchée indépendamment : l'échec d'un consumer
-    // (ex. création du nouveau durable yekoli refusée) ne doit pas priver
-    // HQ des tickets arrivant encore sur l'autre sujet.
-    for (const { consumer, filter } of SupportIngestListener.SOURCES) {
+    for (const { consumer, filter, businessUnitCode } of SupportIngestListener.SOURCES) {
       try {
         await this.eventBus.consume<SupportRequestPayload>(
           SupportIngestListener.STREAM,
           consumer,
           filter,
-          (env) => this.handle(env),
+          (env) => this.handle(env, businessUnitCode),
         );
-        this.logger.log(`Ingesting support requests from ${filter}`);
+        this.logger.log(
+          `Ingesting support requests from ${filter} (stream=${SupportIngestListener.STREAM}, consumer=${consumer})`,
+        );
       } catch (err: unknown) {
         this.logger.error(
-          `Support ingestion init failed for ${filter}: ${err instanceof Error ? err.message : String(err)}`,
+          `CRITICAL: Support ingestion consumer bind failed for ${filter} (consumer=${consumer}, stream=${SupportIngestListener.STREAM}): ${err instanceof Error ? err.message : String(err)}`,
         );
+        throw err;
       }
     }
   }
 
   private async handle(
     env: EventEnvelope<SupportRequestPayload>,
+    businessUnitCode: string,
   ): Promise<void> {
     const p = env.payload ?? {};
     const subject = (p.subject ?? '').trim();
@@ -208,6 +242,8 @@ export class SupportIngestListener implements OnApplicationBootstrap {
       assignee: 'unassigned',
       category,
       source: p.source ?? 'yekoli',
+      businessUnitCode,
+      dueAt: p.meta?.dueAt,
     });
 
     this.logger.log(
@@ -226,6 +262,10 @@ export class SupportIngestListener implements OnApplicationBootstrap {
     if (m.appVersion) lines.push(`Version app : ${m.appVersion}`);
     if (m.platform) lines.push(`Plateforme : ${m.platform}`);
     if (m.personId) lines.push(`Person ID : ${m.personId}`);
+    // Producteur's own upstream commitment — display only, never HQ's SLA
+    // source of truth (that's sla_policies, business unit × priority).
+    if (m.slaTarget) lines.push(`Engagement fournisseur : ${m.slaTarget}`);
+    if (m.dueAt) lines.push(`Échéance fournisseur : ${m.dueAt}`);
     if (lines.length === 0) return message;
     return `${message}\n\n— Contexte —\n${lines.join('\n')}`;
   }

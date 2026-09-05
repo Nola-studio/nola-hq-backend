@@ -1,32 +1,113 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { IsNull, Repository } from 'typeorm';
 import { NolaClientService } from '@nola-hq/nola-sdk';
+import { Notification, type NotificationKind } from './notification.entity';
 
-/**
- * Operator-facing test surface for the Nola notification pipeline.
- *
- * Publishes `nola.commands.notify.send` on the cross-app bus (same
- * subject the auto-invite flow / billing flow / incident bridge use
- * in production). The downstream `nola-notify` service consumes the
- * command, renders the named template (or the `_inline` sentinel for
- * raw subject+body), and dispatches through the configured channel
- * provider (Resend SMTP for email, etc).
- *
- * Why this lives in nola-hq-backend rather than as a temporary endpoint
- * in kelasi: HQ already holds the privileged `nola-studio` NATS user
- * with publish rights on `nola.commands.notify.send`, the existing
- * `IncidentAlertListener` uses the same path, and it's the natural
- * place for an ops "send test email" capability that won't be
- * deleted when validation is done.
- *
- * Failures are surfaced as ServiceUnavailable when NolaClient is
- * offline (so the operator UI shows a clear error instead of a silent
- * 200) and as BadRequest when the payload is malformed.
- */
+export interface CreateNotificationInput {
+  kind: NotificationKind;
+  ticketId?: number | null;
+  title: string;
+  body?: string | null;
+  url?: string | null;
+}
+
 @Injectable()
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
 
-  constructor(private readonly nolaClient: NolaClientService) {}
+  constructor(
+    @InjectRepository(Notification) private readonly repo: Repository<Notification>,
+    private readonly nolaClient: NolaClientService,
+  ) {}
+
+  // ── Per-recipient in-app notifications ──────────────────────────────
+
+  /**
+   * One row per recipient, same trigger, same content — the fan-out a
+   * single `TicketEvent` can't represent. `recipientIds` is expected
+   * pre-resolved and pre-deduplicated by the caller (see
+   * `TeamService.membersForBusinessUnit` / the single-assignee case);
+   * this method doesn't second-guess who should receive it.
+   */
+  async createForRecipients(recipientIds: string[], input: CreateNotificationInput): Promise<Notification[]> {
+    if (recipientIds.length === 0) return [];
+    const now = new Date();
+    const rows = recipientIds.map((recipientId) =>
+      this.repo.create({
+        recipientId,
+        kind: input.kind,
+        ticketId: input.ticketId ?? null,
+        title: input.title,
+        body: input.body ?? null,
+        url: input.url ?? null,
+        readAt: null,
+        clearedAt: null,
+        createdAt: now,
+      }),
+    );
+    return this.repo.save(rows);
+  }
+
+  /** Never-cleared, newest first — cleared notifications are excluded from every default view, never deleted. */
+  async list(recipientId: string): Promise<Notification[]> {
+    return this.repo.find({
+      where: { recipientId, clearedAt: IsNull() },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  async unreadCount(recipientId: string): Promise<number> {
+    return this.repo.count({ where: { recipientId, readAt: IsNull(), clearedAt: IsNull() } });
+  }
+
+  /**
+   * Scoped to `recipientId`, not just `id` — a notification's owner must
+   * match the caller, or this 404s exactly like a ticket outside a
+   * caller's brand scope does elsewhere in this codebase. Without this,
+   * any authenticated user could mark/clear anyone else's row by
+   * guessing a UUID.
+   */
+  async markRead(id: string, recipientId: string): Promise<Notification> {
+    const row = await this.findOwned(id, recipientId);
+    if (!row.readAt) {
+      row.readAt = new Date();
+      await this.repo.save(row);
+    }
+    return row;
+  }
+
+  async markAllRead(recipientId: string): Promise<{ updated: number }> {
+    const result = await this.repo.update(
+      { recipientId, readAt: IsNull(), clearedAt: IsNull() },
+      { readAt: new Date() },
+    );
+    return { updated: result.affected ?? 0 };
+  }
+
+  async clear(id: string, recipientId: string): Promise<Notification> {
+    const row = await this.findOwned(id, recipientId);
+    if (!row.clearedAt) {
+      row.clearedAt = new Date();
+      await this.repo.save(row);
+    }
+    return row;
+  }
+
+  private async findOwned(id: string, recipientId: string): Promise<Notification> {
+    const row = await this.repo.findOne({ where: { id, recipientId } });
+    if (!row) throw new NotFoundException(`Notification ${id} introuvable`);
+    return row;
+  }
+
+  // ── Operator test-send (nola-notify pipeline) ───────────────────────
+  //
+  // Predates the per-recipient model above and is otherwise unrelated to
+  // it — an ops "send a test email/SMS/WhatsApp" capability that
+  // publishes `nola.commands.notify.send` directly, same subject the
+  // auto-invite/billing/incident-bridge flows use in production. Kept
+  // in the same service/controller because both now live under
+  // `/notifications`, not because they share any data model.
 
   async sendTest(input: {
     channel: 'email' | 'sms' | 'whatsapp';

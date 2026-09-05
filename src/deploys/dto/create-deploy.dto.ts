@@ -1,4 +1,4 @@
-import { IsIn, IsOptional, IsString } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString } from 'class-validator';
 
 const STATUSES = ['success', 'rolled-back'] as const;
 
@@ -13,4 +13,6 @@ export class CreateDeployDto {
   status?: (typeof STATUSES)[number];
   @IsString() sha!: string;
   @IsString() changelog!: string;
+  /** The `deployment`-category ticket that approved this promotion. Omitted for dev deploys. */
+  @IsOptional() @IsInt() ticketId?: number;
 }

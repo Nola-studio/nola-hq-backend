@@ -1,17 +1,19 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { FindOptionsWhere, Repository } from 'typeorm';
 import { Deploy } from './deploy.entity';
 import { CreateDeployDto } from './dto/create-deploy.dto';
+import { Ticket } from '../tickets/ticket.entity';
 
 @Injectable()
 export class DeploysService {
   constructor(
     @InjectRepository(Deploy) private readonly repo: Repository<Deploy>,
+    @InjectRepository(Ticket) private readonly tickets: Repository<Ticket>,
   ) {}
 
   list(app?: string, env?: string) {
-    const where: Partial<Deploy> = {};
+    const where: FindOptionsWhere<Deploy> = {};
     if (app) where.app = app;
     if (env) where.env = env;
     return this.repo.find({ where, order: { id: 'DESC' }, take: 200 });
@@ -24,6 +26,10 @@ export class DeploysService {
   }
 
   async create(dto: CreateDeployDto) {
+    if (dto.ticketId !== undefined) {
+      const ticket = await this.tickets.findOne({ where: { id: dto.ticketId } });
+      if (!ticket) throw new NotFoundException(`Ticket ${dto.ticketId} introuvable`);
+    }
     const id = dto.id ?? (await this.nextId());
     return this.repo.save(
       this.repo.create({
@@ -36,6 +42,7 @@ export class DeploysService {
         status: dto.status ?? 'success',
         sha: dto.sha,
         changelog: dto.changelog,
+        ticketId: dto.ticketId ?? null,
       }),
     );
   }
