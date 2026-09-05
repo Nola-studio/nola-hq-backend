@@ -10,6 +10,7 @@ import {
 import { parseExecutionReference, summarize } from './execution-reference.parser';
 import { resolvePlacement } from './execution-placement';
 import { Capability, Domain } from '../domains/domain.entity';
+import { RoadmapInitiative } from '../roadmap/roadmap-initiative.entity';
 import { WorkItem } from '../work-items/work-item.entity';
 
 /**
@@ -56,6 +57,12 @@ export interface ImportReport {
   dryRun: boolean;
   counts: Record<ImportOutcome, number>;
   items: ImportedItem[];
+  /** Le projet déclaré par le document, tel qu'écrit. */
+  projectLabel: string | null;
+  /** Ce à quoi ce libellé s'est résolu — `null` s'il ne désigne rien de connu. */
+  projectId: string | null;
+  /** Ce que l'import a à dire et qui ne concerne aucun item en particulier. */
+  notes: string[];
 }
 
 /**
@@ -90,8 +97,41 @@ export class ExecutionImportService {
     @InjectRepository(Domain) private readonly domains: Repository<Domain>,
     @InjectRepository(Capability) private readonly capabilities: Repository<Capability>,
     @InjectRepository(WorkItem) private readonly workItems: Repository<WorkItem>,
+    @InjectRepository(RoadmapInitiative)
+    private readonly projects: Repository<RoadmapInitiative>,
     private readonly references: ExecutionReferencesService,
   ) {}
+
+  /**
+   * Résout « Projet : NolaHQ » contre le registre des projets.
+   *
+   * Sur la clé (`HQ`) ou sur le titre, sans distinction de casse — on écrit
+   * l'un ou l'autre selon ce qu'on a en tête. Une ambiguïté n'est pas
+   * tranchée au hasard : deux projets qui répondent au même libellé, c'est le
+   * document qui doit être précisé.
+   */
+  private async resolveDocumentProject(
+    label: string | null,
+  ): Promise<{ id: string | null; note: string | null }> {
+    if (!label) return { id: null, note: null };
+
+    const needle = label.trim().toLowerCase();
+    const matches = (await this.projects.find({ where: { archived: false } })).filter(
+      (p) => p.keyPrefix?.toLowerCase() === needle || p.title.trim().toLowerCase() === needle,
+    );
+
+    if (matches.length === 1) return { id: matches[0].id, note: null };
+    if (matches.length === 0) {
+      return {
+        id: null,
+        note: `Le document déclare « Projet : ${label} », qui ne correspond à aucun projet actif — les tickets entrent sans projet.`,
+      };
+    }
+    return {
+      id: null,
+      note: `« Projet : ${label} » désigne ${matches.length} projets — précisez-le dans le document ; les tickets entrent sans projet.`,
+    };
+  }
 
   /**
    * Reads a stored version and records what it declares. Writes nothing
@@ -115,6 +155,7 @@ export class ExecutionImportService {
         versionId: row.id,
         schemaVersion: MANIFEST_SCHEMA_VERSION,
         issues: parsed.issues,
+        projectLabel: parsed.project,
         parsedBy: actorEmail,
         parsedAt: new Date(),
       }),
@@ -130,6 +171,7 @@ export class ExecutionImportService {
           title: item.title,
           body: item.body,
           priority: item.priority,
+          surface: item.surface,
           sourceSectionId: item.sourceSectionId,
           sourceExcerptHash: item.sourceExcerptHash,
           sourceLine: item.line,
@@ -186,6 +228,21 @@ export class ExecutionImportService {
     const domainByCode = new Map((await this.domains.find()).map((d) => [d.code as string, d]));
     const capabilityByCode = new Map((await this.capabilities.find()).map((c) => [c.code, c]));
 
+    /**
+     * « Projet : NolaHQ » en tête du document.
+     *
+     * Il ne l'emporte jamais sur ce qu'un humain a posé dans HQ — ni sur le
+     * ticket, ni sur le référentiel : ce sont des décisions, et une ligne de
+     * document ne les révise pas. Il sert quand personne n'a rien dit, ce qui
+     * est le cas d'un lot qu'on vient de déposer.
+     *
+     * Un libellé qui ne désigne rien n'arrête pas l'import : les tickets
+     * entrent sans projet, et le rapport dit pourquoi — c'est une faute de
+     * frappe à corriger, pas une raison de perdre le lot.
+     */
+    const documentProject = await this.resolveDocumentProject(manifest.projectLabel);
+    const documentProjectId = documentProject.id;
+
     const importable = items.filter((item) => item.kind === 'epic' || item.kind === 'story');
     const existing = new Map(
       (
@@ -219,6 +276,9 @@ export class ExecutionImportService {
       dryRun,
       counts: { ...EMPTY_COUNTS },
       items: [],
+      projectLabel: manifest.projectLabel,
+      projectId: documentProjectId,
+      notes: documentProject.note ? [documentProject.note] : [],
     };
 
     /** Epic `sourceKey` → work item id, so stories can hang off their epic. */
@@ -301,7 +361,7 @@ export class ExecutionImportService {
            * Un projet déjà posé sur le ticket l'emporte — l'affecter à la main
            * est une décision, la propager est un défaut.
            */
-          projectId: current?.projectId ?? reference.projectId ?? null,
+          projectId: current?.projectId ?? reference.projectId ?? documentProjectId,
           title: item.title.slice(0, 200),
           description: item.body,
           type: item.kind === 'epic' ? 'epic' : 'story',
@@ -309,6 +369,10 @@ export class ExecutionImportService {
           priority: item.priority ?? 'P2',
           domainId: placement.domainId,
           capabilityId: placement.capabilityId,
+          // Ce que le document a dit, jamais deviné — et jamais écrasé par un
+          // ré-import muet : si le rédacteur a retiré la ligne, c'est le
+          // ticket qui reste classé, pas le document qui déclasse.
+          surface: item.surface ?? current?.surface ?? null,
           parentId: parentWorkItemId,
           reporter: actorEmail,
           sourceKind: 'manifest',

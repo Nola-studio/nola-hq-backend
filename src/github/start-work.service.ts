@@ -131,6 +131,9 @@ export class StartWorkService {
     const repositories = await this.repositories.allowedForWorkItem({
       projectId: item.projectId,
       domainId: item.domainId,
+      // Le côté du ticket, quand le document l'a dit : c'est ce qui fait qu'un
+      // projet portant un front et un back ne pose plus la question.
+      surface: item.surface,
     });
     if (repositories.length === 0) {
       return blocked(

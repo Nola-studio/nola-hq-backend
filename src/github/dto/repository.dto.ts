@@ -1,6 +1,11 @@
 import { Type } from 'class-transformer';
 import { IsBoolean, IsIn, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
-import { REPOSITORY_VISIBILITIES, type RepositoryVisibility } from '../repository.entity';
+import {
+  REPOSITORY_SIDES,
+  REPOSITORY_VISIBILITIES,
+  type RepositorySide,
+  type RepositoryVisibility,
+} from '../repository.entity';
 
 export class RegisterRepositoryDto {
   /**
@@ -17,6 +22,7 @@ export class RegisterRepositoryDto {
   @IsOptional() @IsUUID() productId?: string | null;
   @IsOptional() @IsUUID() domainId?: string | null;
   @IsOptional() @IsString() @MaxLength(160) steward?: string | null;
+  @IsOptional() @IsIn(REPOSITORY_SIDES as unknown as string[]) side?: RepositorySide | null;
   @IsOptional() @IsString() @MaxLength(64) externalId?: string | null;
 }
 
@@ -33,6 +39,8 @@ export class UpdateRepositoryDto {
   @IsOptional() @IsUUID() productId?: string | null;
   @IsOptional() @IsUUID() domainId?: string | null;
   @IsOptional() @IsString() @MaxLength(160) steward?: string | null;
+  /** Backend, frontend ou les deux — ce qui permet à « Start Work » de choisir. */
+  @IsOptional() @IsIn(REPOSITORY_SIDES as unknown as string[]) side?: RepositorySide | null;
   @IsOptional() @IsBoolean() @Type(() => Boolean) archived?: boolean;
 }
 

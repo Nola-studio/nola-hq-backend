@@ -53,6 +53,20 @@ export const WORK_ITEM_CATEGORIES = ['product', 'sales', 'brand', 'admin_legal',
 export type WorkItemCategory = (typeof WORK_ITEM_CATEGORIES)[number];
 
 /**
+ * De quel côté du produit le travail tombe.
+ *
+ * Distinct de `category`, qui dit la nature métier (produit, ventes, marque…) :
+ * celui-ci dit où le code se trouve, et c'est lui qui permet à « Start Work »
+ * de choisir seul entre le dépôt du front et celui du back quand un projet en
+ * autorise plusieurs.
+ *
+ * `null` est la valeur normale d'un ticket qui ne l'a pas dit — on ne devine
+ * pas un côté depuis un titre.
+ */
+export const WORK_ITEM_SURFACES = ['backend', 'frontend', 'fullstack'] as const;
+export type WorkItemSurface = (typeof WORK_ITEM_SURFACES)[number];
+
+/**
  * One piece of internal Nola Studio work. Support tickets deliberately live in
  * their own `tickets` table: a work item is authored and owned by the internal
  * team and always belongs to a roadmap initiative/project at creation time.
@@ -123,6 +137,9 @@ export class WorkItem {
   /** Nola-internal work classification (absorbed from Studio's tasks). */
   @Column({ type: 'varchar', nullable: true })
   category!: WorkItemCategory | null;
+
+  @Column({ type: 'varchar', length: 16, nullable: true })
+  surface!: WorkItemSurface | null;
 
   @Column({ type: 'numeric', precision: 8, scale: 2, name: 'hours_spent', nullable: true })
   hoursSpent!: string | null;

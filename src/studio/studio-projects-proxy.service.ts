@@ -600,6 +600,8 @@ export class StudioProjectsProxyService {
        * dit ce qu'est l'objet, l'autre à quoi il sert.
        */
       type: item.type,
+      /** Backend, frontend, les deux — dit par le document, jamais deviné. */
+      surface: item.surface,
       /** Rattachement fonctionnel (§4A) — `null` tant que rien n'a classé l'item. */
       domain: (item.domainId && context?.domains.get(item.domainId)) || null,
       /** L'epic dont ce ticket dépend, quand il en a un. */

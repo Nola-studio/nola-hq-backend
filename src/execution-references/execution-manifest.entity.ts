@@ -1,5 +1,10 @@
 import { Column, Entity, Index, JoinColumn, ManyToOne, OneToMany, PrimaryGeneratedColumn } from 'typeorm';
-import type { ParsedItemKind, ParsedPriority, ParseIssue } from './execution-reference.parser';
+import type {
+  ParsedItemKind,
+  ParsedPriority,
+  ParseIssue,
+  ParsedSurface,
+} from './execution-reference.parser';
 
 export const MANIFEST_SCHEMA_VERSION = '1';
 
@@ -27,6 +32,14 @@ export class ExecutionManifest {
   /** Errors and warnings the parser raised, kept so a reviewer sees what it could not read. */
   @Column({ type: 'simple-json', name: 'issues', default: '[]' })
   issues!: ParseIssue[];
+
+  /**
+   * Le projet que le document déclare, tel qu'écrit — « NolaHQ ». Gardé brut :
+   * c'est l'import qui le résout contre le registre, et un document dont le
+   * projet a été renommé doit continuer à dire ce qu'il disait.
+   */
+  @Column({ type: 'varchar', length: 160, name: 'project_label', nullable: true })
+  projectLabel!: string | null;
 
   @Column({ type: 'varchar', length: 160, name: 'parsed_by' })
   parsedBy!: string;
@@ -76,6 +89,10 @@ export class ExecutionManifestItem {
 
   @Column({ type: 'varchar', length: 4, nullable: true })
   priority!: ParsedPriority | null;
+
+  /** Backend, frontend, les deux — ce que le document a dit, rien de deviné. */
+  @Column({ type: 'varchar', length: 16, nullable: true })
+  surface!: ParsedSurface | null;
 
   @Column({ type: 'varchar', length: 200, name: 'source_section_id' })
   sourceSectionId!: string;
