@@ -90,4 +90,27 @@ async function bootstrap() {
   logger.log(`Swagger UI at http://localhost:${port}/docs`);
 }
 
+/**
+ * Filet de sécurité, pas une excuse.
+ *
+ * Les écouteurs d'évènements démarrent en `void this.bootstrap()` : leur
+ * promesse n'est attendue par personne. Une exception qui s'en échappe est un
+ * rejet non traité, et Node arrête le processus — c'est ainsi qu'un refus de
+ * `ensureStream` sur l'ingestion de support a emporté Nolaa HQ tout entier en
+ * production, facturation et tickets compris.
+ *
+ * Chaque écouteur attrape désormais ses propres erreurs ; ce garde-fou est là
+ * pour le prochain qu'on écrira en l'oubliant. Il journalise et laisse
+ * l'application debout : une ingestion muette se répare à froid, un processus
+ * mort réveille tout le monde.
+ */
+process.on('unhandledRejection', (reason: unknown) => {
+  const logger = new Logger('UnhandledRejection');
+  logger.error(
+    reason instanceof Error
+      ? `${reason.message}\n${reason.stack ?? ''}`
+      : String(reason),
+  );
+});
+
 void bootstrap();
