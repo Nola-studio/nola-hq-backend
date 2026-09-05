@@ -35,6 +35,7 @@ import { WorkItemsService } from './work-items.service';
 import { WorkPlanningService } from './work-planning.service';
 import { StartWorkService } from '../github/start-work.service';
 import { StartWorkDto } from '../github/dto/start-work.dto';
+import { OpenPullRequestDto } from '../github/dto/open-pull-request.dto';
 
 @ApiBearerAuth()
 @ApiTags('work-items')
@@ -114,6 +115,19 @@ export class WorkItemsController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.startWork.startWork(id, dto, user.email);
+  }
+
+  @Post(':id/pull-request')
+  @HqRoles(HqRole.Operator)
+  @ApiOperation({
+    summary: 'Ouvre la pull request de la branche du ticket, et le passe en revue.',
+  })
+  openPullRequest(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: OpenPullRequestDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.startWork.openPullRequest(id, dto, user.email);
   }
 
   @Get(':id/branches')

@@ -6,6 +6,7 @@ import { RoadmapInitiative } from '../roadmap/roadmap-initiative.entity';
 import { RoadmapMilestone } from '../roadmap/roadmap-milestone.entity';
 import { WorkItemsModule } from '../work-items/work-items.module';
 import { WorkItem } from '../work-items/work-item.entity';
+import { ReleasesModule } from '../releases/releases.module';
 // Le domaine fonctionnel (§4A) — à ne pas confondre avec `StudioDomain`,
 // qui est un nom de domaine internet.
 import { Domain } from '../domains/domain.entity';
@@ -43,6 +44,9 @@ import { StudioResolvedCloserScheduler } from './studio-resolved-closer.schedule
 
 @Module({
   imports: [
+    // Le rattachement d'un ticket à une version passe par ce service : la
+    // cascade vers les sous-tâches n'a pas à être réécrite ici.
+    ReleasesModule,
     TypeOrmModule.forFeature([
       Domain,
       RoadmapInitiative,

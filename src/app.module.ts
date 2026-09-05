@@ -25,6 +25,7 @@ import { TicketsModule } from './tickets/tickets.module';
 import { InvoicesModule } from './invoices/invoices.module';
 import { MomoModule } from './momo/momo.module';
 import { DeploysModule } from './deploys/deploys.module';
+import { ReleasesModule } from './releases/releases.module';
 import { AuditModule } from './audit/audit.module';
 import { LogsModule } from './logs/logs.module';
 import { AnalyticsModule } from './analytics/analytics.module';
@@ -124,6 +125,7 @@ import { validate } from './config/env.validation';
     InvoicesModule,
     MomoModule,
     DeploysModule,
+    ReleasesModule,
     AuditModule,
     LogsModule,
     AnalyticsModule,

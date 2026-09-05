@@ -67,7 +67,8 @@ export class RepositoriesService {
       });
     }
 
-    return qb.orderBy('r.owner', 'ASC').addOrderBy('r.name', 'ASC').getMany();
+    const rows = await qb.orderBy('r.owner', 'ASC').addOrderBy('r.name', 'ASC').getMany();
+    return this.withProjectIds(rows);
   }
 
   /**
@@ -110,7 +111,27 @@ export class RepositoriesService {
   async findOne(id: string): Promise<CodeRepository> {
     const found = await this.repos.findOne({ where: { id }, relations: ['product', 'domain'] });
     if (!found) throw new NotFoundException(`Dépôt ${id} introuvable`);
-    return found;
+    const [withIds] = await this.withProjectIds([found]);
+    return withIds;
+  }
+
+  /**
+   * Rattache leurs projets aux dépôts, en une requête pour toute la page.
+   *
+   * Sans ça, l'écran devrait demander les projets dépôt par dépôt — vingt
+   * dépôts, vingt allers-retours pour afficher des étiquettes.
+   */
+  private async withProjectIds(rows: CodeRepository[]): Promise<CodeRepository[]> {
+    if (rows.length === 0) return rows;
+    const links = await this.links.find({
+      where: { repositoryId: In(rows.map((r) => r.id)) },
+    });
+    const byRepo = new Map<string, string[]>();
+    for (const link of links) {
+      byRepo.set(link.repositoryId, [...(byRepo.get(link.repositoryId) ?? []), link.projectId]);
+    }
+    for (const row of rows) row.projectIds = byRepo.get(row.id) ?? [];
+    return rows;
   }
 
   /** Retrouve par `owner/name`, sans distinguer la casse — comme GitHub. */

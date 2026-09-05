@@ -9,6 +9,7 @@ import {
 import { RoadmapMilestone } from '../roadmap/roadmap-milestone.entity';
 import { RoadmapService, type RoadmapInitiativeView } from '../roadmap/roadmap.service';
 import { Domain } from '../domains/domain.entity';
+import { ReleasesService } from '../releases/releases.service';
 import { TeamMember } from '../team/team-member.entity';
 import { StudioNotifyService } from './studio-notify.service';
 import { BusinessUnitResolverService } from '../company/business-unit-resolver.service';
@@ -120,6 +121,7 @@ export class StudioProjectsProxyService {
     // domaine/epic en a besoin.
     @InjectRepository(Domain)
     private readonly domains: Repository<Domain>,
+    private readonly releases: ReleasesService,
   ) {}
 
   // ── projects ─────────────────────────────────────────────────────
@@ -335,6 +337,7 @@ export class StudioProjectsProxyService {
     const qb = this.tasks.createQueryBuilder('w').leftJoinAndSelect('w.meeting', 'meeting');
     if (filter.category) qb.andWhere('w.category = :category', { category: filter.category });
     if (filter.project) qb.andWhere('w.projectId = :project', { project: filter.project });
+    if (filter.release) qb.andWhere('w.releaseId = :release', { release: filter.release });
     if (filter.status) {
       qb.andWhere('w.status = :status', { status: STUDIO_STATUS_TO_WORK_ITEM_STATUS[filter.status] });
     }
@@ -376,6 +379,7 @@ export class StudioProjectsProxyService {
       limit: query.limit,
       q: query.q,
       projectId: query.project,
+      releaseId: query.release,
       status: query.status ? STUDIO_STATUS_TO_WORK_ITEM_STATUS[query.status] : undefined,
     } as ListWorkItemsDto);
     const [emailById, context] = await Promise.all([this.emailById(), this.taskContext(result.items)]);
@@ -462,6 +466,17 @@ export class StudioProjectsProxyService {
         : dto.assigneeEmail === null
           ? null
           : await this.requireAssigneeId(dto.assigneeEmail);
+    /**
+     * La version passe par son service, pas par une mise à jour de champ :
+     * posée sur un epic elle doit descendre sur tout ce qu'il porte, et cette
+     * règle n'a pas à être réécrite ici. Faite avant l'écriture du reste, pour
+     * qu'un refus — version inconnue — ne laisse pas un ticket à moitié
+     * modifié.
+     */
+    if (dto.releaseId !== undefined) {
+      await this.releases.assignToWorkItem(workItemId, dto.releaseId);
+    }
+
     const updated = await this.workItems.update(
       workItemId,
       compact({
@@ -602,6 +617,8 @@ export class StudioProjectsProxyService {
       type: item.type,
       /** Backend, frontend, les deux — dit par le document, jamais deviné. */
       surface: item.surface,
+      /** La version visée — héritée de l'epic quand le ticket en dépend. */
+      releaseId: item.releaseId,
       /** Rattachement fonctionnel (§4A) — `null` tant que rien n'a classé l'item. */
       domain: (item.domainId && context?.domains.get(item.domainId)) || null,
       /** L'epic dont ce ticket dépend, quand il en a un. */

@@ -18,6 +18,8 @@ sections est conservée telle quelle et devient la description du ticket.
 ```markdown
 # Lot « Facturation par échéance »
 
+**Version :** 1.0
+
 Projet : NolaHQ
 Auteur : Greg · septembre 2026
 
@@ -26,6 +28,7 @@ Auteur : Greg · septembre 2026
 Priorité : P0
 Domaine : D08
 Côté : backend
+Version cible : 1.1.0
 
 Chaque abonnement doit produire sa facture trois jours avant le
 renouvellement, et l'envoyer au contact de facturation du tenant.
@@ -68,6 +71,21 @@ classera dans HQ, sur le ticket.
   raison d'avoir déplacé une section.
 - Le **niveau de titre est libre** : `#`, `##`, `####` — tous acceptés.
 - Le séparateur peut être `—`, `–` ou `-`.
+
+### La version — obligatoire pour le script
+
+```
+**Version :** 1.0
+```
+
+Les astérisques comptent ici : le script la cherche sous cette forme exacte, et
+s'arrête s'il ne la trouve pas. Elle peut aussi se passer en second argument
+(`import-referentiel.sh mon-lot.md 1.0`), mais l'écrire dans le document est
+préférable — **le numéro qui fait foi est celui que le document déclare**, pas
+celui qu'on retape en ligne de commande.
+
+Incrémentez-la à chaque dépôt d'une version modifiée du même document. C'est
+elle qui permet le rapprochement : inchangé, modifié, ajouté, retiré.
 
 ### Le projet — une fois, en tête
 
@@ -113,6 +131,23 @@ candidat, et la branche s'ouvre sans question.
 
 Facultatif, comme le reste. Sans lui, rien n'est restreint — on ne devine pas
 un côté depuis un titre.
+
+### La version cible — facultative
+
+```
+Version cible : 1.1.0
+```
+
+Le numéro d'une version déclarée dans **Versions** (le registre REL-00). Le
+« v » est toléré : `v1.1.0` et `1.1.0` désignent la même chose.
+
+Elle descend sur les stories de l'epic — on ne livre pas la moitié d'un epic.
+Une version déjà posée dans HQ l'emporte : replanifier est une décision, et un
+ré-import ne la révise pas.
+
+Un numéro que le registre ne connaît pas n'arrête pas l'import : les tickets
+entrent sans version et le rapport le nomme. Créer la version au passage serait
+pire — planifier une livraison n'est pas un effet de bord d'un import.
 
 ### La priorité
 
@@ -193,8 +228,25 @@ User stories :
 ## Déposer le document
 
 ```bash
-scripts/import-referentiel.sh chemin/vers/mon-lot.md
+HQ_KEY=REF-FACTURATION \
+HQ_TITLE="Facturation par échéance" \
+scripts/import-referentiel.sh docs/mon-lot.md
 ```
+
+### ⚠️ La clé décide de tout
+
+`HQ_KEY` identifie le **référentiel**, pas le fichier. Déposer un document sous
+une clé existante en fait une **nouvelle version de ce référentiel-là** — et le
+rapprochement marque alors « retiré » tout ce que la version précédente
+déclarait et que celle-ci ne déclare plus.
+
+Autrement dit : lancer le script sans `HQ_KEY` sur un lot de facturation le
+déposerait comme une v2 de `REF-NOLAAHQ`, et **retirerait les 106 tickets du
+référentiel v1.3**. Rien n'est détruit — le référentiel garde ses versions, et
+les tickets acceptés sont « dépréciés » plutôt que supprimés — mais c'est une
+soirée à défaire.
+
+**Un lot de travail distinct veut sa propre clé.** Une seule règle à retenir.
 
 Le dépôt se fait en deux temps : le document est d'abord **analysé** — vous
 recevez le compte d'epics et de stories, et la liste des anomalies — puis
@@ -218,6 +270,7 @@ inchangé, modifié, ajouté, retiré. Rien n'est écrasé en silence.
 | `Côté : mobile` (inconnu) | Avertissement : le côté est ignoré, l'item entre. |
 | `Projet :` inconnu ou ambigu | Les tickets entrent sans projet, le rapport dit pourquoi. |
 | Deux lignes `Projet :` | Avertissement : la première est retenue. |
+| `Version cible :` inconnue du registre | Les tickets entrent sans version, le rapport la nomme. |
 
 Une anomalie de niveau *avertissement* n'empêche pas l'import ; une *erreur*
 l'arrête. Le rapport les nomme toutes, avec leur ligne.

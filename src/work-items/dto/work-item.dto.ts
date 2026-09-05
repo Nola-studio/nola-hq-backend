@@ -34,6 +34,8 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 export class ListWorkItemsDto extends PaginationDto {
   @IsOptional() @IsUUID() projectId?: string;
   @IsOptional() @IsUUID() sprintId?: string;
+  /** La version visée (REL-00) — « montre-moi ce qui part en 1.4 ». */
+  @IsOptional() @IsUUID() releaseId?: string;
   @IsOptional() @IsIn(WORK_ITEM_STATUSES as unknown as string[])
   status?: WorkItemStatus;
   @IsOptional() @IsIn(WORK_ITEM_PRIORITIES as unknown as string[])

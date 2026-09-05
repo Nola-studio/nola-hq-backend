@@ -8,6 +8,8 @@ export class ListTasksDto {
   @IsOptional() @IsEmail() assignee?: string;
   @IsOptional() @IsIn(TASK_CATEGORIES as unknown as string[]) category?: WorkItemCategory;
   @IsOptional() @IsUUID() project?: string;
+  /** La version visée — ce qui part en 1.4, et rien d'autre. */
+  @IsOptional() @IsUUID() release?: string;
   @IsOptional() @IsIn(TASK_STATUSES as unknown as string[]) status?: StudioTaskStatus;
   /** Only tasks whose due date has passed and are not done. */
   @IsOptional()

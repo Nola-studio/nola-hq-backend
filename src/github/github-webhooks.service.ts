@@ -235,18 +235,44 @@ export class GithubWebhooksService {
    * Fermée sans fusion, on ne touche à rien : la branche existe toujours et
    * le travail peut reprendre. Seule la fusion est un fait acquis.
    */
+  /**
+   * Ce qu'une pull request dit de la branche d'un ticket.
+   *
+   * Deux choses distinctes, et les confondre coûterait cher :
+   *
+   *  - **L'état de la PR** suit GitHub à chaque événement, y compris quand
+   *    elle est ouverte depuis un terminal ou l'interface web. C'est ce qui
+   *    fait que le tiroir montre « PR #12 » sans qu'on ait cliqué dans HQ.
+   *  - **L'état de la branche** ne bouge qu'à la fusion. Une PR fermée sans
+   *    fusion laisse la branche vivante — le travail continue, et le marquer
+   *    « fusionné » ferait disparaître du travail en cours.
+   */
   private async onPullRequest(
     payload: Record<string, unknown>,
     repository: CodeRepository,
   ): Promise<void> {
-    if (payload.action !== 'closed') return;
-    const pr = payload.pull_request as { merged?: boolean; head?: { ref?: string } } | undefined;
-    if (!pr?.merged || !pr.head?.ref) return;
+    const pr = payload.pull_request as
+      | { number?: number; html_url?: string; merged?: boolean; state?: string; head?: { ref?: string } }
+      | undefined;
+    const ref = pr?.head?.ref;
+    if (!pr || !ref) return;
 
-    await this.branches.update(
-      { repositoryId: repository.id, name: stripRefsHeads(pr.head.ref), state: 'open' },
-      { state: 'merged', updatedAt: new Date() },
-    );
+    const name = stripRefsHeads(ref);
+    const branch = await this.branches.findOne({ where: { repositoryId: repository.id, name } });
+    if (!branch) return;
+
+    const now = new Date();
+    if (pr.number) {
+      branch.prNumber = pr.number;
+      branch.prUrl = pr.html_url ?? branch.prUrl;
+      branch.prState = pr.merged ? 'merged' : pr.state === 'closed' ? 'closed' : 'open';
+    }
+    // La fusion, et elle seule, ferme la branche côté HQ.
+    if (payload.action === 'closed' && pr.merged && branch.state === 'open') {
+      branch.state = 'merged';
+    }
+    branch.updatedAt = now;
+    await this.branches.save(branch);
   }
 
   /** Le journal d'un dépôt — ce que GitHub a raconté à son sujet. */

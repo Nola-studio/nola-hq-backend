@@ -50,6 +50,27 @@ export interface StartWorkReadiness {
   existing: WorkItemBranch[];
 }
 
+export interface OpenPullRequestResult {
+  branch: WorkItemBranch;
+  /** `false` quand la PR existait déjà — ouverte depuis GitHub, ou double clic. */
+  created: boolean;
+  workItem: WorkItem;
+}
+
+/**
+ * Le corps de la pull request.
+ *
+ * Court et factuel : un lien retour vers le ticket, sa place dans le
+ * référentiel. Recopier la description entière ferait diverger deux textes
+ * qui doivent dire la même chose — HQ reste la source.
+ */
+function pullRequestBody(item: WorkItem): string {
+  const lines = [`Ticket **${item.reference ?? `#${item.id}`}** — ${item.title}`];
+  if (item.type) lines.push('', `Type : ${item.type}`);
+  lines.push('', '_Ouverte depuis Nolaa HQ._');
+  return lines.join('\n');
+}
+
 export interface StartWorkResult {
   branch: WorkItemBranch;
   /** `false` quand la branche existait déjà et qu'on l'a simplement reliée. */
@@ -242,6 +263,111 @@ export class StartWorkService {
     );
 
     return { branch, created, workItem: item };
+  }
+
+  /**
+   * Ouvre la pull request d'une branche (ENG-08, lot 2.5).
+   *
+   * Le même ordre que `startWork`, pour la même raison : GitHub d'abord, HQ
+   * ensuite. Un échec réseau après un passage en revue laisserait un ticket
+   * « en revue » sans rien à relire.
+   *
+   * Le titre reprend la clé du ticket — c'est ce qui fait qu'un reviewer
+   * reconnaît de quoi il s'agit sans ouvrir HQ — et le corps porte le lien
+   * retour. Ni l'un ni l'autre n'est deviné : ils viennent du ticket.
+   */
+  async openPullRequest(
+    workItemId: number,
+    options: { branchId?: string; draft?: boolean },
+    actor: string,
+  ): Promise<OpenPullRequestResult> {
+    const item = await this.findItem(workItemId);
+    const branches = await this.branchesOf(workItemId);
+    const branch = this.pickBranch(branches, options.branchId);
+
+    if (branch.prNumber && branch.prState === 'open') {
+      throw new ConflictException(
+        `La pull request #${branch.prNumber} est déjà ouverte pour ${branch.name}.`,
+      );
+    }
+
+    const repository = branch.repository;
+    if (!repository) {
+      throw new BadRequestException("Le dépôt de cette branche n'est plus connu de HQ.");
+    }
+
+    const { created, pull } = await this.github.createPullRequest(
+      repository.owner,
+      repository.name,
+      {
+        title: `${item.reference ?? `#${item.id}`} — ${item.title}`.slice(0, 250),
+        head: branch.name,
+        base: branch.baseBranch,
+        body: pullRequestBody(item),
+        draft: options.draft ?? false,
+      },
+    );
+
+    const now = new Date();
+    branch.prNumber = pull.number;
+    branch.prUrl = pull.html_url;
+    branch.prState = pull.merged_at ? 'merged' : pull.state === 'closed' ? 'closed' : 'open';
+    branch.updatedAt = now;
+    await this.branches.save(branch);
+
+    /**
+     * Ouvrir une pull request, c'est demander une revue. Le statut suit —
+     * mais jamais à reculons : un ticket déjà résolu ne redevient pas « en
+     * revue » parce qu'on ouvre une PR tardive.
+     */
+    if (item.status === 'in_progress' || item.status === 'todo') {
+      item.status = 'review';
+      item.updatedAt = now;
+      await this.items.save(item);
+    }
+
+    await this.events.save(
+      this.events.create({
+        workItemId,
+        actor,
+        action: 'pull_request_opened',
+        meta: {
+          branch: branch.name,
+          repository: `${repository.owner}/${repository.name}`,
+          number: pull.number,
+          url: pull.html_url,
+          createdByHq: created,
+        },
+        createdAt: now,
+      }),
+    );
+
+    return { branch, created, workItem: item };
+  }
+
+  /**
+   * Sur quelle branche ouvrir. Sans précision, la seule ouverte — et s'il y
+   * en a plusieurs, on demande plutôt que de choisir : une PR s'ouvre sur un
+   * travail précis.
+   */
+  private pickBranch(branches: WorkItemBranch[], requested?: string): WorkItemBranch {
+    if (requested) {
+      const found = branches.find((b) => b.id === requested);
+      if (!found) throw new NotFoundException('Cette branche ne se rapporte pas à ce ticket.');
+      return found;
+    }
+    const open = branches.filter((b) => b.state === 'open');
+    if (open.length === 0) {
+      throw new BadRequestException(
+        "Ce ticket n'a aucune branche ouverte — démarrez le travail d'abord.",
+      );
+    }
+    if (open.length > 1) {
+      throw new BadRequestException(
+        `Ce ticket a ${open.length} branches ouvertes — précisez laquelle.`,
+      );
+    }
+    return open[0];
   }
 
   /** Les branches d'un ticket, pour son tiroir. */

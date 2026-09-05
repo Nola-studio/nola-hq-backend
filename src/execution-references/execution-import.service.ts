@@ -11,6 +11,7 @@ import { parseExecutionReference, summarize } from './execution-reference.parser
 import { resolvePlacement } from './execution-placement';
 import { Capability, Domain } from '../domains/domain.entity';
 import { RoadmapInitiative } from '../roadmap/roadmap-initiative.entity';
+import { Release } from '../releases/release.entity';
 import { WorkItem } from '../work-items/work-item.entity';
 
 /**
@@ -99,6 +100,8 @@ export class ExecutionImportService {
     @InjectRepository(WorkItem) private readonly workItems: Repository<WorkItem>,
     @InjectRepository(RoadmapInitiative)
     private readonly projects: Repository<RoadmapInitiative>,
+    @InjectRepository(Release)
+    private readonly releases: Repository<Release>,
     private readonly references: ExecutionReferencesService,
   ) {}
 
@@ -172,6 +175,7 @@ export class ExecutionImportService {
           body: item.body,
           priority: item.priority,
           surface: item.surface,
+          targetVersion: item.targetVersion,
           sourceSectionId: item.sourceSectionId,
           sourceExcerptHash: item.sourceExcerptHash,
           sourceLine: item.line,
@@ -240,8 +244,33 @@ export class ExecutionImportService {
      * entrent sans projet, et le rapport dit pourquoi — c'est une faute de
      * frappe à corriger, pas une raison de perdre le lot.
      */
+    const report0Notes: string[] = [];
     const documentProject = await this.resolveDocumentProject(manifest.projectLabel);
     const documentProjectId = documentProject.id;
+
+    /**
+     * « Version cible : 1.4 » se résout contre le registre, une fois pour tout
+     * le lot — un document qui vise trois versions ne doit pas faire trois
+     * requêtes par ticket.
+     *
+     * Un numéro qui ne désigne rien n'arrête pas l'import : les tickets
+     * entrent sans version, et le rapport le dit. Créer la version au passage
+     * serait pire — planifier une livraison n'est pas un effet de bord d'un
+     * import.
+     */
+    const citedVersions = [...new Set(items.map((i) => i.targetVersion).filter((v): v is string => !!v))];
+    const releaseByVersion = new Map<string, string>();
+    if (citedVersions.length > 0) {
+      const known = await this.releases.find({ where: { version: In(citedVersions) } });
+      for (const release of known) releaseByVersion.set(release.version, release.id);
+      const unknown = citedVersions.filter((v) => !releaseByVersion.has(v));
+      if (unknown.length > 0) {
+        documentProject.note = documentProject.note ?? null;
+        report0Notes.push(
+          `Version(s) inconnue(s) du registre : ${unknown.join(', ')} — les tickets concernés entrent sans version.`,
+        );
+      }
+    }
 
     const importable = items.filter((item) => item.kind === 'epic' || item.kind === 'story');
     const existing = new Map(
@@ -278,7 +307,7 @@ export class ExecutionImportService {
       items: [],
       projectLabel: manifest.projectLabel,
       projectId: documentProjectId,
-      notes: documentProject.note ? [documentProject.note] : [],
+      notes: [...(documentProject.note ? [documentProject.note] : []), ...report0Notes],
     };
 
     /** Epic `sourceKey` → work item id, so stories can hang off their epic. */
@@ -373,6 +402,14 @@ export class ExecutionImportService {
           // ré-import muet : si le rédacteur a retiré la ligne, c'est le
           // ticket qui reste classé, pas le document qui déclasse.
           surface: item.surface ?? current?.surface ?? null,
+          /**
+           * La version visée, quand le document la nomme et que le registre la
+           * connaît. Une version déjà posée dans HQ l'emporte : la replanifier
+           * est une décision, et un ré-import ne la révise pas.
+           */
+          releaseId:
+            current?.releaseId ??
+            (item.targetVersion ? releaseByVersion.get(item.targetVersion) ?? null : null),
           parentId: parentWorkItemId,
           reporter: actorEmail,
           sourceKind: 'manifest',

@@ -30,6 +30,8 @@ function makeService({
   branches = [] as Partial<WorkItemBranch>[],
   branchExists = false,
   shaFails = false,
+  pullExists = false,
+  pullFails = false,
 } = {}) {
   const savedItems: WorkItem[] = [];
   const savedBranches: WorkItemBranch[] = [];
@@ -45,6 +47,7 @@ function makeService({
 
   const branchRepo = {
     find: mock(async () => branches),
+    findOne: mock(async () => branches[0] ?? null),
     create: mock((b: WorkItemBranch) => b),
     save: mock(async (b: WorkItemBranch) => {
       savedBranches.push(b);
@@ -73,6 +76,19 @@ function makeService({
       return 'abc1234def';
     }),
     createBranch: mock(async () => ({ created: !branchExists })),
+    createPullRequest: mock(async (_o: string, _n: string, input: Record<string, unknown>) => {
+      if (pullFails) throw new Error('GitHub a répondu 403 : Resource not accessible');
+      return {
+        created: !pullExists,
+        pull: {
+          number: 12,
+          html_url: 'https://github.com/nola-studio/nola-hq/pull/12',
+          state: 'open' as const,
+          merged_at: null,
+          draft: Boolean(input.draft),
+        },
+      };
+    }),
   } as never;
 
   return {
@@ -322,5 +338,131 @@ describe('startWork', () => {
       await expect(svc.startWork(1, {}, 'greg@nolaa.dev')).rejects.toThrow();
       expect(github.createBranch).not.toHaveBeenCalled();
     });
+  });
+});
+
+/**
+ * Ouvrir la pull request depuis le ticket (lot 2.5).
+ *
+ * Le même ordre que « Start Work », pour la même raison : GitHub d'abord, HQ
+ * ensuite. Un échec réseau après un passage en revue laisserait un ticket
+ * « en revue » sans rien à relire.
+ */
+describe('openPullRequest', () => {
+  const openBranch = (over: Partial<WorkItemBranch> = {}) =>
+    ({
+      id: 'b1',
+      workItemId: 1,
+      repositoryId: 'repo-1',
+      name: 'feature/GOV-01-registre',
+      baseBranch: 'main',
+      state: 'open',
+      prNumber: null,
+      prUrl: null,
+      prState: null,
+      repository: REPO,
+      ...over,
+    }) as WorkItemBranch;
+
+  test('la PR reprend la clé du ticket dans son titre', async () => {
+    const { svc, github } = makeService({ branches: [openBranch()] });
+    await svc.openPullRequest(1, {}, 'greg@nolaa.dev');
+
+    const input = (github as never as { createPullRequest: { mock: { calls: unknown[][] } } })
+      .createPullRequest.mock.calls[0][2] as Record<string, string>;
+    expect(input.title).toContain('GOV-01');
+    expect(input.head).toBe('feature/GOV-01-registre');
+    expect(input.base).toBe('main');
+  });
+
+  test('le numéro, l’URL et l’état sont retenus sur la branche', async () => {
+    const { svc, savedBranches } = makeService({ branches: [openBranch()] });
+    const result = await svc.openPullRequest(1, {}, 'greg@nolaa.dev');
+
+    expect(result.branch.prNumber).toBe(12);
+    expect(result.branch.prUrl).toContain('/pull/12');
+    expect(result.branch.prState).toBe('open');
+    expect(savedBranches).toHaveLength(1);
+  });
+
+  /** Ouvrir une PR, c'est demander une revue : le statut suit. */
+  test('le ticket passe en revue', async () => {
+    const { svc, savedItems } = makeService({
+      workItem: item({ status: 'in_progress' }),
+      branches: [openBranch()],
+    });
+    await svc.openPullRequest(1, {}, 'greg@nolaa.dev');
+
+    expect(savedItems[0]?.status).toBe('review');
+  });
+
+  /** Mais jamais à reculons : un ticket résolu ne redevient pas « en revue ». */
+  test('un ticket déjà résolu ne recule pas', async () => {
+    const { svc, savedItems } = makeService({
+      workItem: item({ status: 'resolved' }),
+      branches: [openBranch()],
+    });
+    await svc.openPullRequest(1, {}, 'greg@nolaa.dev');
+
+    expect(savedItems).toHaveLength(0);
+  });
+
+  /**
+   * Quelqu'un a pu l'ouvrir depuis GitHub entre-temps. On la relie, et le
+   * journal dit qu'on ne l'a pas créée.
+   */
+  test('une PR déjà existante est reliée, pas dupliquée', async () => {
+    const { svc, events } = makeService({ branches: [openBranch()], pullExists: true });
+    const result = await svc.openPullRequest(1, {}, 'greg@nolaa.dev');
+
+    expect(result.created).toBe(false);
+    expect(events[0]?.meta.createdByHq).toBe(false);
+  });
+
+  test('rouvrir quand HQ la connaît déjà ouverte est un conflit', async () => {
+    const { svc } = makeService({
+      branches: [openBranch({ prNumber: 12, prState: 'open' })],
+    });
+
+    expect(svc.openPullRequest(1, {}, 'greg@nolaa.dev')).rejects.toThrow(/#12/);
+  });
+
+  test('sans branche ouverte, on dit de démarrer le travail d’abord', async () => {
+    const { svc } = makeService({ branches: [] });
+    expect(svc.openPullRequest(1, {}, 'greg@nolaa.dev')).rejects.toThrow(/démarrez le travail/);
+  });
+
+  /** Deux branches ouvertes, c'est une question — on la pose. */
+  test('plusieurs branches ouvertes ⇒ on demande laquelle', async () => {
+    const { svc } = makeService({
+      branches: [openBranch(), openBranch({ id: 'b2', name: 'feature/GOV-01-autre' })],
+    });
+    expect(svc.openPullRequest(1, {}, 'greg@nolaa.dev')).rejects.toThrow(/précisez laquelle/);
+  });
+
+  test('une branche précisée est utilisée telle quelle', async () => {
+    const second = openBranch({ id: 'b2', name: 'feature/GOV-01-autre' });
+    const { svc, github } = makeService({ branches: [openBranch(), second] });
+
+    await svc.openPullRequest(1, { branchId: 'b2' }, 'greg@nolaa.dev');
+    const input = (github as never as { createPullRequest: { mock: { calls: unknown[][] } } })
+      .createPullRequest.mock.calls[0][2] as Record<string, string>;
+    expect(input.head).toBe('feature/GOV-01-autre');
+  });
+
+  /**
+   * GitHub d'abord, HQ ensuite : un refus ne doit laisser ni statut avancé ni
+   * lien de PR sur une branche qui n'en a pas.
+   */
+  test('un refus de GitHub ne change rien dans HQ', async () => {
+    const { svc, savedItems, savedBranches } = makeService({
+      branches: [openBranch()],
+      pullFails: true,
+    });
+
+    expect(svc.openPullRequest(1, {}, 'greg@nolaa.dev')).rejects.toThrow(/403/);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(savedItems).toHaveLength(0);
+    expect(savedBranches).toHaveLength(0);
   });
 });
