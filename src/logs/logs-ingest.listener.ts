@@ -55,7 +55,9 @@ export class LogsIngestListener
   private eventBus: EventBus | null = null;
   private readonly enabled: boolean;
 
-  private static readonly STREAM = 'NOLA_HQ_EVENTS';
+  /** Voir `SupportIngestListener` : le flux n'appartient pas toujours à HQ. */
+  private readonly stream: string;
+  private static readonly DEFAULT_STREAM = 'NOLA_HQ_EVENTS';
   private static readonly STREAM_SUBJECTS = ['nola.events.>'];
   private static readonly SOURCES: Source[] = [
     {
@@ -82,6 +84,9 @@ export class LogsIngestListener
   ) {
     this.enabled =
       (this.config.get<string>('NOLA_HQ_LOG_INGEST') ?? 'true') !== 'false';
+    this.stream =
+      this.config.get<string>('NOLA_HQ_EVENTS_STREAM') ??
+      LogsIngestListener.DEFAULT_STREAM;
   }
 
   async onApplicationBootstrap(): Promise<void> {
@@ -113,17 +118,29 @@ export class LogsIngestListener
     try {
       this.eventBus = new EventBus(this.nolaClient.getClient());
       await this.eventBus.init();
+    } catch (err: unknown) {
+      this.logger.error(
+        `CRITICAL: Log ingestion bus init failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return;
+    }
 
+    // Comme pour l'ingestion de support : déclarer le flux est une commodité.
+    // Un refus — le plus souvent parce qu'un flux de plateforme couvre déjà
+    // « nola.events.> » — ne doit pas emporter l'application entière.
+    try {
       await this.eventBus.ensureStream({
-        name: LogsIngestListener.STREAM,
+        name: this.stream,
         subjects: LogsIngestListener.STREAM_SUBJECTS,
         max_age: 30 * 24 * 60 * 60 * 1_000_000_000,
       });
     } catch (err: unknown) {
-      this.logger.error(
-        `CRITICAL: Log ingestion stream init failed for ${LogsIngestListener.STREAM}: ${err instanceof Error ? err.message : String(err)}`,
+      this.logger.warn(
+        `Log ingestion could not declare stream ${this.stream} ` +
+          `(${err instanceof Error ? err.message : String(err)}) — ` +
+          'pointez HQ sur le flux existant avec NOLA_HQ_EVENTS_STREAM si besoin. ' +
+          'Tentative de consommation malgré tout.',
       );
-      throw err;
     }
 
     const jsm = await this.nolaClient
@@ -138,21 +155,21 @@ export class LogsIngestListener
         // replay the whole stream history into the logs table on reboot.
         if (jsm) {
           await jsm.consumers
-            .delete(LogsIngestListener.STREAM, src.consumer)
+            .delete(this.stream, src.consumer)
             .catch(() => undefined);
         }
         await this.eventBus.consume<Record<string, unknown>>(
-          LogsIngestListener.STREAM,
+          this.stream,
           src.consumer,
           src.filter,
           (env) => this.handle(src.category, env),
         );
-        this.logger.log(`Ingesting logs from ${src.filter} (stream=${LogsIngestListener.STREAM}, consumer=${src.consumer})`);
+        this.logger.log(`Ingesting logs from ${src.filter} (stream=${this.stream}, consumer=${src.consumer})`);
       } catch (err: unknown) {
+        // Une source qui ne se lie pas n'emporte ni les autres, ni HQ.
         this.logger.error(
-          `CRITICAL: Log ingestion consumer bind failed for ${src.filter} (consumer=${src.consumer}, stream=${LogsIngestListener.STREAM}): ${err instanceof Error ? err.message : String(err)}`,
+          `CRITICAL: Log ingestion consumer bind failed for ${src.filter} (consumer=${src.consumer}, stream=${this.stream}): ${err instanceof Error ? err.message : String(err)}`,
         );
-        throw err;
       }
     }
   }
