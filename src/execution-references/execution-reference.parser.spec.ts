@@ -596,6 +596,55 @@ En tant que juriste, je veux enregistrer les données légales d'une entité.
     expect(parsed.issues[0]?.sourceKey).toBe('US-GOV-01-1');
   });
 
+  /**
+   * Ce qui appartient à l'item lui-même — le côté, la priorité — s'écrit dans
+   * sa section et ne vaut que pour lui. Écrit sur l'epic, il aurait changé
+   * l'epic et toutes les stories suivantes, sans un mot.
+   */
+  test('« Priorité : » dans la section vaut pour la story seule', () => {
+    const parsed = parseExecutionReference(
+      '# EPIC GOV-01 — T\n\nPriorité : P0\n\n##### US-GOV-01-1 — Une vue\n\nPriorité : P3\n\n##### US-GOV-01-2 — Autre\n\nTexte.\n',
+    );
+    const epic = parsed.items.find((i) => i.kind === 'epic');
+    const [un, deux] = parsed.items.filter((i) => i.kind === 'story');
+    expect(un?.priority).toBe('P3');
+    expect(deux?.priority).toBe('P0');
+    expect(epic?.priority).toBe('P0');
+  });
+
+  /**
+   * Le domaine classe l'epic, et la story suit son epic : une story rangée
+   * ailleurs que son parent serait incohérente avec la chaîne elle-même.
+   */
+  test('« Domaine : » dans la section est refusé, pas appliqué', () => {
+    const parsed = parseExecutionReference(
+      '# EPIC GOV-01 — T\n\nDomaine : D01\n\n##### US-GOV-01-1 — Une vue\n\nDomaine : D09\n',
+    );
+    const epic = parsed.items.find((i) => i.kind === 'epic');
+    expect(epic?.parentKey).toBe('D01');
+    expect(parsed.items.find((i) => i.kind === 'story')?.parentKey).toBe('GOV-01');
+    expect(parsed.issues).toHaveLength(1);
+    expect(parsed.issues[0]?.level).toBe('warning');
+    expect(parsed.issues[0]?.sourceKey).toBe('US-GOV-01-1');
+  });
+
+  /**
+   * Le filet, plutôt qu'un audit à l'œil : toutes les lignes de métadonnées
+   * écrites dans une section de story, et un epic qui n'a pas bougé d'un
+   * champ. Une ligne qu'on ajouterait plus tard sans la garder tomberait ici.
+   */
+  test('aucune ligne écrite dans une section ne déteint sur l’epic', () => {
+    const temoin = parseExecutionReference(
+      '# EPIC GOV-01 — T\n\nPriorité : P0\nCôté : backend\nDomaine : D01\nVersion cible : 0.3\n\n##### US-GOV-01-1 — Une vue\n\nTexte.\n',
+    ).items.find((i) => i.kind === 'epic');
+
+    const pollue = parseExecutionReference(
+      '# EPIC GOV-01 — T\n\nPriorité : P0\nCôté : backend\nDomaine : D01\nVersion cible : 0.3\n\n##### US-GOV-01-1 — Une vue\n\nPriorité : P3\nCôté : frontend\nDomaine : D09\nVersion cible : 9.9\n',
+    ).items.find((i) => i.kind === 'epic');
+
+    expect(pollue).toEqual(temoin!);
+  });
+
   test('le corps de la section devient celui de la story', () => {
     const story = parseExecutionReference(DOC).items.find((i) => i.kind === 'story');
     expect(story?.body).toContain('En tant que dirigeant');
