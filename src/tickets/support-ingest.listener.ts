@@ -95,7 +95,17 @@ export class SupportIngestListener implements OnApplicationBootstrap {
   private eventBus: EventBus | null = null;
   private readonly enabled: boolean;
 
-  private static readonly STREAM = 'NOLA_HQ_EVENTS';
+  /**
+   * Le flux JetStream d'où viennent les évènements.
+   *
+   * Configurable parce qu'il n'appartient pas toujours à HQ : sur un compte
+   * NATS où un flux de plateforme couvre déjà `nola.events.>`, en créer un
+   * second est refusé — « subjects overlap with an existing stream ». Là, HQ
+   * doit consommer celui qui existe (`NOLA_HQ_EVENTS_STREAM=NOLA_EVENTS`)
+   * plutôt que réclamer le sien.
+   */
+  private readonly stream: string;
+  private static readonly DEFAULT_STREAM = 'NOLA_HQ_EVENTS';
   private static readonly STREAM_SUBJECTS = ['nola.events.>'];
   /**
    * Un consumer durable par sujet produit (voir doc de classe). Le nom
@@ -137,6 +147,9 @@ export class SupportIngestListener implements OnApplicationBootstrap {
   ) {
     this.enabled =
       (this.config.get<string>('NOLA_HQ_SUPPORT_INGEST') ?? 'true') !== 'false';
+    this.stream =
+      this.config.get<string>('NOLA_HQ_EVENTS_STREAM') ??
+      SupportIngestListener.DEFAULT_STREAM;
   }
 
   async onApplicationBootstrap(): Promise<void> {
@@ -166,34 +179,60 @@ export class SupportIngestListener implements OnApplicationBootstrap {
       this.eventBus = new EventBus(this.nolaClient.getClient());
       await this.eventBus.init();
 
+    } catch (err: unknown) {
+      this.logger.error(
+        `CRITICAL: Support ingestion bus init failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return;
+    }
+
+    /**
+     * Créer le flux est une commodité, pas une condition.
+     *
+     * Un échec ici ne dit pas que rien ne marchera : le flux peut très bien
+     * exister, tenu par la plateforme, et notre `streams.add` être refusé
+     * précisément parce qu'il est déjà là sous un autre nom. On le signale et
+     * on tente quand même de consommer — c'est le binding du consumer qui
+     * tranche.
+     *
+     * Ce qu'on ne fait plus, c'est mourir. Cette exception remontait d'un
+     * `void this.bootstrap()` : rejet non traité, et Node arrête le
+     * processus. Nolaa HQ tout entier — tickets, factures, backlog — tombait
+     * parce qu'une ingestion de support ne pouvait pas déclarer son flux.
+     */
+    try {
       await this.eventBus.ensureStream({
-        name: SupportIngestListener.STREAM,
+        name: this.stream,
         subjects: SupportIngestListener.STREAM_SUBJECTS,
         max_age: 30 * 24 * 60 * 60 * 1_000_000_000,
       });
     } catch (err: unknown) {
-      this.logger.error(
-        `CRITICAL: Support ingestion stream init failed for ${SupportIngestListener.STREAM}: ${err instanceof Error ? err.message : String(err)}`,
+      this.logger.warn(
+        `Support ingestion could not declare stream ${this.stream} ` +
+          `(${err instanceof Error ? err.message : String(err)}) — ` +
+          "si un flux de plateforme couvre déjà « nola.events.> », pointez HQ dessus " +
+          'avec NOLA_HQ_EVENTS_STREAM. Tentative de consommation malgré tout.',
       );
-      throw err;
     }
 
     for (const { consumer, filter, businessUnitCode } of SupportIngestListener.SOURCES) {
       try {
         await this.eventBus.consume<SupportRequestPayload>(
-          SupportIngestListener.STREAM,
+          this.stream,
           consumer,
           filter,
           (env) => this.handle(env, businessUnitCode),
         );
         this.logger.log(
-          `Ingesting support requests from ${filter} (stream=${SupportIngestListener.STREAM}, consumer=${consumer})`,
+          `Ingesting support requests from ${filter} (stream=${this.stream}, consumer=${consumer})`,
         );
       } catch (err: unknown) {
+        // Une source qui ne se lie pas ne doit emporter ni les autres ni
+        // l'application : les demandes de support restent dans le flux, et
+        // le prochain démarrage les reprendra.
         this.logger.error(
-          `CRITICAL: Support ingestion consumer bind failed for ${filter} (consumer=${consumer}, stream=${SupportIngestListener.STREAM}): ${err instanceof Error ? err.message : String(err)}`,
+          `CRITICAL: Support ingestion consumer bind failed for ${filter} (consumer=${consumer}, stream=${this.stream}): ${err instanceof Error ? err.message : String(err)}`,
         );
-        throw err;
       }
     }
   }
