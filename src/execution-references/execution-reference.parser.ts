@@ -69,6 +69,8 @@ export interface ParsedItem {
   priority: ParsedPriority | null;
   /** Backend, frontend, les deux — ou rien, quand le rédacteur ne l'a pas dit. */
   surface: ParsedSurface | null;
+  /** Le numéro de version visé, tel qu'écrit — résolu à l'import. */
+  targetVersion: string | null;
   /** Slug of the heading — survives a re-ordering, unlike a line number. */
   sourceSectionId: string;
   /** SHA-256 of the raw slice, so a later version can tell what actually changed. */
@@ -121,6 +123,14 @@ const DOMAIN_LINE = /^\*{0,2}Domaine\s*:\s*\*{0,2}\s*D?(\d{1,2})\*{0,2}\s*$/i;
  * aucun dépôt où ouvrir leur branche.
  */
 const PROJECT_LINE = /^\*{0,2}Projet\s*:\s*\*{0,2}\s*(.+?)\*{0,2}\s*$/i;
+/**
+ * « Version cible : 1.4 » sous un epic.
+ *
+ * Le numéro désigne une version du registre (REL-00), pas une section du
+ * document : c'est l'import qui le résout. Facultatif — un lot qu'on dépose
+ * avant d'avoir planifié sa livraison est le cas courant.
+ */
+const TARGET_VERSION_LINE = /^\*{0,2}Version cible\s*:\s*\*{0,2}\s*v?(.+?)\*{0,2}\s*$/i;
 /** « Côté : backend » sous un epic, hérité par ses stories. */
 const SURFACE_LINE = /^\*{0,2}(?:C[oô]t[ée]|Surface)\s*:\s*\*{0,2}\s*(.+?)\*{0,2}\s*$/i;
 /** « … #backend » en fin de ligne d'une story, quand un epic mêle les deux. */
@@ -227,6 +237,7 @@ export function parseExecutionReference(markdown: string): ParsedReference {
           body: null,
           priority: null,
           surface: null,
+          targetVersion: null,
           sourceSectionId: slug(`domaine-${number}-${title}`),
           sourceExcerptHash: sha256(title),
           line: lineNumber,
@@ -267,6 +278,7 @@ export function parseExecutionReference(markdown: string): ParsedReference {
           body: null,
           priority: null,
           surface: null,
+          targetVersion: null,
           sourceSectionId: slug(`capacite-${domainNumber}-${capabilityNumber}-${title}`),
           sourceExcerptHash: sha256(title),
           line: lineNumber,
@@ -288,6 +300,7 @@ export function parseExecutionReference(markdown: string): ParsedReference {
         body: null,
         priority: null,
         surface: null,
+        targetVersion: null,
         sourceSectionId: slug(`epic-${code}-${title}`),
         sourceExcerptHash: '',
         line: lineNumber,
@@ -346,6 +359,12 @@ export function parseExecutionReference(markdown: string): ParsedReference {
       continue;
     }
 
+    const targetVersionMatch = TARGET_VERSION_LINE.exec(line);
+    if (targetVersionMatch && currentEpic) {
+      currentEpic.targetVersion = targetVersionMatch[1].trim() || null;
+      continue;
+    }
+
     const domainLineMatch = DOMAIN_LINE.exec(line);
     if (domainLineMatch && currentEpic) {
       currentEpic.parentKey = domainKey(domainLineMatch[1]);
@@ -376,6 +395,9 @@ export function parseExecutionReference(markdown: string): ParsedReference {
             body: null,
             priority: currentEpic.priority,
             surface: (tagged && readSurface(tagged[1])) || currentEpic.surface,
+            // Une story part avec son epic : on ne livre pas la moitié d'un
+            // epic, et la cascade côté HQ dit la même chose.
+            targetVersion: currentEpic.targetVersion,
             sourceSectionId: `${currentEpic.sourceSectionId}-us-${index}`,
             sourceExcerptHash: sha256(sentence),
             line: cursor + 1,
