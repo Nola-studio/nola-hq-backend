@@ -25,6 +25,7 @@ import { TicketsModule } from './tickets/tickets.module';
 import { InvoicesModule } from './invoices/invoices.module';
 import { MomoModule } from './momo/momo.module';
 import { DeploysModule } from './deploys/deploys.module';
+import { ReleasesModule } from './releases/releases.module';
 import { AuditModule } from './audit/audit.module';
 import { LogsModule } from './logs/logs.module';
 import { AnalyticsModule } from './analytics/analytics.module';
@@ -41,10 +42,14 @@ import { ModulesModule } from './modules/modules.module';
 import { InfraModule } from './infra/infra.module';
 import { RoadmapModule } from './roadmap/roadmap.module';
 import { StudioModule } from './studio/studio.module';
+import { GithubModule } from './github/github.module';
 import { WorkItemsModule } from './work-items/work-items.module';
 import { BusinessModule } from './business/business.module';
 import { VerifyModule } from './verify/verify.module';
 import { CompanyModule } from './company/company.module';
+import { DomainsModule } from './domains/domains.module';
+import { ExecutionReferencesModule } from './execution-references/execution-references.module';
+import { PublicApiModule } from './public-api/public-api.module';
 import { SlaModule } from './sla/sla.module';
 
 import { entities } from './entities';
@@ -120,6 +125,7 @@ import { validate } from './config/env.validation';
     InvoicesModule,
     MomoModule,
     DeploysModule,
+    ReleasesModule,
     AuditModule,
     LogsModule,
     AnalyticsModule,
@@ -135,10 +141,14 @@ import { validate } from './config/env.validation';
     ModulesModule,
     RoadmapModule,
     StudioModule,
+    GithubModule,
     WorkItemsModule,
     BusinessModule,
     VerifyModule,
     CompanyModule,
+    DomainsModule,
+    ExecutionReferencesModule,
+    PublicApiModule,
     InfraModule,
     SlaModule,
   ],

@@ -34,7 +34,13 @@ import type { HealthIncident } from './health.service';
  * destination with NOLA_HQ_INCIDENT_EMAIL.
  */
 const ALERT_CONSUMER = 'nola-hq-health-alert-bridge';
-const HEALTH_STREAM = 'NOLA_HQ_EVENTS';
+/**
+ * Même flux que les deux ingesteurs, même raison d'être configurable : sur un
+ * compte NATS où un flux de plateforme couvre déjà « nola.events.> », HQ doit
+ * consommer celui-là. Ce pont-ci attrapait déjà toutes ses erreurs — il ne
+ * faisait pas tomber l'application, il se taisait simplement.
+ */
+const HEALTH_STREAM = process.env.NOLA_HQ_EVENTS_STREAM || 'NOLA_HQ_EVENTS';
 const DEFAULT_RECIPIENT = 'admin@nolaastudio.com';
 
 @Injectable()

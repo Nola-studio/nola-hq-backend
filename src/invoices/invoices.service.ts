@@ -438,10 +438,26 @@ export class InvoicesService {
       // Sequential invoice number (only consumed AFTER brand and tenant have passed fail-closed checks)
       const invoiceNumber = await nextBusinessNumber(this.repo.manager, 'FAC', upcomingDate);
 
-      // Render PDF
+      /**
+       * Modèle de rendu, jamais persisté : il ne sert qu'à fabriquer le PDF de
+       * la facture à venir, que le renderer lit par ses relations (`client`,
+       * `project`) et jamais par ses identifiants.
+       *
+       * Les six champs ci-dessous n'ont donc rien à dire — mais l'entité les
+       * déclare obligatoires depuis que la facturation a gagné son client, son
+       * projet et son contrat, et un littéral incomplet ne se transtype plus.
+       * Les renseigner à vide vaut mieux que de relâcher le type : c'est
+       * précisément ce contrôle qui a signalé le décalage.
+       */
       const invoiceEntity: BusinessInvoice = {
         id: invoiceNumber,
         number: invoiceNumber,
+        clientId: '',
+        projectId: '',
+        contractId: null,
+        receiptVoidedAt: null,
+        createdAt: now,
+        updatedAt: now,
         receiptNumber: null as any,
         businessUnitId: businessUnit.id,
         businessUnit,
@@ -454,7 +470,14 @@ export class InvoicesService {
         issuedOn: now.toISOString().slice(0, 10),
         dueOn: targetDateStr,
         paidAt: null,
-        status: 'pending',
+        /**
+         * « Brouillon » et non « pending » : le statut du modèle de rendu est
+         * imprimé sur le PDF (« Statut : Brouillon »), et l'entité ne connaît
+         * plus « pending » depuis que la facturation a repris ses six états.
+         * Une facture à venir n'est pas encore émise — c'est bien un brouillon,
+         * et le dire est plus juste que de forcer une valeur disparue.
+         */
+        status: 'draft',
         description: `Abonnement ${product.name} — ${tenantName}`,
         paymentMethod: 'mobile_money',
         paymentReference: null,

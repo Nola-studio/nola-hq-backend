@@ -1,4 +1,8 @@
 import { ActivityEvent } from './activity/activity.entity';
+import { Capability, Domain } from './domains/domain.entity';
+import { ExecutionManifest, ExecutionManifestItem } from './execution-references/execution-manifest.entity';
+import { IdempotencyKey } from './public-api/idempotency-key.entity';
+import { ExecutionReference, ExecutionReferenceVersion } from './execution-references/execution-reference.entity';
 import { AuditEntry } from './audit/audit.entity';
 import { Broadcast } from './broadcast/broadcast.entity';
 import { BusinessUnit } from './company/business-unit.entity';
@@ -6,6 +10,7 @@ import { LegalEntity } from './company/legal-entity.entity';
 import { Product } from './company/product.entity';
 import { Country } from './countries/country.entity';
 import { Deploy } from './deploys/deploy.entity';
+import { Release } from './releases/release.entity';
 import { HealthEntry } from './health/health-entry.entity';
 import { Invoice } from './invoices/invoice.entity';
 import { Kpi } from './analytics/kpi.entity';
@@ -25,7 +30,6 @@ import { StudioExpense } from './studio/studio-expense.entity';
 import { StudioMeeting } from './studio/studio-meeting.entity';
 import { StudioNotificationDedup } from './studio/studio-notification-dedup.entity';
 import { StudioRecurring } from './studio/studio-recurring.entity';
-import { StudioRequest } from './studio/studio-request.entity';
 import { TeamMember } from './team/team-member.entity';
 import { Tenant } from './tenants/tenant.entity';
 import { TenantCrm } from './tenants/tenant-crm.entity';
@@ -52,6 +56,9 @@ import { BusinessReminder } from './business/business-reminder.entity';
 import { ProjectTimeEntry } from './business/project-time-entry.entity';
 import { SlaPolicy } from './sla/sla-policy.entity';
 import { Notification } from './notifications/notification.entity';
+import { CodeRepository, RepositoryProject } from './github/repository.entity';
+import { GithubWebhookDelivery } from './github/github-webhook-delivery.entity';
+import { WorkItemBranch } from './github/work-item-branch.entity';
 
 // Le registry des apps n'a PAS de table — c'est une projection in-memory
 // reconstruite à partir du JetStream NOLA_REGISTRY (cf. AppsService).
@@ -76,6 +83,7 @@ export const entities = [
   Product,
   Country,
   Deploy,
+  Release,
   HealthEntry,
   Invoice,
   Kpi,
@@ -95,7 +103,6 @@ export const entities = [
   StudioMeeting,
   StudioNotificationDedup,
   StudioRecurring,
-  StudioRequest,
   TeamMember,
   Tenant,
   TenantCrm,
@@ -124,4 +131,15 @@ export const entities = [
   ProjectTimeEntry,
   SlaPolicy,
   Notification,
+  Domain,
+  Capability,
+  ExecutionReference,
+  ExecutionReferenceVersion,
+  ExecutionManifest,
+  ExecutionManifestItem,
+  IdempotencyKey,
+  CodeRepository,
+  RepositoryProject,
+  GithubWebhookDelivery,
+  WorkItemBranch,
 ];

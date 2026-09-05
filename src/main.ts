@@ -9,12 +9,19 @@ import { NolaClientService } from '@nola-hq/nola-sdk';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { cors: false });
+    // `rawBody: true` conserve les octets reçus à côté du corps analysé. Les
+  // webhooks GitHub en dépendent : la signature porte sur ce que GitHub a
+  // envoyé, et re-sérialiser l'objet analysé donnerait d'autres octets.
+  const app = await NestFactory.create(AppModule, { cors: false, rawBody: true });
   const config = app.get(ConfigService);
   const logger = new Logger('Bootstrap');
 
   app.setGlobalPrefix('api/v1', {
-    exclude: ['.well-known/nola-manifest.yaml'],
+    // L'API publique porte déjà sa version dans son chemin — le référentiel
+    // spécifie `POST /public/v1/execution-references`. Sans cette exclusion
+    // elle vivrait sous `/api/v1/public/v1/…`, versionnée deux fois, et
+    // l'adresse publiée ne correspondrait pas au contrat.
+    exclude: ['.well-known/nola-manifest.yaml', 'public/v1/(.*)'],
   });
   app.use(cookieParser());
 
@@ -82,5 +89,28 @@ async function bootstrap() {
   logger.log(`Nola HQ backend ready at http://localhost:${port}/api/v1`);
   logger.log(`Swagger UI at http://localhost:${port}/docs`);
 }
+
+/**
+ * Filet de sécurité, pas une excuse.
+ *
+ * Les écouteurs d'évènements démarrent en `void this.bootstrap()` : leur
+ * promesse n'est attendue par personne. Une exception qui s'en échappe est un
+ * rejet non traité, et Node arrête le processus — c'est ainsi qu'un refus de
+ * `ensureStream` sur l'ingestion de support a emporté Nolaa HQ tout entier en
+ * production, facturation et tickets compris.
+ *
+ * Chaque écouteur attrape désormais ses propres erreurs ; ce garde-fou est là
+ * pour le prochain qu'on écrira en l'oubliant. Il journalise et laisse
+ * l'application debout : une ingestion muette se répare à froid, un processus
+ * mort réveille tout le monde.
+ */
+process.on('unhandledRejection', (reason: unknown) => {
+  const logger = new Logger('UnhandledRejection');
+  logger.error(
+    reason instanceof Error
+      ? `${reason.message}\n${reason.stack ?? ''}`
+      : String(reason),
+  );
+});
 
 void bootstrap();

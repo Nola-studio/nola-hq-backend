@@ -10,7 +10,13 @@ export type WorkItemEventAction =
   | 'subtask_updated'
   | 'closed'
   | 'attachment_added'
-  | 'attachment_removed';
+  | 'attachment_removed'
+  | 'accepted'
+  | 'dismissed'
+  | 'branch_created'
+  /** Ouverte depuis HQ ou reconnue depuis GitHub — le journal ne distingue
+   *  pas la provenance ici, `meta.createdByHq` s'en charge. */
+  | 'pull_request_opened';
 
 @Entity('work_item_events')
 export class WorkItemEvent {

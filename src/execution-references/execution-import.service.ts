@@ -1,0 +1,556 @@
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { In, Repository } from 'typeorm';
+import { ExecutionReferencesService } from './execution-references.service';
+import {
+  ExecutionManifest,
+  ExecutionManifestItem,
+  MANIFEST_SCHEMA_VERSION,
+} from './execution-manifest.entity';
+import { parseExecutionReference, summarize } from './execution-reference.parser';
+import { resolvePlacement } from './execution-placement';
+import { Capability, Domain } from '../domains/domain.entity';
+import { RoadmapInitiative } from '../roadmap/roadmap-initiative.entity';
+import { Release } from '../releases/release.entity';
+import { WorkItem } from '../work-items/work-item.entity';
+
+/**
+ * What one item became, in the referential's own vocabulary (EXE-06).
+ *
+ * The six states EXE-06 names, plus `skipped` — ours, for an item whose
+ * domain the registry does not know, which is a placement failure rather than
+ * a difference between two versions.
+ *
+ * `deprecated` and `removed` both mean « the document no longer mentions it »;
+ * they differ by what happened to it since. Nothing accepted is ever removed
+ * on a document's say-so.
+ */
+export type ImportOutcome =
+  | 'added'
+  | 'modified'
+  | 'unchanged'
+  | 'deprecated'
+  | 'removed'
+  | 'conflict'
+  | 'skipped';
+
+export interface ImportedItem {
+  sourceKey: string;
+  kind: string;
+  outcome: ImportOutcome;
+  workItemId?: number;
+  reason?: string;
+}
+
+const EMPTY_COUNTS: Record<ImportOutcome, number> = {
+  added: 0,
+  modified: 0,
+  unchanged: 0,
+  deprecated: 0,
+  removed: 0,
+  conflict: 0,
+  skipped: 0,
+};
+
+export interface ImportReport {
+  reference: string;
+  version: string;
+  dryRun: boolean;
+  counts: Record<ImportOutcome, number>;
+  items: ImportedItem[];
+  /** Le projet déclaré par le document, tel qu'écrit. */
+  projectLabel: string | null;
+  /** Ce à quoi ce libellé s'est résolu — `null` s'il ne désigne rien de connu. */
+  projectId: string | null;
+  /** Ce que l'import a à dire et qui ne concerne aucun item en particulier. */
+  notes: string[];
+}
+
+/**
+ * Turns a parsed reference into backlog, in the right place (EXE-03 → EXE-05).
+ *
+ * Two rules shape everything here.
+ *
+ * **Domains and capabilities are resolved, never created.** They are seeded
+ * from the referential and own their codes; an import matches `D06` and
+ * `D06.C03` against existing rows so an epic lands on its real domain and
+ * capability. A code the registry does not know is *skipped and reported* —
+ * inventing a domain to make an import succeed would defeat the purpose of
+ * having a canonical set.
+ *
+ * **Delivered work is never silently rewritten, nor silently withdrawn.**
+ * Re-importing matches on `sourceKey` and refreshes an item only while it is
+ * still untouched in `triage`. Once someone has accepted it and moved it
+ * along, a changed document produces a `conflict` line for a human to
+ * arbitrate, not an overwrite. And an item the new version no longer mentions
+ * is reported — `removed` if nobody had touched it, `deprecated` if it was
+ * already accepted — but never deleted or closed on the document's say-so.
+ * Withdrawing accepted work is a decision, and decisions belong to people
+ * (EXE-06).
+ */
+@Injectable()
+export class ExecutionImportService {
+  constructor(
+    @InjectRepository(ExecutionManifest)
+    private readonly manifests: Repository<ExecutionManifest>,
+    @InjectRepository(ExecutionManifestItem)
+    private readonly manifestItems: Repository<ExecutionManifestItem>,
+    @InjectRepository(Domain) private readonly domains: Repository<Domain>,
+    @InjectRepository(Capability) private readonly capabilities: Repository<Capability>,
+    @InjectRepository(WorkItem) private readonly workItems: Repository<WorkItem>,
+    @InjectRepository(RoadmapInitiative)
+    private readonly projects: Repository<RoadmapInitiative>,
+    @InjectRepository(Release)
+    private readonly releases: Repository<Release>,
+    private readonly references: ExecutionReferencesService,
+  ) {}
+
+  /**
+   * Résout « Projet : NolaHQ » contre le registre des projets.
+   *
+   * Sur la clé (`HQ`) ou sur le titre, sans distinction de casse — on écrit
+   * l'un ou l'autre selon ce qu'on a en tête. Une ambiguïté n'est pas
+   * tranchée au hasard : deux projets qui répondent au même libellé, c'est le
+   * document qui doit être précisé.
+   */
+  private async resolveDocumentProject(
+    label: string | null,
+  ): Promise<{ id: string | null; note: string | null }> {
+    if (!label) return { id: null, note: null };
+
+    const needle = label.trim().toLowerCase();
+    const matches = (await this.projects.find({ where: { archived: false } })).filter(
+      (p) => p.keyPrefix?.toLowerCase() === needle || p.title.trim().toLowerCase() === needle,
+    );
+
+    if (matches.length === 1) return { id: matches[0].id, note: null };
+    if (matches.length === 0) {
+      return {
+        id: null,
+        note: `Le document déclare « Projet : ${label} », qui ne correspond à aucun projet actif — les tickets entrent sans projet.`,
+      };
+    }
+    return {
+      id: null,
+      note: `« Projet : ${label} » désigne ${matches.length} projets — précisez-le dans le document ; les tickets entrent sans projet.`,
+    };
+  }
+
+  /**
+   * Reads a stored version and records what it declares. Writes nothing
+   * operational — EXE-03 is explicit that extraction must not create final
+   * objects.
+   */
+  async parse(key: string, version: string, actorEmail: string) {
+    const row = await this.references.findVersion(key, version);
+    const parsed = parseExecutionReference(row.content);
+
+    // A manifest is derived data: re-parsing replaces it rather than
+    // accumulating revisions of a reading of an immutable document.
+    const existing = await this.manifests.findOne({ where: { versionId: row.id } });
+    if (existing) {
+      await this.manifestItems.delete({ manifestId: existing.id });
+      await this.manifests.delete({ id: existing.id });
+    }
+
+    const manifest = await this.manifests.save(
+      this.manifests.create({
+        versionId: row.id,
+        schemaVersion: MANIFEST_SCHEMA_VERSION,
+        issues: parsed.issues,
+        projectLabel: parsed.project,
+        parsedBy: actorEmail,
+        parsedAt: new Date(),
+      }),
+    );
+
+    await this.manifestItems.save(
+      parsed.items.map((item) =>
+        this.manifestItems.create({
+          manifestId: manifest.id,
+          kind: item.kind,
+          sourceKey: item.sourceKey,
+          parentKey: item.parentKey,
+          title: item.title,
+          body: item.body,
+          priority: item.priority,
+          surface: item.surface,
+          targetVersion: item.targetVersion,
+          sourceSectionId: item.sourceSectionId,
+          sourceExcerptHash: item.sourceExcerptHash,
+          sourceLine: item.line,
+        }),
+      ),
+    );
+
+    return {
+      manifestId: manifest.id,
+      schemaVersion: manifest.schemaVersion,
+      counts: summarize(parsed),
+      issues: parsed.issues,
+    };
+  }
+
+  /** Comme `findManifest`, mais `null` plutôt qu'un 404 : `/status` répond
+   *  « pas encore analysé » au lieu de faire échouer la requête. */
+  async findManifestOrNull(key: string, version: string) {
+    const row = await this.references.findVersion(key, version);
+    return this.manifests.findOne({ where: { versionId: row.id } });
+  }
+
+  async findManifest(key: string, version: string) {
+    const row = await this.references.findVersion(key, version);
+    const manifest = await this.manifests.findOne({
+      where: { versionId: row.id },
+      relations: ['items'],
+    });
+    if (!manifest) {
+      throw new NotFoundException(
+        `Version ${version} de ${key} pas encore analysée — appelez d'abord /parse.`,
+      );
+    }
+    return manifest;
+  }
+
+  /**
+   * Creates the backlog the manifest proposes. `dryRun` runs the whole
+   * resolution and reports what *would* happen without writing — the
+   * preview EXE-05 asks for, on the same code path as the real import so the
+   * two can never disagree.
+   */
+  async import(
+    key: string,
+    version: string,
+    actorEmail: string,
+    dryRun: boolean,
+  ): Promise<ImportReport> {
+    const reference = await this.references.findByKey(key);
+    const versionRow = await this.references.findVersion(key, version);
+    const manifest = await this.findManifest(key, version);
+    const items = manifest.items ?? [];
+
+    const domainByCode = new Map((await this.domains.find()).map((d) => [d.code as string, d]));
+    const capabilityByCode = new Map((await this.capabilities.find()).map((c) => [c.code, c]));
+
+    /**
+     * « Projet : NolaHQ » en tête du document.
+     *
+     * Il ne l'emporte jamais sur ce qu'un humain a posé dans HQ — ni sur le
+     * ticket, ni sur le référentiel : ce sont des décisions, et une ligne de
+     * document ne les révise pas. Il sert quand personne n'a rien dit, ce qui
+     * est le cas d'un lot qu'on vient de déposer.
+     *
+     * Un libellé qui ne désigne rien n'arrête pas l'import : les tickets
+     * entrent sans projet, et le rapport dit pourquoi — c'est une faute de
+     * frappe à corriger, pas une raison de perdre le lot.
+     */
+    const report0Notes: string[] = [];
+    const documentProject = await this.resolveDocumentProject(manifest.projectLabel);
+    const documentProjectId = documentProject.id;
+
+    /**
+     * « Version cible : 1.4 » se résout contre le registre, une fois pour tout
+     * le lot — un document qui vise trois versions ne doit pas faire trois
+     * requêtes par ticket.
+     *
+     * Un numéro qui ne désigne rien n'arrête pas l'import : les tickets
+     * entrent sans version, et le rapport le dit. Créer la version au passage
+     * serait pire — planifier une livraison n'est pas un effet de bord d'un
+     * import.
+     */
+    const citedVersions = [...new Set(items.map((i) => i.targetVersion).filter((v): v is string => !!v))];
+    const releaseByVersion = new Map<string, string>();
+    if (citedVersions.length > 0) {
+      const known = await this.releases.find({ where: { version: In(citedVersions) } });
+      for (const release of known) releaseByVersion.set(release.version, release.id);
+      const unknown = citedVersions.filter((v) => !releaseByVersion.has(v));
+      if (unknown.length > 0) {
+        documentProject.note = documentProject.note ?? null;
+        report0Notes.push(
+          `Version(s) inconnue(s) du registre : ${unknown.join(', ')} — les tickets concernés entrent sans version.`,
+        );
+      }
+    }
+
+    const importable = items.filter((item) => item.kind === 'epic' || item.kind === 'story');
+    const existing = new Map(
+      (
+        await this.workItems.find({
+          where: { sourceKind: 'manifest', sourceKey: In(importable.map((i) => i.sourceKey)) },
+        })
+      ).map((w) => [w.sourceKey as string, w]),
+    );
+
+    /**
+     * References already spoken for by someone else. `reference` is unique
+     * across the whole backlog, so a second referential reusing `GOV-01`
+     * would otherwise make the import die on a constraint violation halfway
+     * through. A key that is taken simply yields no reference — losing a
+     * display token is a nuisance, losing the import is not.
+     */
+    const takenReferences = new Set(
+      (
+        await this.workItems.find({
+          where: { reference: In(importable.map((i) => i.sourceKey.slice(0, 32))) },
+          select: { id: true, reference: true },
+        })
+      )
+        .filter((w) => existing.get(w.reference ?? '')?.id !== w.id)
+        .map((w) => w.reference as string),
+    );
+
+    const report: ImportReport = {
+      reference: reference.key,
+      version: versionRow.version,
+      dryRun,
+      counts: { ...EMPTY_COUNTS },
+      items: [],
+      projectLabel: manifest.projectLabel,
+      projectId: documentProjectId,
+      notes: [...(documentProject.note ? [documentProject.note] : []), ...report0Notes],
+    };
+
+    /** Epic `sourceKey` → work item id, so stories can hang off their epic. */
+    const epicWorkItemId = new Map<string, number>();
+    const manifestByKey = new Map(items.map((i) => [i.sourceKey, i]));
+
+    // Epics first: a story's parent must exist before the story is written.
+    for (const item of [...importable].sort((a, b) => (a.kind === 'epic' ? -1 : 1) - (b.kind === 'epic' ? -1 : 1))) {
+      const placement = resolvePlacement(item, manifestByKey, domainByCode, capabilityByCode);
+      if (!placement.ok) {
+        report.counts.skipped += 1;
+        report.items.push({ sourceKey: item.sourceKey, kind: item.kind, outcome: 'skipped', reason: placement.reason });
+        continue;
+      }
+
+      const parentWorkItemId =
+        item.kind === 'story' && item.parentKey ? epicWorkItemId.get(item.parentKey) ?? null : null;
+      if (item.kind === 'story' && parentWorkItemId === null) {
+        report.counts.skipped += 1;
+        report.items.push({
+          sourceKey: item.sourceKey,
+          kind: item.kind,
+          outcome: 'skipped',
+          reason: `Epic parent « ${item.parentKey} » non importé.`,
+        });
+        continue;
+      }
+
+      const current = existing.get(item.sourceKey);
+
+      if (current && current.sourceExcerptHash === item.sourceExcerptHash) {
+        report.counts.unchanged += 1;
+        report.items.push({ sourceKey: item.sourceKey, kind: item.kind, outcome: 'unchanged', workItemId: current.id });
+        if (item.kind === 'epic') epicWorkItemId.set(item.sourceKey, current.id);
+        continue;
+      }
+
+      if (current && current.status !== 'triage') {
+        report.counts.conflict += 1;
+        report.items.push({
+          sourceKey: item.sourceKey,
+          kind: item.kind,
+          outcome: 'conflict',
+          workItemId: current.id,
+          reason: `Le document a changé, mais le ticket est passé en « ${current.status} » — arbitrage humain requis.`,
+        });
+        if (item.kind === 'epic') epicWorkItemId.set(item.sourceKey, current.id);
+        continue;
+      }
+
+      if (dryRun) {
+        const outcome: ImportOutcome = current ? 'modified' : 'added';
+        report.counts[outcome] += 1;
+        report.items.push({ sourceKey: item.sourceKey, kind: item.kind, outcome, workItemId: current?.id });
+        // A dry run cannot know a future id; a placeholder keeps stories from
+        // being reported as orphans for a reason that is an artefact of the
+        // preview rather than of the document.
+        if (item.kind === 'epic') epicWorkItemId.set(item.sourceKey, current?.id ?? -1);
+        continue;
+      }
+
+      const now = new Date();
+      const saved = await this.workItems.save(
+        this.workItems.create({
+          ...(current ? { id: current.id } : {}),
+          // The referential's own key is the identifier. A work item normally
+          // draws its reference from a project's sequence, but an epic of the
+          // referential has no project — and inventing `TNOLAAHQ-42` for
+          // something the document already calls `EXE-05` would throw away the
+          // one token that makes the two sides talk about the same object.
+          reference:
+            current?.reference ??
+            (takenReferences.has(item.sourceKey.slice(0, 32)) ? null : item.sourceKey.slice(0, 32)),
+          /**
+           * Le projet que le référentiel déclare concerner (EXE-01 : « le
+           * produit, projet, organisation ou domaine concerné »).
+           *
+           * C'est ce qui relie un ticket au code : un projet porte ses dépôts
+           * autorisés, et « Start Work » n'a alors plus de question à poser.
+           * Un projet déjà posé sur le ticket l'emporte — l'affecter à la main
+           * est une décision, la propager est un défaut.
+           */
+          projectId: current?.projectId ?? reference.projectId ?? documentProjectId,
+          title: item.title.slice(0, 200),
+          description: item.body,
+          type: item.kind === 'epic' ? 'epic' : 'story',
+          status: 'triage',
+          priority: item.priority ?? 'P2',
+          domainId: placement.domainId,
+          capabilityId: placement.capabilityId,
+          // Ce que le document a dit, jamais deviné — et jamais écrasé par un
+          // ré-import muet : si le rédacteur a retiré la ligne, c'est le
+          // ticket qui reste classé, pas le document qui déclasse.
+          surface: item.surface ?? current?.surface ?? null,
+          /**
+           * La version visée, quand le document la nomme et que le registre la
+           * connaît. Une version déjà posée dans HQ l'emporte : la replanifier
+           * est une décision, et un ré-import ne la révise pas.
+           */
+          releaseId:
+            current?.releaseId ??
+            (item.targetVersion ? releaseByVersion.get(item.targetVersion) ?? null : null),
+          parentId: parentWorkItemId,
+          reporter: actorEmail,
+          sourceKind: 'manifest',
+          sourceRefId: versionRow.id,
+          sourceKey: item.sourceKey,
+          sourceAuthor: versionRow.receivedFrom,
+          sourceExcerptHash: item.sourceExcerptHash,
+          position: 0,
+          estimatePoints: 0,
+          createdAt: current?.createdAt ?? now,
+          updatedAt: now,
+        }),
+      );
+
+      const outcome: ImportOutcome = current ? 'modified' : 'added';
+      report.counts[outcome] += 1;
+      report.items.push({ sourceKey: item.sourceKey, kind: item.kind, outcome, workItemId: saved.id });
+      if (item.kind === 'epic') epicWorkItemId.set(item.sourceKey, saved.id);
+    }
+
+    for (const gone of await this.findWithdrawn(reference.id, new Set(importable.map((i) => i.sourceKey)))) {
+      const withdrawn: ImportOutcome = gone.status === 'triage' ? 'removed' : 'deprecated';
+      report.counts[withdrawn] += 1;
+      report.items.push({
+        sourceKey: gone.sourceKey ?? String(gone.id),
+        kind: gone.type,
+        outcome: withdrawn,
+        workItemId: gone.id,
+        reason:
+          withdrawn === 'removed'
+            ? "Absent de cette version, et jamais accepté — la proposition peut être retirée de la boîte de réception."
+            : `Absent de cette version, mais déjà passé en « ${gone.status} » — retirer du backlog est une décision, pas un effet de bord de l'import.`,
+      });
+    }
+
+    return report;
+  }
+
+  /**
+   * « Pourquoi cet élément de backlog existe-t-il ? » (EXE-07)
+   *
+   * Remonte la chaîne depuis un work item : référentiel → version → section
+   * source → item de manifest → ticket. `source_excerpt_hash` dit en plus si
+   * le passage source a bougé depuis l'import, sans avoir à relire le
+   * document.
+   */
+  async provenance(workItemId: number) {
+    const item = await this.workItems.findOne({ where: { id: workItemId } });
+    if (!item) throw new NotFoundException(`Ticket ${workItemId} introuvable`);
+
+    if (item.sourceKind !== 'manifest' || !item.sourceRefId || !item.sourceKey) {
+      return {
+        workItemId: item.id,
+        title: item.title,
+        sourceKind: item.sourceKind,
+        sourceAuthor: item.sourceAuthor,
+        /** Rien à remonter : personne ne l'a tiré d'un document. */
+        reference: null,
+      };
+    }
+
+    const version = await this.references.findVersionById(item.sourceRefId);
+    const reference = version ? await this.references.findById(version.referenceId) : null;
+    const manifest = version ? await this.manifests.findOne({ where: { versionId: version.id } }) : null;
+    const manifestItem = manifest
+      ? await this.manifestItems.findOne({ where: { manifestId: manifest.id, sourceKey: item.sourceKey } })
+      : null;
+
+    return {
+      workItemId: item.id,
+      title: item.title,
+      sourceKind: item.sourceKind,
+      sourceKey: item.sourceKey,
+      sourceAuthor: item.sourceAuthor,
+      approvedBy: item.approvedBy,
+      reference: reference ? { key: reference.key, title: reference.title } : null,
+      version: version
+        ? { version: version.version, receivedAt: version.receivedAt, contentHash: version.contentHash }
+        : null,
+      section: manifestItem
+        ? {
+            sectionId: manifestItem.sourceSectionId,
+            line: manifestItem.sourceLine,
+            title: manifestItem.title,
+            parentKey: manifestItem.parentKey,
+          }
+        : null,
+      /** `true` si le passage source a changé depuis que ce ticket a été écrit. */
+      excerptChangedSinceImport: manifestItem
+        ? manifestItem.sourceExcerptHash !== item.sourceExcerptHash
+        : null,
+    };
+  }
+
+  /** L'inverse : tout ce qu'un référentiel a produit, et où ça en est. */
+  async traceability(key: string) {
+    const reference = await this.references.findByKey(key);
+    const versionIds = await this.references.listVersionIds(reference.id);
+    const produced = versionIds.length
+      ? await this.workItems.find({
+          where: { sourceKind: 'manifest', sourceRefId: In(versionIds) },
+          order: { id: 'ASC' },
+        })
+      : [];
+
+    return {
+      reference: reference.key,
+      title: reference.title,
+      versions: versionIds.length,
+      produced: produced.length,
+      items: produced.map((item) => ({
+        workItemId: item.id,
+        sourceKey: item.sourceKey,
+        type: item.type,
+        status: item.status,
+        domainId: item.domainId,
+        capabilityId: item.capabilityId,
+        assignee: item.assignee,
+      })),
+    };
+  }
+
+  /**
+   * Items an earlier version of this reference produced, that the version
+   * being imported no longer mentions.
+   *
+   * Scoped to *this* reference: two documents may legitimately describe
+   * different parts of the backlog, and one falling silent about a key says
+   * nothing about the other's. The scoping is what `source_ref_id` is for —
+   * it holds the version id, so every version of the reference has to be
+   * gathered first.
+   */
+  private async findWithdrawn(referenceId: string, stillDeclared: Set<string>): Promise<WorkItem[]> {
+    const versionIds = (
+      await this.references.listVersionIds(referenceId)
+    ).filter((id): id is string => Boolean(id));
+    if (versionIds.length === 0) return [];
+
+    const produced = await this.workItems.find({
+      where: { sourceKind: 'manifest', sourceRefId: In(versionIds) },
+    });
+    return produced.filter((item) => item.sourceKey !== null && !stillDeclared.has(item.sourceKey));
+  }
+}
