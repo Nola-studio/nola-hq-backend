@@ -187,8 +187,35 @@ function sha256(text: string): string {
  * not like a paragraph.
  */
 function storyTitle(sentence: string): string {
-  const trimmed = sentence.replace(/\s+/g, ' ').trim();
-  return trimmed.length <= 200 ? trimmed : `${trimmed.slice(0, 197)}…`;
+  return sentence.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Ce qu'un ticket accepte comme titre. Le manifeste en tolère 300, le ticket
+ * 200 : un titre entre les deux passait l'analyse pour faire échouer l'import,
+ * loin de la ligne fautive. On borne donc ici, une fois, pour tous les genres —
+ * seule la story l'était, et en silence.
+ */
+const TITLE_MAX = 200;
+
+function boundedTitle(
+  raw: string,
+  sourceKey: string,
+  line: number,
+  issues: ParseIssue[],
+): string {
+  const trimmed = raw.replace(/\s+/g, ' ').trim();
+  const chars = [...trimmed];
+  if (chars.length <= TITLE_MAX) return trimmed;
+  issues.push({
+    level: 'warning',
+    message:
+      `Titre de ${chars.length} caractères pour ${sourceKey} — ${TITLE_MAX} au plus, ` +
+      `il a été coupé. Raccourcissez-le dans le document.`,
+    line,
+    sourceKey,
+  });
+  return `${chars.slice(0, TITLE_MAX - 3).join('')}…`;
 }
 
 export function parseExecutionReference(markdown: string): ParsedReference {
@@ -250,7 +277,7 @@ export function parseExecutionReference(markdown: string): ParsedReference {
           kind: 'domain',
           sourceKey: currentDomain,
           parentKey: null,
-          title,
+          title: boundedTitle(title, currentDomain, lineNumber, issues),
           body: null,
           priority: null,
           surface: null,
@@ -291,7 +318,7 @@ export function parseExecutionReference(markdown: string): ParsedReference {
           kind: 'capability',
           sourceKey: key,
           parentKey: parent,
-          title,
+          title: boundedTitle(title, key, lineNumber, issues),
           body: null,
           priority: null,
           surface: null,
@@ -313,7 +340,7 @@ export function parseExecutionReference(markdown: string): ParsedReference {
         kind: 'epic',
         sourceKey: code,
         parentKey: currentCapability ?? currentDomain,
-        title,
+        title: boundedTitle(title, code, lineNumber, issues),
         body: null,
         priority: null,
         surface: null,
@@ -418,7 +445,7 @@ export function parseExecutionReference(markdown: string): ParsedReference {
             kind: 'story',
             sourceKey: key,
             parentKey: currentEpic.sourceKey,
-            title: sentence,
+            title: boundedTitle(sentence, key, cursor + 1, issues),
             body: null,
             priority: currentEpic.priority,
             surface: (tagged && readSurface(tagged[1])) || currentEpic.surface,

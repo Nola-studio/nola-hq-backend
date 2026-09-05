@@ -448,3 +448,57 @@ Stories :
     expect(epic?.parentKey).toBe('D08');
   });
 });
+
+/**
+ * Le titre d'un ticket est borné à 200 caractères ; le manifeste en accepte
+ * 300. Un titre entre les deux passait l'analyse pour faire échouer l'import,
+ * loin de la ligne fautive. Le parser borne donc, et le rapport nomme le
+ * document qui a débordé.
+ */
+describe('un titre trop long', () => {
+  const LONG = 'x'.repeat(250);
+
+  test('celui d’un epic est borné, et l’anomalie le nomme', () => {
+    const parsed = parseExecutionReference(`# EPIC ONE-01 — ${LONG}\n`);
+    expect([...(parsed.items[0]?.title ?? '')].length).toBe(198);
+    expect(parsed.items[0]?.title.endsWith('…')).toBe(true);
+    expect(parsed.issues).toEqual([
+      {
+        level: 'warning',
+        message:
+          'Titre de 250 caractères pour ONE-01 — 200 au plus, il a été coupé. Raccourcissez-le dans le document.',
+        line: 1,
+        sourceKey: 'ONE-01',
+      },
+    ]);
+  });
+
+  test('celui d’une story aussi — la coupe cesse d’être silencieuse', () => {
+    const parsed = parseExecutionReference(
+      `# EPIC ONE-01 — T\n\nStories :\n\n1. ${LONG}\n`,
+    );
+    const story = parsed.items.find((i) => i.kind === 'story');
+    expect([...(story?.title ?? '')].length).toBe(198);
+    expect(parsed.issues).toHaveLength(1);
+    expect(parsed.issues[0]?.sourceKey).toBe('US-ONE-01-1');
+  });
+
+  /**
+   * L'empreinte porte sur la phrase entière, pas sur ce qu'il en reste après
+   * la coupe. Avant, deux stories ne différant qu'au-delà du 200e caractère
+   * avaient la même empreinte : la correction du texte long passait pour
+   * « inchangée » au ré-import, et le ticket gardait l'ancienne version.
+   */
+  test('une correction au-delà de la coupe reste détectable', () => {
+    const empreinte = (fin: string) =>
+      parseExecutionReference(`# EPIC ONE-01 — T\n\nStories :\n\n1. ${'a'.repeat(210)}${fin}\n`)
+        .items.find((i) => i.kind === 'story')?.sourceExcerptHash;
+    expect(empreinte('ROUGE')).not.toBe(empreinte('VERT'));
+  });
+
+  test('un titre de 200 caractères passe sans un mot', () => {
+    const parsed = parseExecutionReference(`# EPIC ONE-01 — ${'y'.repeat(200)}\n`);
+    expect([...(parsed.items[0]?.title ?? '')].length).toBe(200);
+    expect(parsed.issues).toEqual([]);
+  });
+});

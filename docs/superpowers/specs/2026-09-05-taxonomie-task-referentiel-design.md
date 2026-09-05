@@ -141,9 +141,19 @@ transverse. On ne livre pas la moitié d'une story.
 - une clé en double dans un document est une **erreur** qui arrête l'analyse.
 
 Le premier n'est pas théorique : `execution_manifest_items.title` accepte 300
-caractères, `work_items.title` n'en accepte que 200. Un titre entre les deux
-passe l'analyse et casse l'import. Aujourd'hui la plus longue story en fait
-**198** — deux caractères sous la falaise — et 1 tâche sur 940 dépasse déjà.
+caractères, `work_items.title` n'en accepte que 200. Un titre de domaine, de
+capacité ou d'epic entre les deux passe l'analyse et casse l'import — seule la
+story était bornée, et en silence.
+
+Deux stories dépassent déjà : `US-AUD-07-1` à **226** caractères et
+`US-AUD-08-1` à **201**. Elles étaient invisibles parce qu'on les mesurait à
+travers le parser qui les tronquait — ce que seul un test de caractérisation
+entre l'ancien et le nouveau parser a fait apparaître. Une tâche sur 940
+dépasse aussi.
+
+L'empreinte porte désormais sur la phrase entière et non sur ce qu'il en reste
+après la coupe : avant, corriger un titre au-delà du 200e caractère laissait
+l'item « inchangé » au ré-import, et le ticket gardait l'ancienne version.
 
 ## L'import
 
