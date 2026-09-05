@@ -410,6 +410,7 @@ export class StudioProjectsProxyService {
         dueDate: dto.dueDate,
         meetingId: dto.meetingId,
         category: dto.category,
+        estimatePoints: dto.points,
         hoursSpent: dto.hoursSpent,
         progressPercent: dto.progressPercent,
       },
@@ -490,6 +491,7 @@ export class StudioProjectsProxyService {
         dueDate: dto.dueDate,
         meetingId: dto.meetingId,
         category: dto.category,
+        estimatePoints: dto.points,
         hoursSpent: dto.hoursSpent,
         progressPercent: dto.progressPercent,
       }),
@@ -635,6 +637,13 @@ export class StudioProjectsProxyService {
       resolvedAt: item.resolvedAt,
       completedAt: item.closedAt,
       position: item.position,
+      /**
+       * L'estimation, en points. Elle existait en base depuis le début
+       * (`estimate_points`) mais ne sortait pas d'ici : la carte, la liste et
+       * le tiroir n'avaient donc rien à afficher. `0` veut dire « pas
+       * estimé » et se lit comme une absence, pas comme un zéro.
+       */
+      points: item.estimatePoints,
       hoursSpent: item.hoursSpent,
       progressPercent: item.progressPercent,
     };
