@@ -73,7 +73,12 @@ function makeService(
     findOne: mock(async ({ where }: any) =>
       links.find((l) => l.repositoryId === where.repositoryId && l.projectId === where.projectId) ?? null,
     ),
-    find: mock(async ({ where }: any) => links.filter((l) => l.repositoryId === where.repositoryId)),
+    // `withProjectIds` interroge par lot (`In([...])`), les autres par dépôt.
+    find: mock(async ({ where }: any) => {
+      const ids = where.repositoryId?._value ?? where.repositoryId;
+      const wanted = Array.isArray(ids) ? ids : [ids];
+      return links.filter((l) => wanted.includes(l.repositoryId));
+    }),
     create: mock((l: any) => ({ id: `l${links.length + 1}`, ...l })),
     save: mock(async (l: any) => {
       links.push(l);
@@ -383,5 +388,50 @@ describe('discover', () => {
 
     expect(res).toEqual({ added: [], updated: [], unchanged: 0 });
     expect(saved).toHaveLength(0);
+  });
+});
+
+/**
+ * Les projets rattachés voyagent avec le dépôt.
+ *
+ * L'écran connaît déjà la liste des projets ; il ne lui manque que de savoir
+ * lesquels sont rattachés à quel dépôt. Le lui dire ici évite une requête par
+ * ligne — vingt dépôts, vingt allers-retours pour afficher des étiquettes.
+ */
+describe('projets rattachés', () => {
+  test('la liste porte les projets de chaque dépôt', async () => {
+    const second = repo({ id: 'r2', name: 'nola-hq-backend' });
+    const { svc } = makeService([repo(), second], [{ id: 'p1' }, { id: 'p2' }]);
+
+    await svc.linkProject('r1', { projectId: 'p1' });
+    await svc.linkProject('r1', { projectId: 'p2' });
+    await svc.linkProject('r2', { projectId: 'p2' });
+
+    const rows = await svc.list();
+    expect(rows.find((r) => r.id === 'r1')?.projectIds?.sort()).toEqual(['p1', 'p2']);
+    expect(rows.find((r) => r.id === 'r2')?.projectIds).toEqual(['p2']);
+  });
+
+  /** Aucun rattachement est une réponse, pas une absence de réponse. */
+  test('un dépôt sans projet rend un tableau vide', async () => {
+    const { svc } = makeService([repo()]);
+    const [row] = await svc.list();
+    expect(row.projectIds).toEqual([]);
+  });
+
+  test('le détail d’un dépôt les porte aussi', async () => {
+    const { svc } = makeService([repo()]);
+    await svc.linkProject('r1', { projectId: 'p1' });
+
+    expect((await svc.findOne('r1')).projectIds).toEqual(['p1']);
+  });
+
+  /** Détacher se voit tout de suite dans la liste. */
+  test('un projet détaché disparaît de la liste', async () => {
+    const { svc } = makeService([repo()]);
+    await svc.linkProject('r1', { projectId: 'p1' });
+    await svc.unlinkProject('r1', 'p1');
+
+    expect((await svc.list())[0].projectIds).toEqual([]);
   });
 });
