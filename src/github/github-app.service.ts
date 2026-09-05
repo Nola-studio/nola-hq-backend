@@ -53,6 +53,15 @@ export interface GithubAppStatus {
 }
 
 /** Ce que HQ retient d'un dépôt vu par l'API — le reste appartient à GitHub. */
+/** Ce qu'on retient d'une pull request — pas la peine d'en garder plus. */
+export interface GithubPullRequest {
+  number: number;
+  html_url: string;
+  state: 'open' | 'closed';
+  merged_at?: string | null;
+  draft?: boolean;
+}
+
 export interface GithubRepositoryFacts {
   externalId: string;
   owner: string;
@@ -225,6 +234,59 @@ export class GithubAppService {
       }
       throw err;
     }
+  }
+
+  /**
+   * Ouvre la pull request d'une branche, ou retrouve celle qui existe.
+   *
+   * Le second cas n'est pas une erreur : quelqu'un a pu l'ouvrir depuis
+   * GitHub entre-temps, ou le bouton a été cliqué deux fois. GitHub répond
+   * alors 422 « A pull request already exists » — on va la chercher et on la
+   * rend, en disant qu'on ne l'a pas créée. L'appelant doit pouvoir
+   * distinguer les deux : « ouverte » et « déjà ouverte » ne se racontent pas
+   * pareil.
+   */
+  async createPullRequest(
+    owner: string,
+    name: string,
+    input: { title: string; head: string; base: string; body?: string; draft?: boolean },
+  ): Promise<{ created: boolean; pull: GithubPullRequest }> {
+    try {
+      const pull = await this.installationRequest<GithubPullRequest>(
+        owner,
+        name,
+        `/repos/${owner}/${name}/pulls`,
+        { method: 'POST', body: JSON.stringify(input) },
+      );
+      return { created: true, pull };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!message.includes('422') || !/already exists/i.test(message)) throw err;
+
+      const existing = await this.findPullRequest(owner, name, input.head);
+      if (!existing) throw err;
+      return { created: false, pull: existing };
+    }
+  }
+
+  /**
+   * La pull request ouverte pour une branche, s'il y en a une.
+   *
+   * `head` se qualifie par le propriétaire (`owner:branche`) : sans ça,
+   * GitHub cherche dans tous les forks et peut répondre celle d'un autre.
+   */
+  async findPullRequest(
+    owner: string,
+    name: string,
+    head: string,
+  ): Promise<GithubPullRequest | null> {
+    const list = await this.installationRequest<GithubPullRequest[]>(
+      owner,
+      name,
+      `/repos/${owner}/${name}/pulls?state=open&head=${encodeURIComponent(`${owner}:${head}`)}`,
+      { method: 'GET' },
+    );
+    return list[0] ?? null;
   }
 
   /**

@@ -18,6 +18,8 @@ sections est conservée telle quelle et devient la description du ticket.
 ```markdown
 # Lot « Facturation par échéance »
 
+**Version :** 1.0
+
 Projet : NolaHQ
 Auteur : Greg · septembre 2026
 
@@ -68,6 +70,21 @@ classera dans HQ, sur le ticket.
   raison d'avoir déplacé une section.
 - Le **niveau de titre est libre** : `#`, `##`, `####` — tous acceptés.
 - Le séparateur peut être `—`, `–` ou `-`.
+
+### La version — obligatoire pour le script
+
+```
+**Version :** 1.0
+```
+
+Les astérisques comptent ici : le script la cherche sous cette forme exacte, et
+s'arrête s'il ne la trouve pas. Elle peut aussi se passer en second argument
+(`import-referentiel.sh mon-lot.md 1.0`), mais l'écrire dans le document est
+préférable — **le numéro qui fait foi est celui que le document déclare**, pas
+celui qu'on retape en ligne de commande.
+
+Incrémentez-la à chaque dépôt d'une version modifiée du même document. C'est
+elle qui permet le rapprochement : inchangé, modifié, ajouté, retiré.
 
 ### Le projet — une fois, en tête
 
@@ -193,8 +210,25 @@ User stories :
 ## Déposer le document
 
 ```bash
-scripts/import-referentiel.sh chemin/vers/mon-lot.md
+HQ_KEY=REF-FACTURATION \
+HQ_TITLE="Facturation par échéance" \
+scripts/import-referentiel.sh docs/mon-lot.md
 ```
+
+### ⚠️ La clé décide de tout
+
+`HQ_KEY` identifie le **référentiel**, pas le fichier. Déposer un document sous
+une clé existante en fait une **nouvelle version de ce référentiel-là** — et le
+rapprochement marque alors « retiré » tout ce que la version précédente
+déclarait et que celle-ci ne déclare plus.
+
+Autrement dit : lancer le script sans `HQ_KEY` sur un lot de facturation le
+déposerait comme une v2 de `REF-NOLAAHQ`, et **retirerait les 106 tickets du
+référentiel v1.3**. Rien n'est détruit — le référentiel garde ses versions, et
+les tickets acceptés sont « dépréciés » plutôt que supprimés — mais c'est une
+soirée à défaire.
+
+**Un lot de travail distinct veut sa propre clé.** Une seule règle à retenir.
 
 Le dépôt se fait en deux temps : le document est d'abord **analysé** — vous
 recevez le compte d'epics et de stories, et la liste des anomalies — puis

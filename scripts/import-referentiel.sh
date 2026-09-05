@@ -23,7 +23,18 @@
 #
 #   HQ_API      base de l'API, sans slash final
 #               (défaut : https://dev.api.nolaastudio.com/api/v1)
-#   HQ_KEY      clé stable du référentiel (défaut : REF-NOLAAHQ)
+#   HQ_KEY      clé stable du référentiel (défaut : REF-NOLAAHQ).
+#
+#               ATTENTION : déposer un document sous une clé existante en fait
+#               une NOUVELLE VERSION de ce référentiel-là. Le rapprochement
+#               marque alors « retiré » tout ce que la version précédente
+#               déclarait et que celle-ci ne déclare plus. Un lot de travail
+#               distinct veut sa propre clé — HQ_KEY=REF-FACTURATION — sans
+#               quoi il efface le référentiel qu'il croit compléter.
+#
+#   HQ_TITLE    titre du référentiel à sa création (défaut : celui de v1.3).
+#               Sans lui, un lot de facturation s'enregistrerait sous le nom
+#               « Référentiel d'évolution de Nolaa HQ ».
 #
 # Le script s'arrête avant d'écrire quoi que ce soit dans le backlog : il
 # affiche la prévisualisation et demande confirmation. Un import touche des
@@ -39,6 +50,10 @@ FILE="${1:?usage: import-referentiel.sh <fichier.md> [version]}"
 VERSION="${2:-}"
 HQ_API="${HQ_API:-https://dev.api.nolaastudio.com/api/v1}"
 HQ_KEY="${HQ_KEY:-REF-NOLAAHQ}"
+# L'apostrophe ne peut pas vivre dans un `${:-…}` : bash y ouvre une chaîne
+# et avale le reste du script. Le défaut passe donc par une variable.
+DEFAULT_TITLE="Référentiel d'évolution de Nolaa HQ"
+HQ_TITLE="${HQ_TITLE:-$DEFAULT_TITLE}"
 COOKIES="$(mktemp)"
 trap 'rm -f "$COOKIES"' EXIT
 
@@ -100,8 +115,10 @@ counts() {
 
 # 1 — déposer. Une clé déjà connue reçoit une nouvelle version plutôt qu'un
 #     second référentiel : l'original n'est jamais remplacé.
-PAYLOAD="$(jq -n --arg k "$HQ_KEY" --arg v "$VERSION" --rawfile c "$FILE" \
-  '{key:$k, title:"Référentiel d'"'"'évolution de Nolaa HQ", version:$v, format:"markdown", content:$c}')"
+PAYLOAD="$(jq -n --arg k "$HQ_KEY" --arg t "$HQ_TITLE" --arg v "$VERSION" --rawfile c "$FILE" \
+  '{key:$k, title:$t, version:$v, format:"markdown", content:$c}')"
+
+echo "Référentiel : $HQ_KEY — « $HQ_TITLE »"
 
 if api -o /dev/null "$BASE/execution-references/$HQ_KEY" 2>/dev/null; then
   echo "→ $HQ_KEY existe : dépôt de la version $VERSION"

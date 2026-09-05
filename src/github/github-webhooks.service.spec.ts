@@ -451,7 +451,7 @@ describe('une pull request', () => {
     expect(branchRows[0].state).toBe('open');
   });
 
-  test('ouverte ne change rien non plus', async () => {
+  test('ouverte ne ferme pas la branche', async () => {
     const { svc, branchRows } = makeService({
       repos: [KNOWN_REPO],
       branches: [{ repositoryId: 'r1', name: 'feature/GOV-01-x', state: 'open' }],
@@ -463,6 +463,83 @@ describe('une pull request', () => {
     });
 
     expect(branchRows[0].state).toBe('open');
+  });
+
+  /**
+   * Une PR ouverte depuis un terminal ou l'interface web doit se voir dans le
+   * tiroir sans qu'on ait cliqué dans HQ — sinon la moitié des PR seraient
+   * invisibles, comme l'étaient les branches avant le lot 2.4.
+   */
+  test('ouverte depuis GitHub, elle rejoint la branche du ticket', async () => {
+    const { svc, branchRows } = makeService({
+      repos: [KNOWN_REPO],
+      branches: [{ repositoryId: 'r1', name: 'feature/GOV-01-x', state: 'open' }],
+    });
+
+    await deliver(svc, 'pull_request', {
+      action: 'opened',
+      pull_request: {
+        number: 12,
+        html_url: 'https://github.com/nola-studio/nola-hq/pull/12',
+        state: 'open',
+        merged: false,
+        head: { ref: 'feature/GOV-01-x' },
+      },
+    });
+
+    expect(branchRows[0].prNumber).toBe(12);
+    expect(branchRows[0].prUrl).toContain('/pull/12');
+    expect(branchRows[0].prState).toBe('open');
+  });
+
+  /**
+   * Fermée sans fusion : la PR est close, la branche vit. Les confondre ferait
+   * disparaître du travail en cours au premier abandon de PR.
+   */
+  test('fermée sans fusion ferme la PR, pas la branche', async () => {
+    const { svc, branchRows } = makeService({
+      repos: [KNOWN_REPO],
+      branches: [
+        { repositoryId: 'r1', name: 'feature/GOV-01-x', state: 'open', prNumber: 12, prState: 'open' },
+      ],
+    });
+
+    await deliver(svc, 'pull_request', {
+      action: 'closed',
+      pull_request: { number: 12, state: 'closed', merged: false, head: { ref: 'feature/GOV-01-x' } },
+    });
+
+    expect(branchRows[0].prState).toBe('closed');
+    expect(branchRows[0].state).toBe('open');
+  });
+
+  test('fusionnée ferme les deux', async () => {
+    const { svc, branchRows } = makeService({
+      repos: [KNOWN_REPO],
+      branches: [
+        { repositoryId: 'r1', name: 'feature/GOV-01-x', state: 'open', prNumber: 12, prState: 'open' },
+      ],
+    });
+
+    await deliver(svc, 'pull_request', {
+      action: 'closed',
+      pull_request: { number: 12, state: 'closed', merged: true, head: { ref: 'feature/GOV-01-x' } },
+    });
+
+    expect(branchRows[0].prState).toBe('merged');
+    expect(branchRows[0].state).toBe('merged');
+  });
+
+  /** Une PR sur une branche que HQ ne connaît pas ne crée rien. */
+  test('sur une branche inconnue, elle ne fabrique aucun lien', async () => {
+    const { svc, branchRows } = makeService({ repos: [KNOWN_REPO], branches: [] });
+
+    await deliver(svc, 'pull_request', {
+      action: 'opened',
+      pull_request: { number: 12, state: 'open', merged: false, head: { ref: 'chore/inconnue' } },
+    });
+
+    expect(branchRows).toHaveLength(0);
   });
 });
 

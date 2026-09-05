@@ -14,6 +14,16 @@ export const BRANCH_STATES = ['open', 'merged', 'deleted'] as const;
 export type BranchState = (typeof BRANCH_STATES)[number];
 
 /**
+ * L'état de la pull request ouverte pour cette branche.
+ *
+ * Distinct de `state` : une branche peut être ouverte sans PR, et une PR
+ * fermée sans fusion laisse la branche vivante. Confondre les deux ferait
+ * disparaître du travail en cours au premier abandon de PR.
+ */
+export const PULL_REQUEST_STATES = ['open', 'merged', 'closed'] as const;
+export type PullRequestState = (typeof PULL_REQUEST_STATES)[number];
+
+/**
  * Le lien entre un ticket et la branche qui le réalise (ENG-08).
  *
  * Sans cette table, la branche existe sur GitHub et HQ ignore à quoi elle se
@@ -95,6 +105,22 @@ export class WorkItemBranch {
 
   @Column({ type: 'varchar', length: 500, name: 'html_url', nullable: true })
   htmlUrl!: string | null;
+
+  /**
+   * La pull request de cette branche, quand il y en a une.
+   *
+   * Nulle est l'état normal d'une branche qu'on vient d'ouvrir : le travail
+   * commence avant la revue. Ces trois champs vont ensemble — un numéro sans
+   * URL ne mènerait nulle part, un état sans numéro ne désignerait rien.
+   */
+  @Column({ type: 'integer', name: 'pr_number', nullable: true })
+  prNumber!: number | null;
+
+  @Column({ type: 'varchar', length: 500, name: 'pr_url', nullable: true })
+  prUrl!: string | null;
+
+  @Column({ type: 'varchar', length: 16, name: 'pr_state', nullable: true })
+  prState!: PullRequestState | null;
 
   @Column({ name: 'created_at' })
   createdAt!: Date;
