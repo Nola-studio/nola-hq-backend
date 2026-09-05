@@ -4,7 +4,28 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 async function main() {
-  const dbUrl = process.env.DATABASE_URL || 'postgres://postgres:postgres@localhost:5432/nola_hq_test';
+  /**
+   * Aucune valeur de repli.
+   *
+   * La chaîne `postgres://postgres:postgres@localhost:5432/nola_hq_test` était
+   * écrite ici en dur : CodeQL la signale en critique (identifiants codés en
+   * dur), et il a raison même pour une base de test — un mot de passe dans le
+   * dépôt est un mot de passe que personne ne fera tourner, et celui-ci finit
+   * par ressembler à celui d'ailleurs.
+   *
+   * Le repli n'apportait rien de plus : la CI fournit `DATABASE_URL`, et en
+   * local une connexion muette vers une base absente échouait de toute façon,
+   * mais dix lignes plus loin et avec un message de TypeORM. Exiger la
+   * variable dit ce qui manque tout de suite.
+   */
+  const dbUrl = process.env.DATABASE_URL;
+  if (!dbUrl) {
+    console.error(
+      '[Tier 2 Postgres CI Gate] DATABASE_URL est requis — ex. ' +
+        'DATABASE_URL=postgres://<utilisateur>:<mot de passe>@localhost:5432/<base> bun run src/scripts/verify-schema-integrity.ts',
+    );
+    process.exit(1);
+  }
   console.log(`[Tier 2 Postgres CI Gate] Connecting to PostgreSQL at ${dbUrl.replace(/:[^:@]+@/, ':***@')}...`);
 
   const migrationsDir = path.join(__dirname, '../migrations');
