@@ -8,6 +8,7 @@ import {
   MANIFEST_SCHEMA_VERSION,
 } from './execution-manifest.entity';
 import { parseExecutionReference, summarize } from './execution-reference.parser';
+import { resolvePlacement } from './execution-placement';
 import { Capability, Domain } from '../domains/domain.entity';
 import { WorkItem } from '../work-items/work-item.entity';
 
@@ -451,51 +452,4 @@ export class ExecutionImportService {
     });
     return produced.filter((item) => item.sourceKey !== null && !stillDeclared.has(item.sourceKey));
   }
-}
-
-type Placement =
-  | { ok: true; domainId: string | null; capabilityId: string | null }
-  | { ok: false; reason: string };
-
-/**
- * Finds the domain and capability an item belongs to, by walking up its
- * declared parents. An epic hangs off a capability, a story off its epic, so a
- * story inherits the placement its epic resolved to.
- */
-function resolvePlacement(
-  item: ExecutionManifestItem,
-  byKey: Map<string, ExecutionManifestItem>,
-  domainByCode: Map<string, Domain>,
-  capabilityByCode: Map<string, Capability>,
-): Placement {
-  let cursor: ExecutionManifestItem | undefined = item;
-  const seen = new Set<string>();
-
-  while (cursor?.parentKey) {
-    if (seen.has(cursor.sourceKey)) {
-      return { ok: false, reason: `Cycle de rattachement autour de « ${cursor.sourceKey} ».` };
-    }
-    seen.add(cursor.sourceKey);
-
-    const parentKey = cursor.parentKey;
-    const capability = capabilityByCode.get(parentKey);
-    if (capability) {
-      return { ok: true, domainId: capability.domainId, capabilityId: capability.id };
-    }
-    const domain = domainByCode.get(parentKey);
-    if (domain) {
-      return { ok: true, domainId: domain.id, capabilityId: null };
-    }
-
-    const parent: ExecutionManifestItem | undefined = byKey.get(parentKey);
-    if (!parent) {
-      return {
-        ok: false,
-        reason: `« ${parentKey} » n'existe ni dans le registre des domaines ni dans le manifest.`,
-      };
-    }
-    cursor = parent;
-  }
-
-  return { ok: false, reason: `« ${item.sourceKey} » n'est rattaché à aucun domaine.` };
 }
