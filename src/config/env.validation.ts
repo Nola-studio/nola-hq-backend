@@ -1,5 +1,5 @@
 import { plainToInstance } from 'class-transformer';
-import { IsOptional, IsString, validateSync } from 'class-validator';
+import { IsIn, IsOptional, IsString, validateSync } from 'class-validator';
 
 /**
  * Boot-time environment validation. Fails fast with a clear message instead of
@@ -29,6 +29,9 @@ export class EnvironmentVariables {
   @IsOptional() @IsString() VAPID_PUBLIC_KEY?: string;
   @IsOptional() @IsString() VAPID_PRIVATE_KEY?: string;
   @IsOptional() @IsString() VAPID_SUBJECT?: string;
+  // Upcoming subscription invoices notification mode ('off' | 'override' | 'live')
+  @IsOptional() @IsIn(['off', 'override', 'live']) INVOICE_NOTIFY_MODE?: 'off' | 'override' | 'live';
+  @IsOptional() @IsString() INVOICE_NOTIFY_OVERRIDE_EMAIL?: string;
 }
 
 /** base64 of 32 zero bytes — the dev placeholder that must never reach prod. */
