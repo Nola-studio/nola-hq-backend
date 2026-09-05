@@ -392,6 +392,52 @@ Stories :
     expect(parsed.issues).toEqual([]);
   });
 
+  /**
+   * Les référentiels par domaine écrivent le numéro suivi du nom de la
+   * version — « Version cible : 1.11 — Contrôle et gouvernance avancée ».
+   * Seul le numéro désigne quelque chose : le libellé est un repère de
+   * lecture pour l'humain. Le garder empêcherait l'import de résoudre la
+   * version, et ferait déborder `target_version`, taillé comme le numéro
+   * qu'il reflète.
+   */
+  test('le libellé qui suit le numéro n’en fait pas partie', () => {
+    const parsed = parseExecutionReference(
+      '# EPIC GOV-02 — T\n\nVersion cible : 1.11 — Contrôle et gouvernance avancée\n',
+    );
+    expect(parsed.items[0]?.targetVersion).toBe('1.11');
+  });
+
+  /**
+   * Le registre n'impose pas le versionnage sémantique : d'autres produits du
+   * groupe numérotent par date. Un tiret sans espaces appartient au numéro et
+   * n'ouvre pas un libellé.
+   */
+  test('un numéro daté garde ses tirets', () => {
+    const parsed = parseExecutionReference('# EPIC ONE-01 — T\n\nVersion cible : 2026-09-05\n');
+    expect(parsed.items[0]?.targetVersion).toBe('2026-09-05');
+  });
+
+  /**
+   * Le registre borne un numéro de version à 32 caractères. Au-delà, ce n'est
+   * plus un numéro : le parser le dit et l'epic n'en vise aucun, plutôt que de
+   * laisser l'écriture du manifeste échouer sur la contrainte de la colonne.
+   */
+  test('un numéro trop long est une anomalie, pas une panne', () => {
+    const parsed = parseExecutionReference(
+      '# EPIC ONE-01 — T\n\nVersion cible : 1.11 Contrôle et gouvernance avancée du groupe\n',
+    );
+    expect(parsed.items[0]?.targetVersion).toBeNull();
+    expect(parsed.issues).toEqual([
+      {
+        level: 'warning',
+        message:
+          '« 1.11 Contrôle et gouvernance avancée du groupe » ne peut pas être un numéro de version — 32 caractères au plus. L’epic entre sans version.',
+        line: 3,
+        sourceKey: 'ONE-01',
+      },
+    ]);
+  });
+
   test('elle cohabite avec le côté et le domaine', () => {
     const parsed = parseExecutionReference(
       '# EPIC ONE-01 — T\n\nDomaine : D08\nCôté : backend\nVersion cible : 1.4.0\n',

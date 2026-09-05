@@ -141,6 +141,14 @@ Version cible : 1.1.0
 Le numéro d'une version déclarée dans **Versions** (le registre REL-00). Le
 « v » est toléré : `v1.1.0` et `1.1.0` désignent la même chose.
 
+Le nom que porte la version est toléré derrière un tiret cadratin détaché, et
+ignoré : `Version cible : 1.11 — Contrôle et gouvernance avancée` vise `1.11`.
+Un tiret collé appartient au numéro — `2026-09-05` reste entier, le registre
+n'imposant pas le versionnage sémantique.
+
+Ce qui dépasse 32 caractères n'est plus un numéro : le rapport le signale et
+l'epic entre sans version, plutôt que de faire échouer l'analyse.
+
 Elle descend sur les stories de l'epic — on ne livre pas la moitié d'un epic.
 Une version déjà posée dans HQ l'emporte : replanifier est une décision, et un
 ré-import ne la révise pas.
@@ -271,6 +279,7 @@ inchangé, modifié, ajouté, retiré. Rien n'est écrasé en silence.
 | `Projet :` inconnu ou ambigu | Les tickets entrent sans projet, le rapport dit pourquoi. |
 | Deux lignes `Projet :` | Avertissement : la première est retenue. |
 | `Version cible :` inconnue du registre | Les tickets entrent sans version, le rapport la nomme. |
+| `Version cible :` qui n'est pas un numéro (plus de 32 caractères) | Avertissement : l'epic entre sans version. |
 
 Une anomalie de niveau *avertissement* n'empêche pas l'import ; une *erreur*
 l'arrête. Le rapport les nomme toutes, avec leur ligne.
