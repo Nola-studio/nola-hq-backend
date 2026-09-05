@@ -193,9 +193,48 @@ Stories :
 - La liste peut être **numérotée** (`1.`) ou **à puces** (`-`, `*`).
 - La clé d'une story est dérivée de son rang : `US-BIL-01-1`, `US-BIL-01-2`…
   **Insérer une story au milieu décale les clés des suivantes** et les fait
-  passer pour des tickets modifiés. Ajoutez plutôt à la fin.
+  passer pour des tickets modifiés. Ajoutez à la fin — ou passez à la forme
+  ci-dessous, qui supprime le problème.
 - La liste s'arrête au premier paragraphe de prose ou au titre suivant ; les
   lignes vides à l'intérieur ne l'interrompent pas.
+
+### La story en section — clé écrite, ordre sans conséquence
+
+```
+##### US-BIL-01-1 — Consulter les factures à venir
+
+En tant que gestionnaire, je veux voir les factures à venir
+afin d'anticiper la trésorerie du mois.
+
+Côté : frontend
+```
+
+La clé n'est plus déduite : elle est **écrite**. Réordonner les sections,
+en insérer une au milieu, en retirer une — rien ne déplace la clé d'une autre.
+C'est la forme à préférer, et la seule qui tienne quand un document vit.
+
+- Le niveau de titre ne compte pas : `#####` par habitude, tout niveau passe.
+- Le titre de section porte le **libellé court**, celui qu'on lira sur le
+  board. La phrase « En tant que… afin de… » descend dans le corps, avec les
+  critères d'acceptation et tout ce qui décrit le comportement attendu.
+- La clé suit la forme `US-<clé d'epic>-<n>`. Elle ne se réutilise ni ne se
+  renumérote : insérer une story, c'est prendre le numéro libre suivant.
+- Une clé déjà prise dans le document est une **erreur** qui arrête l'analyse.
+- La story hérite de la priorité, du côté et de la version cible de son epic.
+  `Côté :` écrit dans la section vaut **pour elle seule** — les stories
+  suivantes gardent celui de l'epic.
+- `Version cible :` dans une section est refusée et signalée : la version se
+  déclare sur l'epic, parce qu'on ne livre pas la moitié d'un epic.
+
+Les deux formes cohabitent, y compris dans un même document, et cela ne
+changera pas : l'analyse s'exécute sur une version *stockée*, et un manifeste
+doit toujours pouvoir se reconstruire depuis un document déjà déposé.
+
+### La longueur des titres
+
+Un titre est borné à **200 caractères** — ce qu'un ticket accepte. Au-delà, il
+est coupé et le rapport le nomme, avec sa longueur et sa ligne. Raccourcissez-le
+dans le document plutôt que de laisser la coupe décider.
 
 ### La prose
 
@@ -280,6 +319,9 @@ inchangé, modifié, ajouté, retiré. Rien n'est écrasé en silence.
 | Deux lignes `Projet :` | Avertissement : la première est retenue. |
 | `Version cible :` inconnue du registre | Les tickets entrent sans version, le rapport la nomme. |
 | `Version cible :` qui n'est pas un numéro (plus de 32 caractères) | Avertissement : l'epic entre sans version. |
+| Titre de plus de 200 caractères | Avertissement : il est coupé, le rapport le nomme. |
+| `Version cible :` dans une section de story | Avertissement : la ligne est ignorée. |
+| Clé déclarée deux fois | **Erreur** : l'analyse s'arrête. |
 
 Une anomalie de niveau *avertissement* n'empêche pas l'import ; une *erreur*
 l'arrête. Le rapport les nomme toutes, avec leur ligne.

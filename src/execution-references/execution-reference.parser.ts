@@ -109,6 +109,22 @@ const CAPABILITY_HEADING = /^### Capacité (\d{1,2})\.(\d{1,2}) — (.+?)\s*$/;
  * d'union sont acceptés parce qu'aucun éditeur ne les distingue à la frappe.
  */
 const EPIC_HEADING = /^#{1,6}\s+EPIC\s+([A-Z]{2,6}-\d{1,3})\s*[—–-]\s*(.+?)\s*$/;
+/**
+ * Une story déclarée en section, avec sa clé écrite :
+ * « ##### US-GOV-01-1 — Consulter la structure du groupe ».
+ *
+ * La liste numérotée dérive la clé du rang, ce que ce fichier s'interdit
+ * pourtant plus haut : « it must come from the document's own numbering, never
+ * from a position ». Insérer une story y décale toutes les suivantes, et le
+ * rapprochement donne au ticket de la troisième le texte de la quatrième — un
+ * epic de backlog corrompu sans un message. La clé écrite supprime la classe.
+ *
+ * Les deux formes cohabitent, et cela ne se retirera pas : `parse` s'exécute
+ * sur une version stockée, et le module promet qu'un manifeste se reconstruit
+ * depuis un document immuable. Cesser de lire la liste numérotée casserait
+ * cette promesse pour toute version déjà déposée.
+ */
+const STORY_HEADING = /^#{1,6}\s+(US-[A-Z]{2,6}-\d{1,3}-\d{1,3})\s*[—–-]\s*(.+?)\s*$/;
 /** Les astérisques du gras sont facultatives : elles ne changent pas le sens. */
 const PRIORITY_LINE = /^\*{0,2}Priorité\s*:\s*\*{0,2}(P[0-3])\*{0,2}\s*$/;
 /**
@@ -187,8 +203,35 @@ function sha256(text: string): string {
  * not like a paragraph.
  */
 function storyTitle(sentence: string): string {
-  const trimmed = sentence.replace(/\s+/g, ' ').trim();
-  return trimmed.length <= 200 ? trimmed : `${trimmed.slice(0, 197)}…`;
+  return sentence.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Ce qu'un ticket accepte comme titre. Le manifeste en tolère 300, le ticket
+ * 200 : un titre entre les deux passait l'analyse pour faire échouer l'import,
+ * loin de la ligne fautive. On borne donc ici, une fois, pour tous les genres —
+ * seule la story l'était, et en silence.
+ */
+const TITLE_MAX = 200;
+
+function boundedTitle(
+  raw: string,
+  sourceKey: string,
+  line: number,
+  issues: ParseIssue[],
+): string {
+  const trimmed = raw.replace(/\s+/g, ' ').trim();
+  const chars = [...trimmed];
+  if (chars.length <= TITLE_MAX) return trimmed;
+  issues.push({
+    level: 'warning',
+    message:
+      `Titre de ${chars.length} caractères pour ${sourceKey} — ${TITLE_MAX} au plus, ` +
+      `il a été coupé. Raccourcissez-le dans le document.`,
+    line,
+    sourceKey,
+  });
+  return `${chars.slice(0, TITLE_MAX - 3).join('')}…`;
 }
 
 export function parseExecutionReference(markdown: string): ParsedReference {
@@ -200,6 +243,9 @@ export function parseExecutionReference(markdown: string): ParsedReference {
   let currentDomain: string | null = null;
   let currentCapability: string | null = null;
   let currentEpic: ParsedItem | null = null;
+  /** La story en section dont le corps est en cours de lecture, s'il y en a
+   *  une : « Côté : » y parle pour elle, pas pour l'epic qui la contient. */
+  let currentStory: ParsedItem | null = null;
   let openItem: { item: ParsedItem; bodyStart: number } | null = null;
 
   const seenKeys = new Map<string, number>();
@@ -242,6 +288,7 @@ export function parseExecutionReference(markdown: string): ParsedReference {
     if (domainMatch) {
       closeOpenItem(i);
       const [, number, title] = domainMatch;
+      currentStory = null;
       currentDomain = domainKey(number);
       currentCapability = null;
       currentEpic = null;
@@ -250,7 +297,7 @@ export function parseExecutionReference(markdown: string): ParsedReference {
           kind: 'domain',
           sourceKey: currentDomain,
           parentKey: null,
-          title,
+          title: boundedTitle(title, currentDomain, lineNumber, issues),
           body: null,
           priority: null,
           surface: null,
@@ -284,6 +331,7 @@ export function parseExecutionReference(markdown: string): ParsedReference {
         });
       }
 
+      currentStory = null;
       currentCapability = key;
       currentEpic = null;
       push(
@@ -291,7 +339,7 @@ export function parseExecutionReference(markdown: string): ParsedReference {
           kind: 'capability',
           sourceKey: key,
           parentKey: parent,
-          title,
+          title: boundedTitle(title, key, lineNumber, issues),
           body: null,
           priority: null,
           surface: null,
@@ -313,7 +361,7 @@ export function parseExecutionReference(markdown: string): ParsedReference {
         kind: 'epic',
         sourceKey: code,
         parentKey: currentCapability ?? currentDomain,
-        title,
+        title: boundedTitle(title, code, lineNumber, issues),
         body: null,
         priority: null,
         surface: null,
@@ -323,7 +371,42 @@ export function parseExecutionReference(markdown: string): ParsedReference {
         line: lineNumber,
       };
       currentEpic = epic;
+      currentStory = null;
       push(epic, i + 1);
+      continue;
+    }
+
+    const storyMatch = STORY_HEADING.exec(line);
+    if (storyMatch) {
+      closeOpenItem(i);
+      const [, key, title] = storyMatch;
+      if (!currentEpic) {
+        issues.push({
+          level: 'warning',
+          message: `« ${key} » n'est sous aucun EPIC — une story sans parent n'entre pas dans le backlog.`,
+          line: lineNumber,
+          sourceKey: key,
+        });
+        currentStory = null;
+        continue;
+      }
+      const story: ParsedItem = {
+        kind: 'story',
+        sourceKey: key,
+        parentKey: currentEpic.sourceKey,
+        title: boundedTitle(title, key, lineNumber, issues),
+        body: null,
+        priority: currentEpic.priority,
+        // Ce que l'epic dit vaut jusqu'à ce que la section dise autrement.
+        surface: currentEpic.surface,
+        // Une story part avec son epic : on ne livre pas la moitié d'un epic.
+        targetVersion: currentEpic.targetVersion,
+        sourceSectionId: slug(`story-${key}-${title}`),
+        sourceExcerptHash: '',
+        line: lineNumber,
+      };
+      currentStory = story;
+      push(story, i + 1);
       continue;
     }
 
@@ -361,22 +444,37 @@ export function parseExecutionReference(markdown: string): ParsedReference {
     }
 
     const surfaceMatch = SURFACE_LINE.exec(line);
-    if (surfaceMatch && currentEpic) {
+    if (surfaceMatch && (currentStory || currentEpic)) {
+      // Dans une section de story, le côté vaut pour elle seule : l'écrire sur
+      // l'epic changerait celui de toutes les stories qui suivent.
+      const cible = currentStory ?? currentEpic!;
       const surface = readSurface(surfaceMatch[1]);
       if (surface) {
-        currentEpic.surface = surface;
+        cible.surface = surface;
       } else {
         issues.push({
           level: 'warning',
           message: `« ${surfaceMatch[1].trim()} » n'est pas un côté connu — attendu backend, frontend ou les deux.`,
           line: lineNumber,
-          sourceKey: currentEpic.sourceKey,
+          sourceKey: cible.sourceKey,
         });
       }
       continue;
     }
 
     const targetVersionMatch = TARGET_VERSION_LINE.exec(line);
+    if (targetVersionMatch && currentStory) {
+      // La version se déclare sur l'epic : on ne livre pas la moitié d'un epic.
+      // L'appliquer ici changerait celle de l'epic, donc celle de toutes les
+      // stories suivantes — un effet de bord que rien n'annoncerait.
+      issues.push({
+        level: 'warning',
+        message: `« Version cible » se déclare sur l'EPIC, pas sur ${currentStory.sourceKey} — la ligne est ignorée.`,
+        line: lineNumber,
+        sourceKey: currentStory.sourceKey,
+      });
+      continue;
+    }
     if (targetVersionMatch && currentEpic) {
       const declaredVersion = targetVersionMatch[1].replace(VERSION_LABEL_SUFFIX, '').trim();
       if ([...declaredVersion].length > TARGET_VERSION_MAX) {
@@ -418,7 +516,7 @@ export function parseExecutionReference(markdown: string): ParsedReference {
             kind: 'story',
             sourceKey: key,
             parentKey: currentEpic.sourceKey,
-            title: sentence,
+            title: boundedTitle(sentence, key, cursor + 1, issues),
             body: null,
             priority: currentEpic.priority,
             surface: (tagged && readSurface(tagged[1])) || currentEpic.surface,
