@@ -221,10 +221,12 @@ C'est la forme à préférer, et la seule qui tienne quand un document vit.
   renumérote : insérer une story, c'est prendre le numéro libre suivant.
 - Une clé déjà prise dans le document est une **erreur** qui arrête l'analyse.
 - La story hérite de la priorité, du côté et de la version cible de son epic.
-  `Côté :` écrit dans la section vaut **pour elle seule** — les stories
-  suivantes gardent celui de l'epic.
-- `Version cible :` dans une section est refusée et signalée : la version se
-  déclare sur l'epic, parce qu'on ne livre pas la moitié d'un epic.
+- Ce qui appartient à l'item lui-même s'écrit dans sa section et **ne vaut que
+  pour lui** : `Côté :` et `Priorité :`. Les stories suivantes gardent ceux de
+  l'epic.
+- Ce qui appartient à l'epic y est refusé et signalé : `Version cible :`, parce
+  qu'on ne livre pas la moitié d'un epic, et `Domaine :`, parce que la story
+  suit le classement de son parent.
 
 Les deux formes cohabitent, y compris dans un même document, et cela ne
 changera pas : l'analyse s'exécute sur une version *stockée*, et un manifeste
@@ -320,7 +322,7 @@ inchangé, modifié, ajouté, retiré. Rien n'est écrasé en silence.
 | `Version cible :` inconnue du registre | Les tickets entrent sans version, le rapport la nomme. |
 | `Version cible :` qui n'est pas un numéro (plus de 32 caractères) | Avertissement : l'epic entre sans version. |
 | Titre de plus de 200 caractères | Avertissement : il est coupé, le rapport le nomme. |
-| `Version cible :` dans une section de story | Avertissement : la ligne est ignorée. |
+| `Version cible :` ou `Domaine :` dans une section de story | Avertissement : la ligne est ignorée. |
 | Clé déclarée deux fois | **Erreur** : l'analyse s'arrête. |
 
 Une anomalie de niveau *avertissement* n'empêche pas l'import ; une *erreur*

@@ -410,10 +410,12 @@ export function parseExecutionReference(markdown: string): ParsedReference {
       continue;
     }
 
-    // A priority line belongs to the epic it follows.
+    // La priorité appartient à l'item sous lequel elle est écrite : à la story
+    // quand sa section est ouverte, à l'epic sinon. L'appliquer toujours à
+    // l'epic changerait aussi celle de toutes les stories qui suivent.
     const priorityMatch = PRIORITY_LINE.exec(line);
-    if (priorityMatch && currentEpic) {
-      currentEpic.priority = priorityMatch[1] as ParsedPriority;
+    if (priorityMatch && (currentStory || currentEpic)) {
+      (currentStory ?? currentEpic!).priority = priorityMatch[1] as ParsedPriority;
       continue;
     }
 
@@ -491,6 +493,18 @@ export function parseExecutionReference(markdown: string): ParsedReference {
     }
 
     const domainLineMatch = DOMAIN_LINE.exec(line);
+    if (domainLineMatch && currentStory) {
+      // Le domaine classe l'epic, et la story suit son epic : la ranger
+      // ailleurs contredirait la chaîne. Écrite ici, la ligne aurait déplacé
+      // l'epic lui-même.
+      issues.push({
+        level: 'warning',
+        message: `« Domaine » se déclare sur l'EPIC, pas sur ${currentStory.sourceKey} — la ligne est ignorée.`,
+        line: lineNumber,
+        sourceKey: currentStory.sourceKey,
+      });
+      continue;
+    }
     if (domainLineMatch && currentEpic) {
       currentEpic.parentKey = domainKey(domainLineMatch[1]);
       declaredDomainCodes.add(currentEpic.parentKey);
