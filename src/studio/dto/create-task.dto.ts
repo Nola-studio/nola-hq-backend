@@ -46,7 +46,7 @@ export const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
  */
 export class CreateTaskDto {
   @IsUUID() projectId!: string;
-  @IsString() @MinLength(1) @MaxLength(500) title!: string;
+  @IsString() @MinLength(1) @MaxLength(200) title!: string;
   @IsIn(TASK_CATEGORIES as unknown as string[]) category!: WorkItemCategory;
   @IsOptional() @IsString() description?: string;
   @IsOptional() @IsIn(TASK_STATUSES as unknown as string[]) status?: StudioTaskStatus;

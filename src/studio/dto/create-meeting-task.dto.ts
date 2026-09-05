@@ -6,7 +6,7 @@ import { DATE_PATTERN, TASK_CATEGORIES, TASK_PRIORITIES, TASK_STATUSES } from '.
 /** Same shape as CreateTaskDto minus `meetingId`, which comes from the route param. */
 export class CreateMeetingTaskDto {
   @IsUUID() projectId!: string;
-  @IsString() @MinLength(1) @MaxLength(500) title!: string;
+  @IsString() @MinLength(1) @MaxLength(200) title!: string;
   @IsIn(TASK_CATEGORIES as unknown as string[]) category!: WorkItemCategory;
   @IsOptional() @IsString() description?: string;
   @IsOptional() @IsIn(TASK_STATUSES as unknown as string[]) status?: StudioTaskStatus;

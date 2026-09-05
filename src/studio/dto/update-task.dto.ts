@@ -47,7 +47,7 @@ export class UpdateTaskDto {
    * suivait : une version qu'on abandonne n'en laisse pas la moitié derrière.
    */
   @IsOptional() @IsUUID() releaseId?: string | null;
-  @IsOptional() @IsString() @MinLength(1) @MaxLength(500) title?: string;
+  @IsOptional() @IsString() @MinLength(1) @MaxLength(200) title?: string;
   @IsOptional() @IsString() description?: string | null;
   @IsOptional() @IsIn(TASK_STATUSES as unknown as string[]) status?: StudioTaskStatus;
   @IsOptional() @IsIn(TASK_CATEGORIES as unknown as string[]) category?: WorkItemCategory;
