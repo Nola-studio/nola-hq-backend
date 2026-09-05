@@ -141,6 +141,18 @@ export class WorkItem {
   @Column({ type: 'varchar', length: 16, nullable: true })
   surface!: WorkItemSurface | null;
 
+  /**
+   * La version visée (REL-00).
+   *
+   * Posée sur l'epic, elle descend sur tout ce qu'il porte — stories et
+   * sous-tâches — parce qu'on ne livre pas la moitié d'un epic. Un enfant
+   * qu'on a délibérément déplacé vers une autre version garde le sien : la
+   * cascade ne défait pas une décision, elle propage la règle.
+   */
+  @Column({ type: 'uuid', name: 'release_id', nullable: true })
+  @Index()
+  releaseId!: string | null;
+
   @Column({ type: 'numeric', precision: 8, scale: 2, name: 'hours_spent', nullable: true })
   hoursSpent!: string | null;
 

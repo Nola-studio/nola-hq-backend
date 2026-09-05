@@ -119,6 +119,7 @@ export class WorkItemsService implements OnModuleInit {
     const qb = this.repo.createQueryBuilder('w');
     if (query.projectId) qb.andWhere('w.projectId = :projectId', { projectId: query.projectId });
     if (query.sprintId) qb.andWhere('w.sprintId = :sprintId', { sprintId: query.sprintId });
+    if (query.releaseId) qb.andWhere('w.releaseId = :releaseId', { releaseId: query.releaseId });
     if (query.status) qb.andWhere('w.status = :status', { status: query.status });
     if (query.priority) qb.andWhere('w.priority = :priority', { priority: query.priority });
     if (query.type) qb.andWhere('w.type = :type', { type: query.type });

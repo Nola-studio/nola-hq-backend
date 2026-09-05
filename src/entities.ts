@@ -10,6 +10,7 @@ import { LegalEntity } from './company/legal-entity.entity';
 import { Product } from './company/product.entity';
 import { Country } from './countries/country.entity';
 import { Deploy } from './deploys/deploy.entity';
+import { Release } from './releases/release.entity';
 import { HealthEntry } from './health/health-entry.entity';
 import { Invoice } from './invoices/invoice.entity';
 import { Kpi } from './analytics/kpi.entity';
@@ -82,6 +83,7 @@ export const entities = [
   Product,
   Country,
   Deploy,
+  Release,
   HealthEntry,
   Invoice,
   Kpi,
