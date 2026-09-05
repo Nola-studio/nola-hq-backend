@@ -133,6 +133,16 @@ export class CodeRepository {
   @Column({ type: 'varchar', length: 160, nullable: true })
   steward!: string | null;
 
+  /**
+   * Les projets autorisés à ouvrir une branche ici, par identifiant.
+   *
+   * Renseigné à la lecture, jamais persisté : la vérité vit dans
+   * `repository_projects`. C'est une commodité pour l'écran, qui connaît déjà
+   * les projets et n'a besoin que de savoir lesquels sont rattachés — sans
+   * quoi il faudrait une requête par ligne.
+   */
+  projectIds?: string[];
+
   /** Dernier rapprochement réussi avec le fournisseur. Nul = jamais synchronisé. */
   @Column({ type: 'timestamp', name: 'last_synced_at', nullable: true })
   lastSyncedAt!: Date | null;
