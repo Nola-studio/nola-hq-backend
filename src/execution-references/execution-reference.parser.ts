@@ -56,10 +56,27 @@ export interface ParsedReference {
 
 const DOMAIN_HEADING = /^# Domaine (\d{1,2}) — (.+?)\s*$/;
 const CAPABILITY_HEADING = /^### Capacité (\d{1,2})\.(\d{1,2}) — (.+?)\s*$/;
-const EPIC_HEADING = /^#### EPIC ([A-Z]{2,6}-\d{1,3}) — (.+?)\s*$/;
-const PRIORITY_LINE = /^\*\*Priorité\s*:\s*(P[0-3])\*\*\s*$/;
-const STORY_BLOCK_START = /^User stories\s*:/;
-const NUMBERED_ITEM = /^(\d{1,2})\.\s+(.+?)\s*$/;
+/**
+ * Le niveau de titre ne porte pas de sens ici : `####` venait de la hiérarchie
+ * du référentiel v1.3, où l'epic vivait sous un domaine et une capacité. Un
+ * document qui n'a que des epics commence naturellement au `#`, et le lui
+ * refuser reviendrait à imposer une hiérarchie vide.
+ *
+ * Le tiret cadratin reste la forme canonique ; le demi-cadratin et le trait
+ * d'union sont acceptés parce qu'aucun éditeur ne les distingue à la frappe.
+ */
+const EPIC_HEADING = /^#{1,6}\s+EPIC\s+([A-Z]{2,6}-\d{1,3})\s*[—–-]\s*(.+?)\s*$/;
+/** Les astérisques du gras sont facultatives : elles ne changent pas le sens. */
+const PRIORITY_LINE = /^\*{0,2}Priorité\s*:\s*\*{0,2}(P[0-3])\*{0,2}\s*$/;
+/**
+ * Rattachement explicite d'un epic à un domaine, pour un document qui n'a pas
+ * la hiérarchie complète : « Domaine : D06 » (ou « Domaine : 6 »). Facultatif —
+ * un epic sans domaine s'importe non classé, et se classe dans HQ.
+ */
+const DOMAIN_LINE = /^\*{0,2}Domaine\s*:\s*\*{0,2}\s*D?(\d{1,2})\*{0,2}\s*$/i;
+const STORY_BLOCK_START = /^\*{0,2}(?:User )?[Ss]tories\s*:/;
+/** Numérotée ou à puces : la clé vient du rang, pas de la puce. */
+const NUMBERED_ITEM = /^(?:\d{1,2}\.|[-*])\s+(.+?)\s*$/;
 const ANY_HEADING = /^#{1,6}\s/;
 
 /** `D6` and `D06` must never be two different keys. */
@@ -108,6 +125,9 @@ export function parseExecutionReference(markdown: string): ParsedReference {
   let openItem: { item: ParsedItem; bodyStart: number } | null = null;
 
   const seenKeys = new Map<string, number>();
+  /** Codes cités par une ligne « Domaine : … » — ils vivent dans le registre,
+   *  pas dans le document : ne pas les réclamer comme sections manquantes. */
+  const declaredDomainCodes = new Set<string>();
 
   function closeOpenItem(endLine: number) {
     if (!openItem) return;
@@ -206,14 +226,6 @@ export function parseExecutionReference(markdown: string): ParsedReference {
     if (epicMatch) {
       closeOpenItem(i);
       const [, code, title] = epicMatch;
-      if (!currentDomain) {
-        issues.push({
-          level: 'warning',
-          message: `EPIC ${code} apparaît avant tout domaine — il ne pourra pas être rattaché.`,
-          line: lineNumber,
-          sourceKey: code,
-        });
-      }
       const epic: ParsedItem = {
         kind: 'epic',
         sourceKey: code,
@@ -237,6 +249,18 @@ export function parseExecutionReference(markdown: string): ParsedReference {
       continue;
     }
 
+    /**
+     * « Domaine : D06 » sous un epic le classe sans qu'il faille écrire toute
+     * la hiérarchie. Le code désigne un domaine du registre, pas une section
+     * du document : c'est l'import qui le résout.
+     */
+    const domainLineMatch = DOMAIN_LINE.exec(line);
+    if (domainLineMatch && currentEpic) {
+      currentEpic.parentKey = domainKey(domainLineMatch[1]);
+      declaredDomainCodes.add(currentEpic.parentKey);
+      continue;
+    }
+
     // « User stories : » followed by a numbered list, until the list stops.
     if (STORY_BLOCK_START.test(line) && currentEpic) {
       let cursor = i + 1;
@@ -248,7 +272,7 @@ export function parseExecutionReference(markdown: string): ParsedReference {
         if (numbered) {
           index += 1;
           const key = `US-${currentEpic.sourceKey}-${index}`;
-          const sentence = storyTitle(numbered[2]);
+          const sentence = storyTitle(numbered[1]);
           items.push({
             kind: 'story',
             sourceKey: key,
@@ -291,12 +315,12 @@ export function parseExecutionReference(markdown: string): ParsedReference {
     issues.push({
       level: 'error',
       message:
-        "Aucun domaine, capacité ni epic reconnu — le document ne suit pas la structure attendue (« # Domaine N — … », « ### Capacité N.M — … », « #### EPIC XXX-NN — … »).",
+        "Aucun epic reconnu — un document doit déclarer au moins « # EPIC XXX-NN — Titre ». La hiérarchie complète (« # Domaine N — … », « ### Capacité N.M — … ») reste possible, mais n'est pas obligatoire.",
     });
   }
 
   for (const item of items) {
-    if (item.parentKey && !seenKeys.has(item.parentKey)) {
+    if (item.parentKey && !seenKeys.has(item.parentKey) && !declaredDomainCodes.has(item.parentKey)) {
       issues.push({
         level: 'warning',
         message: `« ${item.sourceKey} » se rattache à « ${item.parentKey} », absent du document.`,

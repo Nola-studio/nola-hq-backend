@@ -162,3 +162,95 @@ describe('parseExecutionReference', () => {
     expect(odd.items.find((i) => i.sourceKey === 'D07.C01')?.parentKey).toBe('D07');
   });
 });
+
+/**
+ * Le format léger : un document qui ne porte qu'un lot de travail.
+ *
+ * Le référentiel v1.3 déclarait douze domaines, leurs capacités, puis les
+ * epics — c'est ce que le parseur savait lire, et il l'exigeait. Écrire « les
+ * deux epics de la facturation » demandait alors d'inventer une hiérarchie
+ * vide au-dessus, et le domaine devenait obligatoire pour une information
+ * qu'on ne veut pas toujours donner à l'écriture.
+ */
+describe('un document sans domaine', () => {
+  const LOT = `# Lot « Facturation par échéance »
+
+# EPIC BIL-01 — Générer les factures avant l'échéance
+
+Priorité : P0
+Domaine : D08
+
+Stories :
+
+1. En tant que gestionnaire, je veux voir les factures à venir.
+2. En tant que client, je veux recevoir ma facture par courriel.
+
+# EPIC BIL-02 — Annuler une facture émise par erreur
+
+Priorité : P1
+
+Stories :
+
+- En tant que gestionnaire, je veux annuler une facture en donnant un motif.
+`;
+
+  test('des epics sans hiérarchie se lisent, sans anomalie', () => {
+    const parsed = parseExecutionReference(LOT);
+    expect(summarize(parsed)).toEqual({ domain: 0, capability: 0, epic: 2, story: 3 });
+    expect(parsed.issues).toEqual([]);
+  });
+
+  /** Le niveau du titre venait de la hiérarchie ; sans elle il n'a plus de sens. */
+  test('l’epic se déclare à n’importe quel niveau de titre', () => {
+    for (const level of ['#', '##', '####', '######']) {
+      const parsed = parseExecutionReference(`${level} EPIC ONE-01 — Titre\n`);
+      expect(parsed.items.map((i) => i.sourceKey)).toEqual(['ONE-01']);
+    }
+  });
+
+  /** Aucun éditeur ne distingue les tirets à la frappe. */
+  test('le tiret simple vaut le cadratin', () => {
+    const parsed = parseExecutionReference('# EPIC ONE-01 - Titre\n');
+    expect(parsed.items[0]?.title).toBe('Titre');
+  });
+
+  test('« Domaine : D08 » classe l’epic sans réclamer une section absente', () => {
+    const parsed = parseExecutionReference(LOT);
+    expect(parsed.items.find((i) => i.sourceKey === 'BIL-01')?.parentKey).toBe('D08');
+    expect(parsed.issues.filter((i) => i.message.includes('D08'))).toEqual([]);
+  });
+
+  /** « Domaine : 8 » et « Domaine : D08 » ne doivent pas être deux clés. */
+  test('le numéro nu vaut le code', () => {
+    const parsed = parseExecutionReference('# EPIC ONE-01 — Titre\n\nDomaine : 8\n');
+    expect(parsed.items[0]?.parentKey).toBe('D08');
+  });
+
+  /** Sans domaine déclaré, l'epic reste non classé — et c'est légitime. */
+  test('un epic sans domaine n’est pas une anomalie', () => {
+    const parsed = parseExecutionReference(LOT);
+    expect(parsed.items.find((i) => i.sourceKey === 'BIL-02')?.parentKey).toBeNull();
+  });
+
+  test('les puces valent la numérotation, et les clés suivent le rang', () => {
+    const parsed = parseExecutionReference(LOT);
+    expect(parsed.items.filter((i) => i.parentKey === 'BIL-02').map((i) => i.sourceKey)).toEqual([
+      'US-BIL-02-1',
+    ]);
+  });
+
+  /** Le gras de « **Priorité : P0** » est une convention d'écriture, pas du sens. */
+  test('la priorité se lit avec ou sans gras', () => {
+    const gras = parseExecutionReference('# EPIC ONE-01 — Titre\n\n**Priorité : P2**\n');
+    const nu = parseExecutionReference('# EPIC ONE-01 — Titre\n\nPriorité : P2\n');
+    expect(gras.items[0]?.priority).toBe('P2');
+    expect(nu.items[0]?.priority).toBe('P2');
+  });
+
+  /** Un document vraiment hors format doit toujours être refusé. */
+  test('du texte sans epic reste refusé', () => {
+    const parsed = parseExecutionReference('# Un titre\n\nDu texte sans structure.\n');
+    expect(parsed.issues[0].level).toBe('error');
+    expect(parsed.issues[0].message).toContain('EPIC');
+  });
+});
