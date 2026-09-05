@@ -3,8 +3,10 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { NolaCommandsService, NolaClientService } from '@nola-hq/nola-sdk';
@@ -18,6 +20,17 @@ import { Product } from '../company/product.entity';
 import { nextBusinessNumber } from '../business/business-number-sequence';
 import type { PaginatedResult } from '../common/dto/pagination.dto';
 import type { BillingSubscriptionRow } from '../subscriptions/subscriptions.service';
+
+/**
+ * Tenant shape returned by nola-billing's admin `tenant.get` command.
+ */
+interface BillingTenant {
+  id: string;
+  name: string;
+  email?: string | null;
+  phone?: string | null;
+  [key: string]: any;
+}
 
 /**
  * Raw shape emitted by nola-billing's admin `invoice.list` command — mirrors
@@ -61,6 +74,7 @@ export class InvoicesService {
     private readonly commands: NolaCommandsService,
     private readonly nolaClient: NolaClientService,
     private readonly pdfService: BusinessPdfService,
+    @Optional() private readonly config?: ConfigService,
   ) {}
 
   async list(query: ListInvoicesDto): Promise<PaginatedResult<Invoice>> {
@@ -391,12 +405,37 @@ export class InvoicesService {
         continue;
       }
 
+      // Tenant lookup: strictly fail closed if tenant not found or missing billing email
+      const tenantRes = await this.commands
+        .send<{ id: string }, BillingTenant>(
+          'nola.commands.billing.admin.tenant.get',
+          { id: sub.tenantId },
+          { issuedBy: 'nola-hq', timeoutMs: 3_000 },
+        )
+        .catch((err: Error) => {
+          this.logger.error(
+            `CRITICAL: upcoming invoice rejected — tenant lookup failed for tenant '${sub.tenantId}' (subscription=${sub.id}): ${err.message}`,
+          );
+          return null;
+        });
+
+      const tenant = tenantRes?.success ? tenantRes.data : null;
+      const tenantEmail = tenant?.email?.trim() || null;
+
+      if (!tenant || !tenantEmail) {
+        this.logger.error(
+          `CRITICAL: upcoming invoice rejected — unresolvable tenant or missing billing email for tenant '${sub.tenantId}' (subscription=${sub.id}). Zero mock fabrication allowed.`,
+        );
+        continue;
+      }
+
+      const tenantName = tenant.name?.trim() || sub.tenantId;
       const businessUnit = product.businessUnit;
       const rawPrice = sub.plan?.price ?? 0;
       const price = typeof rawPrice === 'string' ? parseFloat(rawPrice) : rawPrice;
       const currency = (sub.plan?.currency || 'USD').toUpperCase();
 
-      // Sequential invoice number
+      // Sequential invoice number (only consumed AFTER brand and tenant have passed fail-closed checks)
       const invoiceNumber = await nextBusinessNumber(this.repo.manager, 'FAC', upcomingDate);
 
       // Render PDF
@@ -416,16 +455,16 @@ export class InvoicesService {
         dueOn: targetDateStr,
         paidAt: null,
         status: 'pending',
-        description: `Abonnement ${product.name} — ${sub.tenantId}`,
+        description: `Abonnement ${product.name} — ${tenantName}`,
         paymentMethod: 'mobile_money',
         paymentReference: null,
         verificationToken: null as any,
         client: {
-          name: sub.tenantId,
-          email: `admin@${sub.tenantId}.nola.cd`,
-          phone: null,
+          name: tenantName,
+          email: tenantEmail,
+          phone: tenant.phone || null,
         } as any,
-      } as BusinessInvoice;
+      } as unknown as BusinessInvoice;
 
       try {
         await this.pdfService.invoice(invoiceEntity);
@@ -451,24 +490,52 @@ export class InvoicesService {
       const saved = await this.repo.save(invoice);
       createdInvoices.push(saved);
 
-      // Dispatch notification (fire-and-forget)
-      const recipient = `admin@${sub.tenantId}.nola.cd`;
-      if (recipient && this.nolaClient.isReady()) {
+      // Notification mode handling
+      const notifyMode = (
+        this.config?.get<string>('INVOICE_NOTIFY_MODE') || 'off'
+      ).toLowerCase();
+      const overrideEmail =
+        this.config?.get<string>('INVOICE_NOTIFY_OVERRIDE_EMAIL')?.trim() || null;
+
+      // Log intended recipient in ALL three modes
+      this.logger.log(
+        `Upcoming invoice ${invoiceNumber} generated for tenant ${sub.tenantId} (${tenantName}) — Intended recipient: ${tenantEmail} | Mode: ${notifyMode}`,
+      );
+
+      let targetRecipient: string | null = null;
+      if (notifyMode === 'live') {
+        targetRecipient = tenantEmail;
+      } else if (notifyMode === 'override') {
+        if (overrideEmail) {
+          targetRecipient = overrideEmail;
+        } else {
+          this.logger.warn(
+            `[INVOICE_NOTIFY_MODE=override] INVOICE_NOTIFY_OVERRIDE_EMAIL is not configured — skipping email dispatch for ${invoiceNumber}`,
+          );
+        }
+      } else {
+        // 'off' (default)
+        this.logger.log(
+          `[INVOICE_NOTIFY_MODE=off] Email dispatch suppressed for invoice ${invoiceNumber}`,
+        );
+      }
+
+      if (targetRecipient && this.nolaClient.isReady()) {
         try {
           await this.nolaClient.getClient().publish('nola.commands.notify.send', {
             channel: 'email',
-            to: recipient,
+            to: targetRecipient,
             template: '_inline',
             variables: {
               subject: `Facture à venir ${invoiceNumber} — ${businessUnit.name}`,
-              body: `Votre facture de renouvellement pour ${product.name} (${sub.tenantId}) d'un montant de ${price} ${currency} arrive à échéance le ${targetDateStr}. Facture n° ${invoiceNumber}.`,
+              body: `Votre facture de renouvellement pour ${product.name} (${tenantName}) d'un montant de ${price} ${currency} arrive à échéance le ${targetDateStr}. Facture n° ${invoiceNumber}.`,
             },
             idempotencyKey: `upcoming-invoice-${sub.id}-${targetDateStr}`,
             realm: 'nola-hq',
             tenantId: sub.tenantId || 'nola-studio',
           });
           this.logger.log(
-            `Upcoming invoice notification dispatched — invoice=${invoiceNumber} to=${recipient}`,
+            `Upcoming invoice notification dispatched — invoice=${invoiceNumber} to=${targetRecipient}${notifyMode === 'override' ? ` (override for ${tenantEmail})` : ''}`,
           );
         } catch (err: any) {
           this.logger.error(

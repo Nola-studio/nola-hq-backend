@@ -207,8 +207,14 @@ describe('InvoicesService — payment.succeeded and branding', () => {
   });
 
   describe('generateUpcomingSubscriptionInvoices (3 days before renewal)', () => {
-    test('generates pending invoice 3 days before renewal, renders PDF, and dispatches notification', async () => {
-      const now = new Date('2026-09-04T12:00:00.000Z');
+    const mockTenant = {
+      id: 'tenant-acme',
+      name: 'Acme Corporation',
+      email: 'billing@acme.com',
+      phone: '+243810000000',
+    };
+
+    test('generates pending invoice with real tenant details, and defaults to notify mode "off" (no notify.send)', async () => {
       const targetDate = new Date('2026-09-07T12:00:00.000Z');
       const targetDateStr = '2026-09-07';
 
@@ -264,7 +270,15 @@ describe('InvoicesService — payment.succeeded and branding', () => {
       ];
 
       const commands = {
-        send: mock(async () => ({ success: true, data: mockSubscriptions })),
+        send: mock(async (subject: string, payload: any) => {
+          if (subject === 'nola.commands.billing.admin.subscription.list') {
+            return { success: true, data: mockSubscriptions };
+          }
+          if (subject === 'nola.commands.billing.admin.tenant.get') {
+            if (payload?.id === 'tenant-acme') return { success: true, data: mockTenant };
+          }
+          return { success: false, error: { message: 'not found' } };
+        }),
       } as any;
 
       const publishedEvents: any[] = [];
@@ -282,6 +296,7 @@ describe('InvoicesService — payment.succeeded and branding', () => {
         invoice: mock(async () => mockPdfBuffer),
       } as any;
 
+      // Default mode: no config passed (defaults to 'off')
       const service = new InvoicesService(
         invoiceRepo,
         productRepo,
@@ -301,17 +316,240 @@ describe('InvoicesService — payment.succeeded and branding', () => {
       expect(generated[0].status).toBe('pending');
       expect(generated[0].due).toBe(targetDateStr);
 
-      // Verify PDF rendered
+      // Verify PDF rendered with real tenant name and email
       expect(pdfService.invoice).toHaveBeenCalled();
       const pdfArg = (pdfService.invoice as any).mock.calls[0][0];
       expect(pdfArg.number).toBe('FAC-2026-00001');
       expect(pdfArg.status).toBe('pending');
       expect(pdfArg.dueOn).toBe(targetDateStr);
+      expect(pdfArg.client.name).toBe('Acme Corporation');
+      expect(pdfArg.client.email).toBe('billing@acme.com');
+      expect(pdfArg.client.phone).toBe('+243810000000');
 
-      // Verify notification dispatched to admin@tenant.nola.cd
+      // Verify no notification published under default 'off' mode
+      expect(publishedEvents.length).toBe(0);
+    });
+
+    test('supports notify mode "override": dispatches notify.send to override address', async () => {
+      const targetDate = new Date('2026-09-07T12:00:00.000Z');
+      const targetDateStr = '2026-09-07';
+
+      const invoiceRepo = makeMockRepo([]);
+      const productRepo = makeMockRepo([product]);
+
+      const mockSubscriptions = [
+        {
+          id: 'sub-target',
+          tenantId: 'tenant-acme',
+          app: 'k-river',
+          status: 'active',
+          nextBillingDate: `${targetDateStr}T00:00:00.000Z`,
+          plan: { price: 500, currency: 'USD' },
+        },
+      ];
+
+      const commands = {
+        send: mock(async (subject: string) => {
+          if (subject === 'nola.commands.billing.admin.subscription.list') {
+            return { success: true, data: mockSubscriptions };
+          }
+          if (subject === 'nola.commands.billing.admin.tenant.get') {
+            return { success: true, data: mockTenant };
+          }
+          return { success: false };
+        }),
+      } as any;
+
+      const publishedEvents: any[] = [];
+      const nolaClient = {
+        isReady: () => true,
+        getClient: () => ({
+          publish: mock(async (subject: string, payload: any) => {
+            publishedEvents.push({ subject, payload });
+          }),
+        }),
+      } as any;
+
+      const mockConfig = {
+        get: (key: string) => {
+          if (key === 'INVOICE_NOTIFY_MODE') return 'override';
+          if (key === 'INVOICE_NOTIFY_OVERRIDE_EMAIL') return 'dev-test@nola.cd';
+          return null;
+        },
+      } as any;
+
+      const service = new InvoicesService(
+        invoiceRepo,
+        productRepo,
+        commands,
+        nolaClient,
+        { invoice: mock(async () => Buffer.from('pdf')) } as any,
+        mockConfig,
+      );
+
+      const generated = await service.generateUpcomingSubscriptionInvoices(targetDate);
+      expect(generated.length).toBe(1);
+
       expect(publishedEvents.length).toBe(1);
-      expect(publishedEvents[0].payload.to).toBe('admin@tenant-acme.nola.cd');
+      expect(publishedEvents[0].payload.to).toBe('dev-test@nola.cd');
       expect(publishedEvents[0].payload.idempotencyKey).toBe(`upcoming-invoice-sub-target-${targetDateStr}`);
+    });
+
+    test('supports notify mode "live": dispatches notify.send to tenant.email', async () => {
+      const targetDate = new Date('2026-09-07T12:00:00.000Z');
+      const targetDateStr = '2026-09-07';
+
+      const invoiceRepo = makeMockRepo([]);
+      const productRepo = makeMockRepo([product]);
+
+      const mockSubscriptions = [
+        {
+          id: 'sub-target',
+          tenantId: 'tenant-acme',
+          app: 'k-river',
+          status: 'active',
+          nextBillingDate: `${targetDateStr}T00:00:00.000Z`,
+          plan: { price: 500, currency: 'USD' },
+        },
+      ];
+
+      const commands = {
+        send: mock(async (subject: string) => {
+          if (subject === 'nola.commands.billing.admin.subscription.list') {
+            return { success: true, data: mockSubscriptions };
+          }
+          if (subject === 'nola.commands.billing.admin.tenant.get') {
+            return { success: true, data: mockTenant };
+          }
+          return { success: false };
+        }),
+      } as any;
+
+      const publishedEvents: any[] = [];
+      const nolaClient = {
+        isReady: () => true,
+        getClient: () => ({
+          publish: mock(async (subject: string, payload: any) => {
+            publishedEvents.push({ subject, payload });
+          }),
+        }),
+      } as any;
+
+      const mockConfig = {
+        get: (key: string) => {
+          if (key === 'INVOICE_NOTIFY_MODE') return 'live';
+          return null;
+        },
+      } as any;
+
+      const service = new InvoicesService(
+        invoiceRepo,
+        productRepo,
+        commands,
+        nolaClient,
+        { invoice: mock(async () => Buffer.from('pdf')) } as any,
+        mockConfig,
+      );
+
+      const generated = await service.generateUpcomingSubscriptionInvoices(targetDate);
+      expect(generated.length).toBe(1);
+
+      expect(publishedEvents.length).toBe(1);
+      expect(publishedEvents[0].payload.to).toBe('billing@acme.com');
+      expect(publishedEvents[0].payload.idempotencyKey).toBe(`upcoming-invoice-sub-target-${targetDateStr}`);
+    });
+
+    test('fails closed when tenant lookup fails: 0 invoices created, 0 sequence numbers consumed', async () => {
+      const targetDate = new Date('2026-09-07T12:00:00.000Z');
+      const targetDateStr = '2026-09-07';
+
+      const invoiceRepo = makeMockRepo([]);
+      const productRepo = makeMockRepo([product]);
+      const pdfService = { invoice: mock(async () => Buffer.from('pdf')) } as any;
+
+      const mockSubscriptions = [
+        {
+          id: 'sub-missing-tenant',
+          tenantId: 'tenant-deleted',
+          app: 'k-river',
+          status: 'active',
+          nextBillingDate: `${targetDateStr}T00:00:00.000Z`,
+          plan: { price: 500, currency: 'USD' },
+        },
+      ];
+
+      const commands = {
+        send: mock(async (subject: string) => {
+          if (subject === 'nola.commands.billing.admin.subscription.list') {
+            return { success: true, data: mockSubscriptions };
+          }
+          if (subject === 'nola.commands.billing.admin.tenant.get') {
+            return { success: false, error: { message: 'Tenant not found' } };
+          }
+          return { success: false };
+        }),
+      } as any;
+
+      const service = new InvoicesService(
+        invoiceRepo,
+        productRepo,
+        commands,
+        { isReady: () => false } as any,
+        pdfService,
+      );
+
+      const generated = await service.generateUpcomingSubscriptionInvoices(targetDate);
+      expect(generated.length).toBe(0);
+      expect(pdfService.invoice).not.toHaveBeenCalled();
+      expect((invoiceRepo.manager.query as any)).not.toHaveBeenCalled();
+    });
+
+    test('fails closed when tenant has no email: 0 invoices created, 0 sequence numbers consumed', async () => {
+      const targetDate = new Date('2026-09-07T12:00:00.000Z');
+      const targetDateStr = '2026-09-07';
+
+      const invoiceRepo = makeMockRepo([]);
+      const productRepo = makeMockRepo([product]);
+      const pdfService = { invoice: mock(async () => Buffer.from('pdf')) } as any;
+
+      const mockSubscriptions = [
+        {
+          id: 'sub-no-email',
+          tenantId: 'tenant-no-email',
+          app: 'k-river',
+          status: 'active',
+          nextBillingDate: `${targetDateStr}T00:00:00.000Z`,
+          plan: { price: 500, currency: 'USD' },
+        },
+      ];
+
+      const commands = {
+        send: mock(async (subject: string) => {
+          if (subject === 'nola.commands.billing.admin.subscription.list') {
+            return { success: true, data: mockSubscriptions };
+          }
+          if (subject === 'nola.commands.billing.admin.tenant.get') {
+            return {
+              success: true,
+              data: { id: 'tenant-no-email', name: 'No Email Org', email: '' },
+            };
+          }
+          return { success: false };
+        }),
+      } as any;
+
+      const service = new InvoicesService(
+        invoiceRepo,
+        productRepo,
+        commands,
+        { isReady: () => false } as any,
+        pdfService,
+      );
+
+      const generated = await service.generateUpcomingSubscriptionInvoices(targetDate);
+      expect(generated.length).toBe(0);
+      expect(pdfService.invoice).not.toHaveBeenCalled();
+      expect((invoiceRepo.manager.query as any)).not.toHaveBeenCalled();
     });
 
     test('is idempotent: skips generating when non-cancelled invoice already exists for (subscriptionId, due)', async () => {
