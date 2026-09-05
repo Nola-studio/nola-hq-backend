@@ -37,6 +37,16 @@ export class UpdateTaskDto {
    * que ce champ existe précisément pour réparer.
    */
   @IsOptional() @IsUUID() projectId?: string;
+
+  /**
+   * La version visée (REL-00). Posée sur un epic, elle descend sur tout ce
+   * qu'il porte — c'est le service des versions qui s'en charge, pas une mise
+   * à jour de champ.
+   *
+   * `null` retire le rattachement, et le retire aussi de la descendance qui
+   * suivait : une version qu'on abandonne n'en laisse pas la moitié derrière.
+   */
+  @IsOptional() @IsUUID() releaseId?: string | null;
   @IsOptional() @IsString() @MinLength(1) @MaxLength(500) title?: string;
   @IsOptional() @IsString() description?: string | null;
   @IsOptional() @IsIn(TASK_STATUSES as unknown as string[]) status?: StudioTaskStatus;

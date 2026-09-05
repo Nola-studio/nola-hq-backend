@@ -8,6 +8,14 @@ name: promote prod
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: >-
+          Numéro à imposer (ex. 1.1.0). Laisser vide pour le calculer depuis les
+          commits. À renseigner — identique des deux côtés — quand front et back
+          partent ensemble.
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -35,4 +43,35 @@ jobs:
             echo "::error::main a divergé de dev — passer par une PR dev → main puis relancer."
             exit 1
           fi
+
+      # La version ne s'édite pas à la main : elle se calcule à la promotion,
+      # depuis les messages de commit. `version` en entrée permet d'imposer le
+      # même numéro qu'à l'autre dépôt — c'est ce qui fait tenir la notion de
+      # « version produit » entre un front et un back livrés séparément.
+      - name: Calculer la version
+        id: version
+        run: |
+          git fetch --tags origin
+          if [[ -n "${{ inputs.version }}" ]]; then
+            NEXT="${{ inputs.version }}"
+            echo "Version imposée : $NEXT"
+          else
+            NEXT="$(scripts/next-version.sh)"
+            echo "Version calculée depuis les commits : $NEXT"
+          fi
+          echo "next=$NEXT" >> "$GITHUB_OUTPUT"
+
+      - name: Étiqueter la livraison
+        run: |
+          NEXT="${{ steps.version.outputs.next }}"
+          if git rev-parse "v$NEXT" >/dev/null 2>&1; then
+            echo "v$NEXT existe déjà — rien à étiqueter."
+            exit 0
+          fi
+          # package.json suit l'étiquette : c'est lui que lit /health/version.
+          node -e "const f='package.json',p=require('./'+f);p.version='$NEXT';require('fs').writeFileSync(f,JSON.stringify(p,null,2)+'\n')"
+          git -c user.email=ci@nolaastudio.com -c user.name="Nolaa CI" \
+            commit -am "chore(release): v$NEXT"
+          git tag -a "v$NEXT" -m "v$NEXT"
+          git push origin HEAD:main "v$NEXT"
 

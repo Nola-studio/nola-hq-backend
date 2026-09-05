@@ -12,4 +12,6 @@ import { TASK_STATUSES } from './create-task.dto';
 export class SearchTasksDto extends PaginationDto {
   @IsOptional() @IsUUID() project?: string;
   @IsOptional() @IsIn(TASK_STATUSES as unknown as string[]) status?: StudioTaskStatus;
+  /** La version visée — le filtre demandé pour préparer un déploiement. */
+  @IsOptional() @IsUUID() release?: string;
 }

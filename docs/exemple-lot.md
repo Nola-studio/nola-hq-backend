@@ -10,6 +10,7 @@ Auteur : Greg · septembre 2026
 Priorité : P0
 Domaine : D08
 Côté : backend
+Version cible : 1.1.0
 
 Chaque abonnement doit produire sa facture trois jours avant le renouvellement.
 

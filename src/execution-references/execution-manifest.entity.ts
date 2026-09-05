@@ -94,6 +94,14 @@ export class ExecutionManifestItem {
   @Column({ type: 'varchar', length: 16, nullable: true })
   surface!: ParsedSurface | null;
 
+  /**
+   * Le numéro de version visé, tel qu'écrit dans le document. Gardé brut :
+   * c'est l'import qui le résout contre le registre, et un document dont la
+   * version a été renommée doit continuer à dire ce qu'il disait.
+   */
+  @Column({ type: 'varchar', length: 32, name: 'target_version', nullable: true })
+  targetVersion!: string | null;
+
   @Column({ type: 'varchar', length: 200, name: 'source_section_id' })
   sourceSectionId!: string;
 

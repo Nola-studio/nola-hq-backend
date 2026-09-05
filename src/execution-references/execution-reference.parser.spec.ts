@@ -349,3 +349,56 @@ Stories :
     expect(parsed.items[0]?.surface).toBeNull();
   });
 });
+
+/**
+ * « Version cible : 1.4 » — ce qui relie un lot à sa livraison.
+ *
+ * Le numéro désigne une version du registre (REL-00), pas une section du
+ * document : c'est l'import qui le résout, et qui le dit quand il ne désigne
+ * rien.
+ */
+describe('la version cible', () => {
+  const LOT = `# EPIC BIL-01 — Générer les factures
+
+Version cible : 1.4.0
+
+Stories :
+
+1. Générer la facture trois jours avant le renouvellement.
+2. Envoyer la facture au contact de facturation.
+`;
+
+  test('elle se lit sous l’epic', () => {
+    const epic = parseExecutionReference(LOT).items.find((i) => i.sourceKey === 'BIL-01');
+    expect(epic?.targetVersion).toBe('1.4.0');
+  });
+
+  /** On ne livre pas la moitié d'un epic : ses stories partent avec lui. */
+  test('elle descend sur les stories de l’epic', () => {
+    const stories = parseExecutionReference(LOT).items.filter((i) => i.kind === 'story');
+    expect(stories).toHaveLength(2);
+    for (const story of stories) expect(story.targetVersion).toBe('1.4.0');
+  });
+
+  /** « v1.4 » et « 1.4 » désignent la même chose — le v est une habitude. */
+  test('le « v » optionnel ne crée pas un second numéro', () => {
+    const parsed = parseExecutionReference('# EPIC ONE-01 — T\n\nVersion cible : v1.4.0\n');
+    expect(parsed.items[0]?.targetVersion).toBe('1.4.0');
+  });
+
+  test('sans la ligne, l’epic ne vise rien — et ce n’est pas une anomalie', () => {
+    const parsed = parseExecutionReference('# EPIC ONE-01 — Titre\n');
+    expect(parsed.items[0]?.targetVersion).toBeNull();
+    expect(parsed.issues).toEqual([]);
+  });
+
+  test('elle cohabite avec le côté et le domaine', () => {
+    const parsed = parseExecutionReference(
+      '# EPIC ONE-01 — T\n\nDomaine : D08\nCôté : backend\nVersion cible : 1.4.0\n',
+    );
+    const epic = parsed.items[0];
+    expect(epic?.targetVersion).toBe('1.4.0');
+    expect(epic?.surface).toBe('backend');
+    expect(epic?.parentKey).toBe('D08');
+  });
+});

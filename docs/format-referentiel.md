@@ -28,6 +28,7 @@ Auteur : Greg · septembre 2026
 Priorité : P0
 Domaine : D08
 Côté : backend
+Version cible : 1.1.0
 
 Chaque abonnement doit produire sa facture trois jours avant le
 renouvellement, et l'envoyer au contact de facturation du tenant.
@@ -130,6 +131,23 @@ candidat, et la branche s'ouvre sans question.
 
 Facultatif, comme le reste. Sans lui, rien n'est restreint — on ne devine pas
 un côté depuis un titre.
+
+### La version cible — facultative
+
+```
+Version cible : 1.1.0
+```
+
+Le numéro d'une version déclarée dans **Versions** (le registre REL-00). Le
+« v » est toléré : `v1.1.0` et `1.1.0` désignent la même chose.
+
+Elle descend sur les stories de l'epic — on ne livre pas la moitié d'un epic.
+Une version déjà posée dans HQ l'emporte : replanifier est une décision, et un
+ré-import ne la révise pas.
+
+Un numéro que le registre ne connaît pas n'arrête pas l'import : les tickets
+entrent sans version et le rapport le nomme. Créer la version au passage serait
+pire — planifier une livraison n'est pas un effet de bord d'un import.
 
 ### La priorité
 
@@ -252,6 +270,7 @@ inchangé, modifié, ajouté, retiré. Rien n'est écrasé en silence.
 | `Côté : mobile` (inconnu) | Avertissement : le côté est ignoré, l'item entre. |
 | `Projet :` inconnu ou ambigu | Les tickets entrent sans projet, le rapport dit pourquoi. |
 | Deux lignes `Projet :` | Avertissement : la première est retenue. |
+| `Version cible :` inconnue du registre | Les tickets entrent sans version, le rapport la nomme. |
 
 Une anomalie de niveau *avertissement* n'empêche pas l'import ; une *erreur*
 l'arrête. Le rapport les nomme toutes, avec leur ligne.

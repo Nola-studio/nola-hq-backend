@@ -204,6 +204,10 @@ export const MODULE_DOMAIN: Record<string, DomainCode> = {
   'work-items': 'D06',
   studio: 'D06',
   deploys: 'D06',
+  // Le registre des versions (REL-00). D06 comme `deploys` : planifier une
+  // livraison est un acte d'ingénierie, pas d'exploitation — c'est ce qu'elle
+  // contient qui décide, et ce qu'elle contient est du travail de D06.
+  releases: 'D06',
   github: 'D06',
 
   business: 'D07',
