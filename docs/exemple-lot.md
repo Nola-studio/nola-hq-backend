@@ -1,5 +1,7 @@
 # Lot « Facturation par échéance »
 
+**Version :** 1.0
+
 Projet : NolaHQ
 Auteur : Greg · septembre 2026
 
