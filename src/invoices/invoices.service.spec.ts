@@ -305,7 +305,16 @@ describe('InvoicesService — payment.succeeded and branding', () => {
       expect(pdfService.invoice).toHaveBeenCalled();
       const pdfArg = (pdfService.invoice as any).mock.calls[0][0];
       expect(pdfArg.number).toBe('FAC-2026-00001');
-      expect(pdfArg.status).toBe('pending');
+      /**
+       * « Brouillon », pas « pending ».
+       *
+       * Le statut du modèle de rendu est imprimé sur le PDF via
+       * `INVOICE_STATUS_LABELS`, qui ne connaît que les six états de l'entité —
+       * « pending » n'en fait pas partie et sortait « Statut : undefined » sur
+       * le document. Le ticket en base garde son propre « pending » : c'est
+       * une autre table, avec ses propres états (ligne 301).
+       */
+      expect(pdfArg.status).toBe('draft');
       expect(pdfArg.dueOn).toBe(targetDateStr);
 
       // Verify notification dispatched to admin@tenant.nola.cd
