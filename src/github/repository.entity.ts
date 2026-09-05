@@ -21,6 +21,10 @@ export type RepositoryProvider = (typeof REPOSITORY_PROVIDERS)[number];
 export const REPOSITORY_VISIBILITIES = ['public', 'private', 'internal'] as const;
 export type RepositoryVisibility = (typeof REPOSITORY_VISIBILITIES)[number];
 
+/** Les mêmes valeurs que `WorkItem.surface` — c'est ce qui les fait se rencontrer. */
+export const REPOSITORY_SIDES = ['backend', 'frontend', 'fullstack'] as const;
+export type RepositorySide = (typeof REPOSITORY_SIDES)[number];
+
 /**
  * Un dépôt de code connu de Nolaa HQ (ENG-06).
  *
@@ -106,6 +110,21 @@ export class CodeRepository {
   @ManyToOne(() => Domain, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'domain_id' })
   domain?: Domain | null;
+
+  /**
+   * De quel côté du produit ce dépôt se trouve.
+   *
+   * C'est le pendant de `WorkItem.surface`, et le seul endroit où le
+   * rapprochement se fait : un document dit « backend », il ne nomme pas
+   * `nola-hq-backend`. Renseigné une fois ici, il permet à « Start Work » de
+   * choisir seul le dépôt d'un ticket, là où il fallait poser la question.
+   *
+   * `fullstack` désigne un dépôt qui porte les deux — un monorepo : il
+   * convient à n'importe quel ticket. `null` ne restreint rien non plus : un
+   * dépôt non classé reste proposé, faute de mieux.
+   */
+  @Column({ type: 'varchar', length: 16, nullable: true })
+  side!: RepositorySide | null;
 
   /**
    * Qui répond de ce dépôt. Référence souple vers un membre d'équipe, comme

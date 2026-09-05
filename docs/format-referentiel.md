@@ -18,25 +18,28 @@ sections est conservée telle quelle et devient la description du ticket.
 ```markdown
 # Lot « Facturation par échéance »
 
+Projet : NolaHQ
 Auteur : Greg · septembre 2026
 
 # EPIC BIL-01 — Générer les factures d'abonnement avant l'échéance
 
 Priorité : P0
 Domaine : D08
+Côté : backend
 
 Chaque abonnement doit produire sa facture trois jours avant le
 renouvellement, et l'envoyer au contact de facturation du tenant.
 
 Stories :
 
-1. En tant que gestionnaire, je veux voir les factures à venir des sept prochains jours.
-2. En tant que client, je veux recevoir ma facture par courriel avant le prélèvement.
-3. En tant que gestionnaire, je veux relancer une génération qui a échoué.
+1. Générer la facture trois jours avant le renouvellement.
+2. Envoyer la facture au contact de facturation du tenant.
+3. En tant que gestionnaire, je veux voir les factures à venir. #frontend
 
 # EPIC BIL-02 — Annuler une facture émise par erreur
 
 Priorité : P1
+Côté : les deux
 
 Stories :
 
@@ -44,9 +47,9 @@ Stories :
 - En tant qu'auditeur, je veux retrouver qui a annulé quoi et quand.
 ```
 
-Ce document produit **2 epics et 5 stories**. `BIL-01` est classé en D08,
-`BIL-02` reste non classé — et c'est valide : il se classera dans HQ, sur le
-ticket, où le domaine et le projet se choisissent.
+Ce document produit **2 epics et 5 stories**, tous rattachés au projet NolaHQ.
+`BIL-01` est classé en D08, `BIL-02` reste non classé — et c'est valide : il se
+classera dans HQ, sur le ticket.
 
 ---
 
@@ -65,6 +68,51 @@ ticket, où le domaine et le projet se choisissent.
   raison d'avoir déplacé une section.
 - Le **niveau de titre est libre** : `#`, `##`, `####` — tous acceptés.
 - Le séparateur peut être `—`, `–` ou `-`.
+
+### Le projet — une fois, en tête
+
+```
+Projet : NolaHQ
+```
+
+La clé du projet (`HQ`) ou son nom (`NolaHQ`), sans distinction de casse.
+
+**C'est la ligne qui relie le document au code.** Un projet porte ses dépôts
+autorisés ; sans elle, les tickets naissent sans projet et « Start Work » n'a
+aucun dépôt où ouvrir leur branche — il faut alors les rattacher un par un.
+
+Elle ne l'emporte jamais sur ce qu'un humain a posé dans HQ : un ticket ou un
+référentiel déjà rattaché garde son projet. Elle sert quand personne n'a rien
+dit, ce qui est le cas d'un lot qu'on vient de déposer.
+
+Un libellé qui ne désigne aucun projet actif — ou qui en désigne deux —
+n'arrête pas l'import : les tickets entrent sans projet et le rapport le dit.
+
+### Le côté — backend ou frontend
+
+```
+Côté : backend
+```
+
+Sous un epic, hérité par ses stories. Valeurs : `backend`, `frontend`,
+`les deux`. Les abréviations courantes passent : `back`, `api`, `front`, `ui`,
+`fullstack`.
+
+Quand un epic mêle les deux, la story tranche pour elle-même avec une marque en
+fin de ligne :
+
+```
+1. Générer la facture trois jours avant l'échéance.
+2. En tant que gestionnaire, je veux voir les factures à venir. #frontend
+```
+
+**À quoi ça sert :** un projet qui porte un dépôt front et un dépôt back
+obligeait à choisir à chaque « Start Work ». Le ticket dit `backend`, le dépôt
+`nola-hq-backend` est marqué backend dans « Dépôts de code », il ne reste qu'un
+candidat, et la branche s'ouvre sans question.
+
+Facultatif, comme le reste. Sans lui, rien n'est restreint — on ne devine pas
+un côté depuis un titre.
 
 ### La priorité
 
@@ -167,6 +215,9 @@ inchangé, modifié, ajouté, retiré. Rien n'est écrasé en silence.
 | `Domaine : D99` (inexistant) | L'item est écarté à l'import, avec son motif. |
 | `Stories :` sans liste | Avertissement : l'epic entre seul. |
 | Epic sans domaine | **Rien** — c'est valide. Le ticket entre non classé. |
+| `Côté : mobile` (inconnu) | Avertissement : le côté est ignoré, l'item entre. |
+| `Projet :` inconnu ou ambigu | Les tickets entrent sans projet, le rapport dit pourquoi. |
+| Deux lignes `Projet :` | Avertissement : la première est retenue. |
 
 Une anomalie de niveau *avertissement* n'empêche pas l'import ; une *erreur*
 l'arrête. Le rapport les nomme toutes, avec leur ligne.

@@ -16,6 +16,8 @@ import {
 } from './repository-slug';
 import { GithubAppService } from './github-app.service';
 import { CodeRepository, RepositoryProject } from './repository.entity';
+import type { WorkItemSurface } from '../work-items/work-item.entity';
+import { narrowBySurface } from './repository-surface';
 import type {
   LinkProjectDto,
   ListRepositoriesDto,
@@ -95,10 +97,14 @@ export class RepositoriesService {
   async allowedForWorkItem(scope: {
     projectId?: string | null;
     domainId?: string | null;
+    surface?: WorkItemSurface | null;
   }): Promise<CodeRepository[]> {
-    if (scope.projectId) return this.allowedFor(scope.projectId);
-    if (scope.domainId) return this.list({ domainId: scope.domainId });
-    return [];
+    const candidates = scope.projectId
+      ? await this.allowedFor(scope.projectId)
+      : scope.domainId
+        ? await this.list({ domainId: scope.domainId })
+        : [];
+    return narrowBySurface(candidates, scope.surface ?? null);
   }
 
   async findOne(id: string): Promise<CodeRepository> {
@@ -143,6 +149,7 @@ export class RepositoriesService {
         productId: dto.productId ?? null,
         domainId: dto.domainId ?? null,
         steward: dto.steward ?? null,
+        side: dto.side ?? null,
         lastSyncedAt: null,
         createdAt: now,
         updatedAt: now,
@@ -198,6 +205,7 @@ export class RepositoriesService {
               productId: null,
               domainId: null,
               steward: null,
+              side: null,
               lastSyncedAt: now,
               createdAt: now,
               updatedAt: now,

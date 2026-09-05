@@ -20,6 +20,39 @@ export type ParsedItemKind = (typeof PARSED_ITEM_KINDS)[number];
 
 export type ParsedPriority = 'P0' | 'P1' | 'P2' | 'P3';
 
+/**
+ * De quel côté du produit la tâche tombe.
+ *
+ * C'est une information de rédaction, pas de dépôt : le document dit
+ * « backend », il ne nomme pas `nola-hq-backend`. Le rapprochement entre un
+ * côté et un dépôt se règle une fois dans HQ, sur l'écran des dépôts — sans
+ * quoi chaque document devrait connaître l'organisation du code, et vieillirait
+ * au premier renommage.
+ */
+export const PARSED_SURFACES = ['backend', 'frontend', 'fullstack'] as const;
+export type ParsedSurface = (typeof PARSED_SURFACES)[number];
+
+/** Ce qu'on écrit vraiment quand on écrit vite. */
+const SURFACE_WORDS: Record<string, ParsedSurface> = {
+  backend: 'backend',
+  back: 'backend',
+  api: 'backend',
+  serveur: 'backend',
+  frontend: 'frontend',
+  front: 'frontend',
+  ui: 'frontend',
+  interface: 'frontend',
+  fullstack: 'fullstack',
+  full: 'fullstack',
+  'les deux': 'fullstack',
+  deux: 'fullstack',
+  both: 'fullstack',
+};
+
+function readSurface(word: string): ParsedSurface | null {
+  return SURFACE_WORDS[word.trim().toLowerCase()] ?? null;
+}
+
 export interface ParsedItem {
   kind: ParsedItemKind;
   /**
@@ -34,6 +67,8 @@ export interface ParsedItem {
   /** The section's prose, verbatim: tasks, acceptance criteria, notes. */
   body: string | null;
   priority: ParsedPriority | null;
+  /** Backend, frontend, les deux — ou rien, quand le rédacteur ne l'a pas dit. */
+  surface: ParsedSurface | null;
   /** Slug of the heading — survives a re-ordering, unlike a line number. */
   sourceSectionId: string;
   /** SHA-256 of the raw slice, so a later version can tell what actually changed. */
@@ -52,6 +87,12 @@ export interface ParseIssue {
 export interface ParsedReference {
   items: ParsedItem[];
   issues: ParseIssue[];
+  /**
+   * Le projet que le document sert, tel qu'écrit — « NolaHQ », « HQ ». C'est
+   * l'import qui le résout contre le registre des projets, parce que lui seul
+   * sait ce qui existe ; le parseur ne devine rien.
+   */
+  project: string | null;
 }
 
 const DOMAIN_HEADING = /^# Domaine (\d{1,2}) — (.+?)\s*$/;
@@ -74,6 +115,16 @@ const PRIORITY_LINE = /^\*{0,2}Priorité\s*:\s*\*{0,2}(P[0-3])\*{0,2}\s*$/;
  * un epic sans domaine s'importe non classé, et se classe dans HQ.
  */
 const DOMAIN_LINE = /^\*{0,2}Domaine\s*:\s*\*{0,2}\s*D?(\d{1,2})\*{0,2}\s*$/i;
+/**
+ * Le projet que le document sert, déclaré une fois en tête : « Projet : NolaHQ ».
+ * Sans lui, les tickets naissent sans projet — et « Start Work » n'a alors
+ * aucun dépôt où ouvrir leur branche.
+ */
+const PROJECT_LINE = /^\*{0,2}Projet\s*:\s*\*{0,2}\s*(.+?)\*{0,2}\s*$/i;
+/** « Côté : backend » sous un epic, hérité par ses stories. */
+const SURFACE_LINE = /^\*{0,2}(?:C[oô]t[ée]|Surface)\s*:\s*\*{0,2}\s*(.+?)\*{0,2}\s*$/i;
+/** « … #backend » en fin de ligne d'une story, quand un epic mêle les deux. */
+const SURFACE_TAG = /\s+#(backend|back|api|serveur|frontend|front|ui|interface|fullstack|full|both)\s*$/i;
 const STORY_BLOCK_START = /^\*{0,2}(?:User )?[Ss]tories\s*:/;
 /** Numérotée ou à puces : la clé vient du rang, pas de la puce. */
 const NUMBERED_ITEM = /^(?:\d{1,2}\.|[-*])\s+(.+?)\s*$/;
@@ -128,6 +179,7 @@ export function parseExecutionReference(markdown: string): ParsedReference {
   /** Codes cités par une ligne « Domaine : … » — ils vivent dans le registre,
    *  pas dans le document : ne pas les réclamer comme sections manquantes. */
   const declaredDomainCodes = new Set<string>();
+  let project: string | null = null;
 
   function closeOpenItem(endLine: number) {
     if (!openItem) return;
@@ -174,6 +226,7 @@ export function parseExecutionReference(markdown: string): ParsedReference {
           title,
           body: null,
           priority: null,
+          surface: null,
           sourceSectionId: slug(`domaine-${number}-${title}`),
           sourceExcerptHash: sha256(title),
           line: lineNumber,
@@ -213,6 +266,7 @@ export function parseExecutionReference(markdown: string): ParsedReference {
           title,
           body: null,
           priority: null,
+          surface: null,
           sourceSectionId: slug(`capacite-${domainNumber}-${capabilityNumber}-${title}`),
           sourceExcerptHash: sha256(title),
           line: lineNumber,
@@ -233,6 +287,7 @@ export function parseExecutionReference(markdown: string): ParsedReference {
         title,
         body: null,
         priority: null,
+        surface: null,
         sourceSectionId: slug(`epic-${code}-${title}`),
         sourceExcerptHash: '',
         line: lineNumber,
@@ -254,6 +309,43 @@ export function parseExecutionReference(markdown: string): ParsedReference {
      * la hiérarchie. Le code désigne un domaine du registre, pas une section
      * du document : c'est l'import qui le résout.
      */
+    /**
+     * Le projet vaut pour tout le document : il se déclare une fois, en tête.
+     * Une seconde déclaration serait une contradiction — on garde la première
+     * et on le signale, plutôt que de laisser la dernière ligne l'emporter en
+     * silence.
+     */
+    const projectMatch = PROJECT_LINE.exec(line);
+    if (projectMatch) {
+      const declared = projectMatch[1].trim();
+      if (project === null) {
+        project = declared;
+      } else if (project !== declared) {
+        issues.push({
+          level: 'warning',
+          message: `Le document déclare deux projets — « ${project} » puis « ${declared} ». Le premier est retenu.`,
+          line: lineNumber,
+        });
+      }
+      continue;
+    }
+
+    const surfaceMatch = SURFACE_LINE.exec(line);
+    if (surfaceMatch && currentEpic) {
+      const surface = readSurface(surfaceMatch[1]);
+      if (surface) {
+        currentEpic.surface = surface;
+      } else {
+        issues.push({
+          level: 'warning',
+          message: `« ${surfaceMatch[1].trim()} » n'est pas un côté connu — attendu backend, frontend ou les deux.`,
+          line: lineNumber,
+          sourceKey: currentEpic.sourceKey,
+        });
+      }
+      continue;
+    }
+
     const domainLineMatch = DOMAIN_LINE.exec(line);
     if (domainLineMatch && currentEpic) {
       currentEpic.parentKey = domainKey(domainLineMatch[1]);
@@ -272,7 +364,10 @@ export function parseExecutionReference(markdown: string): ParsedReference {
         if (numbered) {
           index += 1;
           const key = `US-${currentEpic.sourceKey}-${index}`;
-          const sentence = storyTitle(numbered[1]);
+          // Un epic peut mêler les deux côtés : la story le dit pour elle-même,
+          // et à défaut hérite de celui de son epic.
+          const tagged = SURFACE_TAG.exec(numbered[1]);
+          const sentence = storyTitle(tagged ? numbered[1].slice(0, tagged.index) : numbered[1]);
           items.push({
             kind: 'story',
             sourceKey: key,
@@ -280,6 +375,7 @@ export function parseExecutionReference(markdown: string): ParsedReference {
             title: sentence,
             body: null,
             priority: currentEpic.priority,
+            surface: (tagged && readSurface(tagged[1])) || currentEpic.surface,
             sourceSectionId: `${currentEpic.sourceSectionId}-us-${index}`,
             sourceExcerptHash: sha256(sentence),
             line: cursor + 1,
@@ -330,7 +426,7 @@ export function parseExecutionReference(markdown: string): ParsedReference {
     }
   }
 
-  return { items, issues };
+  return { items, issues, project };
 }
 
 /** Counts per kind — what a validation report leads with. */

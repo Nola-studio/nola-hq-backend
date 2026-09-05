@@ -254,3 +254,98 @@ Stories :
     expect(parsed.issues[0].message).toContain('EPIC');
   });
 });
+
+/**
+ * Le projet et le côté — ce qui relie un document au code.
+ *
+ * Sans le projet, les tickets naissent orphelins et « Start Work » n'a aucun
+ * dépôt où ouvrir leur branche. Sans le côté, un projet qui porte un front et
+ * un back oblige à poser la question à chaque ticket.
+ */
+describe('projet et côté', () => {
+  const LOT = `# Lot « Facturation »
+
+Projet : NolaHQ
+
+# EPIC BIL-01 — Générer les factures
+
+Côté : backend
+
+Stories :
+
+1. Générer la facture trois jours avant l'échéance.
+2. En tant que gestionnaire, je veux voir les factures à venir. #frontend
+
+# EPIC BIL-02 — Annuler une facture
+
+Côté : les deux
+
+Stories :
+
+- Annuler une facture en donnant un motif.
+`;
+
+  test('le projet se déclare une fois pour tout le document', () => {
+    expect(parseExecutionReference(LOT).project).toBe('NolaHQ');
+  });
+
+  test('sans déclaration, le projet est nul — et ce n’est pas une anomalie', () => {
+    const parsed = parseExecutionReference('# EPIC ONE-01 — Titre\n');
+    expect(parsed.project).toBeNull();
+    expect(parsed.issues).toEqual([]);
+  });
+
+  /** Deux projets, c'est une contradiction : le premier gagne, et on le dit. */
+  test('un second projet est signalé plutôt que d’écraser le premier', () => {
+    const parsed = parseExecutionReference('Projet : A\nProjet : B\n\n# EPIC ONE-01 — T\n');
+    expect(parsed.project).toBe('A');
+    expect(parsed.issues.some((i) => i.message.includes('deux projets'))).toBe(true);
+  });
+
+  test('le côté d’un epic descend sur ses stories', () => {
+    const items = parseExecutionReference(LOT).items;
+    expect(items.find((i) => i.sourceKey === 'BIL-01')?.surface).toBe('backend');
+    expect(items.find((i) => i.sourceKey === 'US-BIL-01-1')?.surface).toBe('backend');
+  });
+
+  /** Un epic mêle souvent les deux : la story tranche pour elle-même. */
+  test('une story marquée #frontend l’emporte sur son epic', () => {
+    const story = parseExecutionReference(LOT).items.find((i) => i.sourceKey === 'US-BIL-01-2');
+    expect(story?.surface).toBe('frontend');
+  });
+
+  test('la marque ne reste pas dans le titre', () => {
+    const story = parseExecutionReference(LOT).items.find((i) => i.sourceKey === 'US-BIL-01-2');
+    expect(story?.title).toBe('En tant que gestionnaire, je veux voir les factures à venir.');
+  });
+
+  test('« les deux » vaut fullstack', () => {
+    const epic = parseExecutionReference(LOT).items.find((i) => i.sourceKey === 'BIL-02');
+    expect(epic?.surface).toBe('fullstack');
+  });
+
+  test('les abréviations courantes sont acceptées', () => {
+    for (const [written, expected] of [
+      ['back', 'backend'],
+      ['api', 'backend'],
+      ['front', 'frontend'],
+      ['UI', 'frontend'],
+      ['fullstack', 'fullstack'],
+    ] as const) {
+      const parsed = parseExecutionReference(`# EPIC ONE-01 — T\n\nCôté : ${written}\n`);
+      expect(parsed.items[0]?.surface).toBe(expected);
+    }
+  });
+
+  /** Un côté inconnu est signalé : le silence le ferait passer pour absent. */
+  test('un côté inconnu est signalé, sans bloquer', () => {
+    const parsed = parseExecutionReference('# EPIC ONE-01 — T\n\nCôté : mobile\n');
+    expect(parsed.items[0]?.surface).toBeNull();
+    expect(parsed.issues[0]?.message).toContain('mobile');
+  });
+
+  test('sans côté, l’item n’en a pas — on ne devine pas depuis un titre', () => {
+    const parsed = parseExecutionReference('# EPIC ONE-01 — Migrer la base\n');
+    expect(parsed.items[0]?.surface).toBeNull();
+  });
+});
