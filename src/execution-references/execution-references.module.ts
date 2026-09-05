@@ -7,6 +7,7 @@ import { ExecutionImportService } from './execution-import.service';
 import { ExecutionReferencesController } from './execution-references.controller';
 import { Capability, Domain } from '../domains/domain.entity';
 import { WorkItem } from '../work-items/work-item.entity';
+import { RoadmapInitiative } from '../roadmap/roadmap-initiative.entity';
 
 @Module({
   imports: [
@@ -18,6 +19,10 @@ import { WorkItem } from '../work-items/work-item.entity';
       Domain,
       Capability,
       WorkItem,
+      // Résout « Projet : NolaHQ » en tête d'un document contre le registre
+      // des projets. Sans cette ligne, `ExecutionImportService` ne peut pas
+      // être construit et l'application ne démarre pas.
+      RoadmapInitiative,
     ]),
   ],
   controllers: [ExecutionReferencesController],
