@@ -205,8 +205,14 @@ const TASK_ACTIVITY_BUCKET: Record<string, 'completed' | 'inProgress' | 'pending
   in_progress: 'inProgress',
 };
 
-/** Not yet at a terminal state — mirrors `StudioRequest`'s own lifecycle, independent of the period filter. */
-const OPEN_REQUEST_STATUSES = new Set(['nouvelle', 'en_revue', 'acceptee']);
+/**
+ * Not yet at a terminal state, independent of the period filter. Since REQ-01
+ * a request is a work item, so "open" is the work item lifecycle — one
+ * definition of done instead of two that could drift apart.
+ */
+function isOpenRequest(request: DashboardRequest): boolean {
+  return !isDoneStatus(request.status);
+}
 
 export function buildSectionA(
   projects: DashboardProject[],
@@ -246,7 +252,7 @@ export function buildSectionA(
       overdueProjects: visibleProjects.filter((p) => p.dueDate && p.dueDate < today && p.healthStatus !== 'completed').length,
       overdueTasks: visibleTasks.filter((t) => t.dueDate && t.dueDate < today && !isDoneStatus(t.status)).length,
       // As-of-today, like the overdue counts above — not period-filtered.
-      requestsOpen: requests.filter((r) => OPEN_REQUEST_STATUSES.has(r.status)).length,
+      requestsOpen: requests.filter(isOpenRequest).length,
       initiatives: initiativesInPeriod.length,
       overdueInitiatives: visibleInitiatives.filter((i) => i.dueDate && i.dueDate < today && i.healthStatus !== 'completed').length,
     },
@@ -258,7 +264,7 @@ export function buildSectionA(
       tasksByPriority: groupCount(tasksInPeriod, (t) => t.priority),
       tasksByAssignee: groupCount(tasksInPeriod, (t) => t.assigneeEmail ?? 'unassigned'),
       requestsByType: groupCount(
-        requests.filter((r) => OPEN_REQUEST_STATUSES.has(r.status)),
+        requests.filter(isOpenRequest),
         (r) => r.type,
       ),
       initiativesByType: groupCount(initiativesInPeriod, (i) => i.type ?? 'unspecified'),

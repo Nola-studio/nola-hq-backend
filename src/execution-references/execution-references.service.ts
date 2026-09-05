@@ -1,0 +1,267 @@
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+  PayloadTooLargeException,
+  Logger,
+} from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { In, IsNull, Repository } from 'typeorm';
+import { WorkItem } from '../work-items/work-item.entity';
+import { createHash } from 'node:crypto';
+import {
+  ExecutionReference,
+  ExecutionReferenceVersion,
+  MAX_REFERENCE_CONTENT_BYTES,
+} from './execution-reference.entity';
+import {
+  AddExecutionReferenceVersionDto,
+  CreateExecutionReferenceDto,
+  UpdateExecutionReferenceDto,
+} from './dto/create-execution-reference.dto';
+
+/**
+ * Columns of a version *except* `content`. A referential runs to tens of
+ * thousands of characters, so a listing that selected it would ship the whole
+ * corpus to render a table of dates — content is fetched one version at a
+ * time, through its own route.
+ */
+const VERSION_METADATA_COLUMNS = [
+  'id',
+  'referenceId',
+  'version',
+  'status',
+  'format',
+  'contentHash',
+  'sizeBytes',
+  'receivedFrom',
+  'receivedAt',
+  'effectiveDate',
+  'publishedBy',
+  'publishedAt',
+] as const;
+
+@Injectable()
+export class ExecutionReferencesService {
+  private readonly logger = new Logger(ExecutionReferencesService.name);
+
+  constructor(
+    @InjectRepository(ExecutionReference)
+    private readonly references: Repository<ExecutionReference>,
+    @InjectRepository(ExecutionReferenceVersion)
+    private readonly versions: Repository<ExecutionReferenceVersion>,
+    @InjectRepository(WorkItem)
+    private readonly workItems: Repository<WorkItem>,
+  ) {}
+
+  list(): Promise<ExecutionReference[]> {
+    return this.references.find({ order: { updatedAt: 'DESC' } });
+  }
+
+  async findByKey(key: string): Promise<ExecutionReference> {
+    const reference = await this.references.findOne({ where: { key: normalizeKey(key) } });
+    if (!reference) throw new NotFoundException(`Référentiel ${key} introuvable`);
+    return reference;
+  }
+
+  /** Metadata only — see {@link VERSION_METADATA_COLUMNS}. */
+  async listVersions(key: string): Promise<Partial<ExecutionReferenceVersion>[]> {
+    const reference = await this.findByKey(key);
+    return this.versions.find({
+      where: { referenceId: reference.id },
+      select: [...VERSION_METADATA_COLUMNS],
+      order: { receivedAt: 'DESC' },
+    });
+  }
+
+  /** The only route that returns `content`, one version at a time. */
+  async findVersion(key: string, version: string): Promise<ExecutionReferenceVersion> {
+    const reference = await this.findByKey(key);
+    const row = await this.versions.findOne({ where: { referenceId: reference.id, version } });
+    if (!row) throw new NotFoundException(`Version ${version} de ${reference.key} introuvable`);
+    return row;
+  }
+
+  /** Résolution par id — la provenance part d'un `source_ref_id`, pas d'une clé. */
+  findVersionById(id: string): Promise<ExecutionReferenceVersion | null> {
+    return this.versions.findOne({ where: { id } });
+  }
+
+  findById(id: string): Promise<ExecutionReference | null> {
+    return this.references.findOne({ where: { id } });
+  }
+
+  /**
+   * Ids of every version of a reference. The import uses them to recognise
+   * what earlier versions produced: `WorkItem.source_ref_id` holds a version
+   * id, not a reference id, so scoping a diff to one document means gathering
+   * its versions first.
+   */
+  async listVersionIds(referenceId: string): Promise<string[]> {
+    const rows = await this.versions.find({ where: { referenceId }, select: ['id'] });
+    return rows.map((row) => row.id);
+  }
+
+  async create(dto: CreateExecutionReferenceDto, actorEmail: string): Promise<ExecutionReference> {
+    const key = normalizeKey(dto.key);
+    if (await this.references.findOne({ where: { key } })) {
+      throw new ConflictException(`Le référentiel ${key} existe déjà — déposez une nouvelle version.`);
+    }
+    assertWithinSizeLimit(dto.content);
+
+    const now = new Date();
+    const reference = await this.references.save(
+      this.references.create({
+        key,
+        title: dto.title,
+        domainId: dto.domainId ?? null,
+        productId: dto.productId ?? null,
+        projectId: dto.projectId ?? null,
+        origin: dto.origin ?? 'internal',
+        owner: dto.owner ?? actorEmail,
+        latestVersionId: null,
+        createdAt: now,
+        updatedAt: now,
+      }),
+    );
+
+    await this.storeVersion(reference, {
+      version: dto.version,
+      format: dto.format,
+      content: dto.content,
+      effectiveDate: dto.effectiveDate,
+    }, actorEmail, now);
+
+    return this.findByKey(key);
+  }
+
+  /**
+   * Files a new revision. Never an overwrite: two guards stand between a
+   * sender and a silent replacement (EXE-01).
+   *
+   *  - the same `version` string twice is a conflict, so a correction has to
+   *    be named — `1.3.1`, not another `1.3`;
+   *  - identical content under a new version number is also a conflict, since
+   *    it means the sender is renumbering rather than changing anything.
+   */
+  async addVersion(
+    key: string,
+    dto: AddExecutionReferenceVersionDto,
+    actorEmail: string,
+  ): Promise<ExecutionReferenceVersion> {
+    const reference = await this.findByKey(key);
+    assertWithinSizeLimit(dto.content);
+
+    const existing = await this.versions.findOne({
+      where: { referenceId: reference.id, version: dto.version },
+    });
+    if (existing) {
+      throw new ConflictException(
+        `${reference.key} a déjà une version ${dto.version} (empreinte ${existing.contentHash.slice(0, 12)}…). ` +
+          `Le document original n'est jamais remplacé : donnez un nouveau numéro de version.`,
+      );
+    }
+
+    const hash = sha256(dto.content);
+    const sameContent = await this.versions.findOne({
+      where: { referenceId: reference.id, contentHash: hash },
+    });
+    if (sameContent) {
+      throw new ConflictException(
+        `Contenu identique à la version ${sameContent.version} de ${reference.key} — rien à enregistrer.`,
+      );
+    }
+
+    return this.storeVersion(reference, dto, actorEmail, new Date());
+  }
+
+  async update(key: string, dto: UpdateExecutionReferenceDto): Promise<ExecutionReference> {
+    const reference = await this.findByKey(key);
+    const projectChanged = dto.projectId !== undefined && dto.projectId !== reference.projectId;
+
+    if (dto.title !== undefined) reference.title = dto.title;
+    if (dto.owner !== undefined) reference.owner = dto.owner;
+    if (dto.domainId !== undefined) reference.domainId = dto.domainId;
+    if (dto.productId !== undefined) reference.productId = dto.productId;
+    if (dto.projectId !== undefined) reference.projectId = dto.projectId;
+    reference.updatedAt = new Date();
+    const saved = await this.references.save(reference);
+
+    if (projectChanged && dto.projectId) await this.attachProject(reference, dto.projectId);
+    return saved;
+  }
+
+  /**
+   * Rattache au projet les tickets que ce référentiel a déjà produits.
+   *
+   * Dire « ce référentiel concerne le projet Nolaa HQ » sans le dire aux cent
+   * tickets qui en découlent serait une demi-vérité : ils resteraient sans
+   * projet, donc sans dépôt, donc sans « Start Work ». Le rattachement porte
+   * sur ce que le référentiel a produit, pas sur le backlog entier.
+   *
+   * Les tickets qui ont déjà un projet ne sont pas touchés : les affecter à la
+   * main est une décision, et une propagation ne doit pas la défaire.
+   */
+  private async attachProject(reference: ExecutionReference, projectId: string): Promise<number> {
+    const versionIds = await this.listVersionIds(reference.id);
+    if (versionIds.length === 0) return 0;
+
+    const result = await this.workItems.update(
+      { sourceKind: 'manifest', sourceRefId: In(versionIds), projectId: IsNull() },
+      { projectId, updatedAt: new Date() },
+    );
+    const touched = result.affected ?? 0;
+    if (touched > 0) {
+      this.logger.log(`${touched} ticket(s) de ${reference.key} rattaché(s) au projet ${projectId}.`);
+    }
+    return touched;
+  }
+
+  private async storeVersion(
+    reference: ExecutionReference,
+    dto: { version: string; format: ExecutionReferenceVersion['format']; content: string; effectiveDate?: string },
+    actorEmail: string,
+    now: Date,
+  ): Promise<ExecutionReferenceVersion> {
+    const saved = await this.versions.save(
+      this.versions.create({
+        referenceId: reference.id,
+        version: dto.version,
+        status: 'received',
+        format: dto.format,
+        content: dto.content,
+        contentHash: sha256(dto.content),
+        sizeBytes: Buffer.byteLength(dto.content, 'utf8'),
+        receivedFrom: actorEmail,
+        receivedAt: now,
+        effectiveDate: dto.effectiveDate ?? null,
+        publishedBy: null,
+        publishedAt: null,
+      }),
+    );
+
+    reference.latestVersionId = saved.id;
+    reference.updatedAt = now;
+    await this.references.save(reference);
+
+    return saved;
+  }
+}
+
+function sha256(content: string): string {
+  return createHash('sha256').update(content, 'utf8').digest('hex');
+}
+
+/** Keys are case-insensitive on the way in, uppercase in storage. */
+function normalizeKey(key: string): string {
+  return key.trim().toUpperCase();
+}
+
+function assertWithinSizeLimit(content: string): void {
+  const bytes = Buffer.byteLength(content, 'utf8');
+  if (bytes > MAX_REFERENCE_CONTENT_BYTES) {
+    throw new PayloadTooLargeException(
+      `Document de ${bytes} octets — la limite est de ${MAX_REFERENCE_CONTENT_BYTES}.`,
+    );
+  }
+}

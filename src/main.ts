@@ -9,12 +9,19 @@ import { NolaClientService } from '@nola-hq/nola-sdk';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { cors: false });
+    // `rawBody: true` conserve les octets reçus à côté du corps analysé. Les
+  // webhooks GitHub en dépendent : la signature porte sur ce que GitHub a
+  // envoyé, et re-sérialiser l'objet analysé donnerait d'autres octets.
+  const app = await NestFactory.create(AppModule, { cors: false, rawBody: true });
   const config = app.get(ConfigService);
   const logger = new Logger('Bootstrap');
 
   app.setGlobalPrefix('api/v1', {
-    exclude: ['.well-known/nola-manifest.yaml'],
+    // L'API publique porte déjà sa version dans son chemin — le référentiel
+    // spécifie `POST /public/v1/execution-references`. Sans cette exclusion
+    // elle vivrait sous `/api/v1/public/v1/…`, versionnée deux fois, et
+    // l'adresse publiée ne correspondrait pas au contrat.
+    exclude: ['.well-known/nola-manifest.yaml', 'public/v1/(.*)'],
   });
   app.use(cookieParser());
 

@@ -8,6 +8,7 @@ import {
 } from '../roadmap/roadmap-initiative.entity';
 import { RoadmapMilestone } from '../roadmap/roadmap-milestone.entity';
 import { RoadmapService, type RoadmapInitiativeView } from '../roadmap/roadmap.service';
+import { Domain } from '../domains/domain.entity';
 import { TeamMember } from '../team/team-member.entity';
 import { StudioNotifyService } from './studio-notify.service';
 import { BusinessUnitResolverService } from '../company/business-unit-resolver.service';
@@ -22,7 +23,6 @@ import { BusinessInvoice } from '../business/business-invoice.entity';
 import { BusinessOpportunity } from '../business/business-opportunity.entity';
 import { BusinessContract } from '../business/business-contract.entity';
 import { BusinessQuote } from '../business/business-quote.entity';
-import { StudioRequest } from './studio-request.entity';
 import {
   STUDIO_PRIORITY_TO_WORK_ITEM_PRIORITY,
   STUDIO_STATUS_TO_WORK_ITEM_STATUS,
@@ -47,6 +47,12 @@ import type { AddWorkItemCommentDto, ListWorkItemsDto } from '../work-items/dto/
  * one, reconsider the other.
  */
 const BOARD_CLOSED_WINDOW_MS = 2 * 24 * 60 * 60 * 1000;
+
+/** Libellés résolus une fois par requête, partagés par toutes les lignes. */
+interface TaskContext {
+  domains: Map<string, { code: string; name: string }>;
+  parents: Map<number, { id: string; identifier: string | null; title: string }>;
+}
 
 /** Studio's `high|medium|low` project priority → `RoadmapInitiative`'s `P0-P3`. */
 const PROJECT_PRIORITY_TO_ROADMAP: Record<StudioProjectPriority, RoadmapInitiativePriority> = {
@@ -105,12 +111,15 @@ export class StudioProjectsProxyService {
     private readonly businessContracts: Repository<BusinessContract>,
     @InjectRepository(BusinessQuote)
     private readonly businessQuotes: Repository<BusinessQuote>,
-    @InjectRepository(StudioRequest)
-    private readonly studioRequests: Repository<StudioRequest>,
     private readonly roadmap: RoadmapService,
     private readonly workItems: WorkItemsService,
     private readonly notify: StudioNotifyService,
     private readonly businessUnits: BusinessUnitResolverService,
+    // Injecté en dernier : les specs qui construisent ce service
+    // positionnellement continuent de fonctionner, et seul l'enrichissement
+    // domaine/epic en a besoin.
+    @InjectRepository(Domain)
+    private readonly domains: Repository<Domain>,
   ) {}
 
   // ── projects ─────────────────────────────────────────────────────
@@ -237,7 +246,6 @@ export class StudioProjectsProxyService {
       opportunityCount,
       contractCount,
       quoteCount,
-      requestCount,
     ] = await Promise.all([
       this.milestones.count({ where: { initiativeId: id } }),
       this.projectRisks.count({ where: { projectId: id } }),
@@ -250,7 +258,6 @@ export class StudioProjectsProxyService {
       this.businessOpportunities.count({ where: { projectId: id } }),
       this.businessContracts.count({ where: { projectId: id } }),
       this.businessQuotes.count({ where: { projectId: id } }),
-      this.studioRequests.count({ where: { projectId: id } }),
     ]);
 
     const blockers: string[] = [];
@@ -265,7 +272,8 @@ export class StudioProjectsProxyService {
     if (opportunityCount > 0) blockers.push(`${opportunityCount} opportunité(s)`);
     if (contractCount > 0) blockers.push(`${contractCount} contrat(s)`);
     if (quoteCount > 0) blockers.push(`${quoteCount} devis`);
-    if (requestCount > 0) blockers.push(`${requestCount} demande(s)`);
+    // No separate request count: a filed need *is* a work item since REQ-01,
+    // so `taskCount` already covers what `studio_requests` used to hold.
 
     if (blockers.length > 0) {
       throw new ConflictException(
@@ -350,8 +358,8 @@ export class StudioProjectsProxyService {
     qb.orderBy('w.status', 'ASC').addOrderBy('w.position', 'ASC').addOrderBy('w.createdAt', 'ASC');
 
     const rows = await qb.getMany();
-    const emailById = await this.emailById();
-    return rows.map((r) => this.toStudioTask(r, emailById));
+    const [emailById, context] = await Promise.all([this.emailById(), this.taskContext(rows)]);
+    return rows.map((r) => this.toStudioTask(r, emailById, context));
   }
 
   /**
@@ -370,9 +378,9 @@ export class StudioProjectsProxyService {
       projectId: query.project,
       status: query.status ? STUDIO_STATUS_TO_WORK_ITEM_STATUS[query.status] : undefined,
     } as ListWorkItemsDto);
-    const emailById = await this.emailById();
+    const [emailById, context] = await Promise.all([this.emailById(), this.taskContext(result.items)]);
     return {
-      items: result.items.map((r) => this.toStudioTask(r, emailById)),
+      items: result.items.map((r) => this.toStudioTask(r, emailById, context)),
       total: result.total,
       page: result.page,
       limit: result.limit,
@@ -381,8 +389,8 @@ export class StudioProjectsProxyService {
 
   async findOneTask(id: string) {
     const task = await this.findWorkItem(id);
-    const emailById = await this.emailById();
-    return this.toStudioTask(task, emailById);
+    const [emailById, context] = await Promise.all([this.emailById(), this.taskContext([task])]);
+    return this.toStudioTask(task, emailById, context);
   }
 
   async createTask(dto: CreateTaskDto, createdByEmail: string) {
@@ -430,9 +438,24 @@ export class StudioProjectsProxyService {
 
   async updateTask(id: string, dto: UpdateTaskDto, actor: string) {
     const workItemId = this.parseId(id);
-    const previous = dto.assigneeEmail !== undefined ? await this.findWorkItem(id) : null;
+    const previous =
+      dto.assigneeEmail !== undefined || dto.projectId !== undefined
+        ? await this.findWorkItem(id)
+        : null;
     const previousAssigneeEmail =
       previous?.assignee ? (await this.emailById()).get(previous.assignee) ?? null : null;
+    /**
+     * Un sprint appartient à un projet. Rattacher le ticket à un autre projet
+     * sans le sortir de son sprint ferait refuser l'écriture pour
+     * incohérence — et le message parlerait du sprint, pas du projet, là où
+     * l'utilisateur croit avoir fait un geste simple. On l'en sort donc, et
+     * l'écran le dit avant le clic.
+     */
+    const leavesSprint =
+      dto.projectId !== undefined &&
+      previous !== null &&
+      previous.sprintId !== null &&
+      previous.projectId !== dto.projectId;
     const assignee =
       dto.assigneeEmail === undefined
         ? undefined
@@ -442,6 +465,8 @@ export class StudioProjectsProxyService {
     const updated = await this.workItems.update(
       workItemId,
       compact({
+        projectId: dto.projectId,
+        sprintId: leavesSprint ? null : undefined,
         title: dto.title,
         description: dto.description,
         status: dto.status ? STUDIO_STATUS_TO_WORK_ITEM_STATUS[dto.status] : undefined,
@@ -534,7 +559,34 @@ export class StudioProjectsProxyService {
     return new Map(members.map((m) => [m.id, m.email]));
   }
 
-  private toStudioTask(item: WorkItem, emailById: Map<string, string>) {
+  /**
+   * Ce qu'il faut pour situer un ticket dans la hiérarchie : son domaine et
+   * son epic parent.
+   *
+   * Chargé une fois par requête et passé aux lignes plutôt que résolu ticket
+   * par ticket — un backlog de cent items ferait deux cents requêtes pour
+   * afficher deux libellés.
+   */
+  private async taskContext(rows: WorkItem[]): Promise<TaskContext> {
+    const domainIds = [...new Set(rows.map((r) => r.domainId).filter((id): id is string => !!id))];
+    const parentIds = [...new Set(rows.map((r) => r.parentId).filter((id): id is number => !!id))];
+
+    const [domains, parents] = await Promise.all([
+      domainIds.length ? this.domains.find({ where: { id: In(domainIds) } }) : Promise.resolve([]),
+      parentIds.length
+        ? this.tasks.find({ where: { id: In(parentIds) }, select: { id: true, reference: true, title: true } })
+        : Promise.resolve([]),
+    ]);
+
+    return {
+      domains: new Map(domains.map((d) => [d.id, { code: d.code, name: d.name }])),
+      parents: new Map(
+        parents.map((p) => [p.id, { id: String(p.id), identifier: p.reference, title: p.title }]),
+      ),
+    };
+  }
+
+  private toStudioTask(item: WorkItem, emailById: Map<string, string>, context?: TaskContext) {
     return {
       id: String(item.id),
       projectId: item.projectId,
@@ -542,6 +594,18 @@ export class StudioProjectsProxyService {
       title: item.title,
       description: item.description,
       status: WORK_ITEM_STATUS_TO_STUDIO_STATUS[item.status],
+      /**
+       * Le type du référentiel (epic, story, spike…), distinct de `category`
+       * qui classe le travail par nature métier. Les deux coexistent : l'un
+       * dit ce qu'est l'objet, l'autre à quoi il sert.
+       */
+      type: item.type,
+      /** Backend, frontend, les deux — dit par le document, jamais deviné. */
+      surface: item.surface,
+      /** Rattachement fonctionnel (§4A) — `null` tant que rien n'a classé l'item. */
+      domain: (item.domainId && context?.domains.get(item.domainId)) || null,
+      /** L'epic dont ce ticket dépend, quand il en a un. */
+      parent: (item.parentId && context?.parents.get(item.parentId)) || null,
       category: item.category,
       assigneeEmail: (item.assignee && emailById.get(item.assignee)) ?? null,
       dueDate: item.dueDate,

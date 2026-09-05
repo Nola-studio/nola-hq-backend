@@ -1,6 +1,9 @@
 import { Type } from 'class-transformer';
 import {
   IsIn,
+  ArrayMaxSize,
+  ArrayNotEmpty,
+  IsArray,
   IsInt,
   IsNumberString,
   IsOptional,
@@ -22,6 +25,8 @@ import {
   type WorkItemPriority,
   type WorkItemStatus,
   type WorkItemType,
+  WORK_ITEM_SOURCE_KINDS,
+  type WorkItemSourceKind,
 } from '../work-item.entity';
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -36,6 +41,27 @@ export class ListWorkItemsDto extends PaginationDto {
   @IsOptional() @IsIn(WORK_ITEM_TYPES as unknown as string[])
   type?: WorkItemType;
   @IsOptional() @IsString() assignee?: string;
+  /** Provenance — `request` isole ce que l'équipe a déposé, `manifest` un import de référentiel. */
+  @IsOptional() @IsIn(WORK_ITEM_SOURCE_KINDS as unknown as string[])
+  sourceKind?: WorkItemSourceKind;
+}
+
+/**
+ * One-field capture (REQ-01). Everything else is deduced or left null, which
+ * is the whole point: filing a need must cost a sentence, not a form. The
+ * project, the category and the assignee are decided later on the board, by
+ * whoever picks the item up — the tools for that already exist.
+ */
+export class CaptureWorkItemDto {
+  @IsString() @MinLength(2) @MaxLength(200) title!: string;
+  @IsOptional() @IsString() @MaxLength(10_000) description?: string;
+  /** Optional hint. `bug` and `feature` are the two a reporter actually knows. */
+  @IsOptional() @IsIn(WORK_ITEM_TYPES as unknown as string[])
+  type?: WorkItemType;
+  @IsOptional() @IsIn(WORK_ITEM_PRIORITIES as unknown as string[])
+  priority?: WorkItemPriority;
+  /** Optional context, exactly as the retired `StudioRequest.projectId` was. */
+  @IsOptional() @IsUUID() projectId?: string;
 }
 
 export class CreateWorkItemDto {
@@ -62,6 +88,8 @@ export class CreateWorkItemDto {
 
 export class UpdateWorkItemDto {
   @IsOptional() @IsUUID() projectId?: string;
+  /** `null` détache. Les règles de forme sont dans `work-item-hierarchy.ts`. */
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) parentId?: number | null;
   @IsOptional() @IsString() @MinLength(2) @MaxLength(200) title?: string;
   @IsOptional() @IsString() @MaxLength(10_000) description?: string | null;
   @IsOptional() @IsIn(WORK_ITEM_TYPES as unknown as string[])
@@ -100,4 +128,21 @@ export class UpdateWorkItemSubtaskDto {
   @IsOptional() @IsString() @MinLength(2) @MaxLength(240) title?: string;
   @IsOptional() @IsIn([true, false]) done?: boolean;
   @IsOptional() @IsString() @MaxLength(160) assignee?: string | null;
+}
+
+/**
+ * Un lot de propositions à accepter ou à écarter.
+ *
+ * Le plafond est celui d'un geste humain qui reste réversible : un référentiel
+ * complet fait une centaine d'items, et accepter mille tickets d'un clic
+ * n'est plus une décision, c'est un accident.
+ */
+export class DecideTriageDto {
+  @IsArray()
+  @ArrayNotEmpty()
+  @ArrayMaxSize(500)
+  @Type(() => Number)
+  @IsInt({ each: true })
+  @Min(1, { each: true })
+  ids!: number[];
 }

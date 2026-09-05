@@ -41,10 +41,14 @@ import { ModulesModule } from './modules/modules.module';
 import { InfraModule } from './infra/infra.module';
 import { RoadmapModule } from './roadmap/roadmap.module';
 import { StudioModule } from './studio/studio.module';
+import { GithubModule } from './github/github.module';
 import { WorkItemsModule } from './work-items/work-items.module';
 import { BusinessModule } from './business/business.module';
 import { VerifyModule } from './verify/verify.module';
 import { CompanyModule } from './company/company.module';
+import { DomainsModule } from './domains/domains.module';
+import { ExecutionReferencesModule } from './execution-references/execution-references.module';
+import { PublicApiModule } from './public-api/public-api.module';
 import { SlaModule } from './sla/sla.module';
 
 import { entities } from './entities';
@@ -135,10 +139,14 @@ import { validate } from './config/env.validation';
     ModulesModule,
     RoadmapModule,
     StudioModule,
+    GithubModule,
     WorkItemsModule,
     BusinessModule,
     VerifyModule,
     CompanyModule,
+    DomainsModule,
+    ExecutionReferencesModule,
+    PublicApiModule,
     InfraModule,
     SlaModule,
   ],

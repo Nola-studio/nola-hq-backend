@@ -6,6 +6,9 @@ import { RoadmapInitiative } from '../roadmap/roadmap-initiative.entity';
 import { RoadmapMilestone } from '../roadmap/roadmap-milestone.entity';
 import { WorkItemsModule } from '../work-items/work-items.module';
 import { WorkItem } from '../work-items/work-item.entity';
+// Le domaine fonctionnel (§4A) — à ne pas confondre avec `StudioDomain`,
+// qui est un nom de domaine internet.
+import { Domain } from '../domains/domain.entity';
 import { ProjectRisk } from '../work-items/project-risk.entity';
 import { WorkSprint } from '../work-items/work-sprint.entity';
 import { ProjectBudget } from '../business/project-budget.entity';
@@ -37,13 +40,11 @@ import { StudioMeetingsController } from './studio-meetings.controller';
 import { StudioNotifyService } from './studio-notify.service';
 import { StudioDueSoonScheduler } from './studio-due-soon.scheduler';
 import { StudioResolvedCloserScheduler } from './studio-resolved-closer.scheduler';
-import { StudioRequest } from './studio-request.entity';
-import { StudioRequestsService } from './studio-requests.service';
-import { StudioRequestsController } from './studio-requests.controller';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([
+      Domain,
       RoadmapInitiative,
       RoadmapMilestone,
       WorkItem,
@@ -62,7 +63,6 @@ import { StudioRequestsController } from './studio-requests.controller';
       StudioRecurring,
       StudioNotificationDedup,
       TeamMember,
-      StudioRequest,
     ]),
     RoadmapModule,
     WorkItemsModule,
@@ -76,7 +76,6 @@ import { StudioRequestsController } from './studio-requests.controller';
     StudioRecurringController,
     StudioDashboardController,
     StudioMeetingsController,
-    StudioRequestsController,
   ],
   providers: [
     StudioProjectsProxyService,
@@ -88,7 +87,6 @@ import { StudioRequestsController } from './studio-requests.controller';
     StudioNotifyService,
     StudioDueSoonScheduler,
     StudioResolvedCloserScheduler,
-    StudioRequestsService,
   ],
   exports: [
     StudioProjectsProxyService,
@@ -97,7 +95,6 @@ import { StudioRequestsController } from './studio-requests.controller';
     StudioRecurringService,
     StudioDashboardService,
     StudioMeetingsService,
-    StudioRequestsService,
   ],
 })
 export class StudioModule {}

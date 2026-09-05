@@ -14,12 +14,13 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, type AuthenticatedUser } from '../common/auth/current-user.decorator';
 import { HqRole } from '../common/auth/hq-role.enum';
 import { HqRoles } from '../common/auth/hq-roles.decorator';
 import { MAX_ATTACHMENT_BYTES } from './work-item-attachment-storage';
 import {
+  CaptureWorkItemDto,
   CreateWorkItemDto,
   ListWorkItemsDto,
   MoveWorkItemDto,
@@ -27,10 +28,13 @@ import {
   AddWorkItemCommentDto,
   AddWorkItemSubtaskDto,
   UpdateWorkItemSubtaskDto,
+  DecideTriageDto,
 } from './dto/work-item.dto';
 import { AddWorkItemDependencyDto } from './dto/work-planning.dto';
 import { WorkItemsService } from './work-items.service';
 import { WorkPlanningService } from './work-planning.service';
+import { StartWorkService } from '../github/start-work.service';
+import { StartWorkDto } from '../github/dto/start-work.dto';
 
 @ApiBearerAuth()
 @ApiTags('work-items')
@@ -39,6 +43,7 @@ export class WorkItemsController {
   constructor(
     private readonly svc: WorkItemsService,
     private readonly planning: WorkPlanningService,
+    private readonly startWork: StartWorkService,
   ) {}
 
   @Get()
@@ -53,10 +58,85 @@ export class WorkItemsController {
     return this.svc.board(query);
   }
 
+  @Get('inbox')
+  @HqRoles(HqRole.Viewer)
+  @ApiOperation({
+    summary: 'Boîte de réception — les propositions machine en attente, groupées par domaine.',
+  })
+  inbox() {
+    return this.svc.inbox();
+  }
+
+  @Get('epics')
+  @HqRoles(HqRole.Viewer)
+  @ApiOperation({
+    summary: 'Les epics du backlog, par domaine, avec l’avancement de ce qu’ils portent.',
+  })
+  epics() {
+    return this.svc.epics();
+  }
+
+  @Post('inbox/accept')
+  @HqRoles(HqRole.Operator)
+  @ApiOperation({ summary: 'Accepte un lot de propositions : triage → todo.' })
+  accept(@Body() dto: DecideTriageDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.svc.acceptTriage(dto.ids, user.email);
+  }
+
+  @Post('inbox/dismiss')
+  @HqRoles(HqRole.Operator)
+  @ApiOperation({ summary: 'Écarte un lot de propositions : triage → closed, sans rien supprimer.' })
+  dismiss(@Body() dto: DecideTriageDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.svc.dismissTriage(dto.ids, user.email);
+  }
+
   @Get(':id')
   @HqRoles(HqRole.Viewer)
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.svc.findDetail(id);
+  }
+
+  @Get(':id/start-work')
+  @HqRoles(HqRole.Viewer)
+  @ApiOperation({
+    summary: 'Ce ticket peut-il démarrer un travail technique, et sous quel nom de branche ?',
+  })
+  startWorkReadiness(@Param('id', ParseIntPipe) id: number) {
+    return this.startWork.readiness(id);
+  }
+
+  @Post(':id/start-work')
+  @HqRoles(HqRole.Operator)
+  @ApiOperation({ summary: 'Crée la branche, la relie au ticket et le passe en cours.' })
+  start(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: StartWorkDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.startWork.startWork(id, dto, user.email);
+  }
+
+  @Get(':id/branches')
+  @HqRoles(HqRole.Viewer)
+  branches(@Param('id', ParseIntPipe) id: number) {
+    return this.startWork.branchesOf(id);
+  }
+
+  @Get(':id/lineage')
+  @HqRoles(HqRole.Viewer)
+  @ApiOperation({ summary: "Ancêtres, domaine et capacité — où se situe l'élément dans la taxonomie" })
+  lineage(@Param('id', ParseIntPipe) id: number) {
+    return this.svc.lineage(id);
+  }
+
+  @Post('capture')
+  @HqRoles(HqRole.Operator)
+  @ApiOperation({
+    summary:
+      "Dépose un besoin en un champ — il entre directement dans le backlog, sans conversion ni projet obligatoire",
+  })
+  capture(@Body() dto: CaptureWorkItemDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.svc.capture(dto, actor(user));
   }
 
   @Post()

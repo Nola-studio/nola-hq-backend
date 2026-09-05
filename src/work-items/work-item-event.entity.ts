@@ -10,7 +10,10 @@ export type WorkItemEventAction =
   | 'subtask_updated'
   | 'closed'
   | 'attachment_added'
-  | 'attachment_removed';
+  | 'attachment_removed'
+  | 'accepted'
+  | 'dismissed'
+  | 'branch_created';
 
 @Entity('work_item_events')
 export class WorkItemEvent {
