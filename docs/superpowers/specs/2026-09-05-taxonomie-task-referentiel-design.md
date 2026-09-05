@@ -225,10 +225,16 @@ d'import :
 - le garde-fou des 200 caractères ;
 - les clés en double, erreur bloquante.
 
-Plus un **test de caractérisation** : la sortie du parser sur les onze
-documents non convertis est figée aujourd'hui et doit rester identique après le
-changement. Onze documents qui produisent exactement les mêmes items qu'avant,
-prouvé à chaque exécution.
+Plus une **caractérisation sur les documents réels**, qui ne peut pas vivre en
+fixture : les douze référentiels n'appartiennent pas à ce dépôt.
+`scripts/analyser-referentiel.ts` écrit l'analyse en JSON, à comparer d'une
+version du parser à l'autre. Un diff vide dit que le changement ne touche que
+ce qu'il prétend toucher.
+
+Ce n'est pas une précaution théorique : c'est ce filet qui a montré que deux
+stories dépassaient déjà 200 caractères — invisibles parce qu'on les mesurait à
+travers le parser qui les tronquait — et que l'empreinte d'un titre long
+ignorait ce qui suivait la coupe.
 
 ## Hors périmètre
 
