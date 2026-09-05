@@ -56,6 +56,12 @@ export class UpdateTaskDto {
   @IsOptional() @IsIn(TASK_PRIORITIES as unknown as string[]) priority?: StudioTaskPriority;
   @IsOptional() @IsUUID() meetingId?: string | null;
   @IsOptional() @IsInt() @Min(0) position?: number;
+  /**
+   * L'estimation, en points (`work_items.estimate_points`). Plafonnée à 999 :
+   * au-delà ce n'est plus une estimation, c'est une saisie ratée, et la
+   * colonne du tableau ne la contiendrait pas.
+   */
+  @IsOptional() @IsInt() @Min(0) @Max(999) points?: number;
   @IsOptional() @IsNumberString() hoursSpent?: string | null;
   @IsOptional() @IsInt() @Min(0) @Max(100) progressPercent?: number | null;
 }

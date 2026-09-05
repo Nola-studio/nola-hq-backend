@@ -11,7 +11,9 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, LessThanOrEqual, Not, Repository } from 'typeorm';
 import { PaginationDto, type PaginatedResult } from '../common/dto/pagination.dto';
-import { Domain } from '../domains/domain.entity';
+import { Capability, Domain } from '../domains/domain.entity';
+import { RoadmapObjective } from '../roadmap/roadmap-objective.entity';
+import { buildHierarchy, type HierarchyEpic } from './hierarchy';
 import { RoadmapInitiative } from '../roadmap/roadmap-initiative.entity';
 import { slugifyProjectName, taskReference } from '../roadmap/roadmap-identifier';
 import { TeamMember } from '../team/team-member.entity';
@@ -80,6 +82,19 @@ const STATUS_TONES: Record<WorkItemStatus, string> = {
  */
 const REOPEN_WINDOW_MS = 2 * 24 * 60 * 60 * 1000;
 
+/**
+ * L'avancement d'un epic se lit sur ses enfants, pas sur son propre statut.
+ * Un epic sans enfant n'a pas d'avancement à montrer — `0/0` vaut « rien de
+ * découpé », pas « rien de fait ».
+ */
+function progressOf(children: WorkItem[]) {
+  return {
+    total: children.length,
+    done: children.filter((c) => isDoneStatus(c.status)).length,
+    inProgress: children.filter((c) => c.status === 'in_progress' || c.status === 'review').length,
+  };
+}
+
 @Injectable()
 export class WorkItemsService implements OnModuleInit {
   private readonly logger = new Logger(WorkItemsService.name);
@@ -105,6 +120,11 @@ export class WorkItemsService implements OnModuleInit {
     // keep working, and only `inbox()` needs it.
     @InjectRepository(Domain)
     private readonly domains: Repository<Domain>,
+    // Mêmes raisons, un lot plus tard : seul `hierarchy()` en a besoin.
+    @InjectRepository(Capability)
+    private readonly capabilities: Repository<Capability>,
+    @InjectRepository(RoadmapObjective)
+    private readonly objectives: Repository<RoadmapObjective>,
   ) {}
 
   /** Fails boot rather than letting a bad `ATTACHMENTS_DIR` surface as a 500 on someone's first upload. */
@@ -220,13 +240,30 @@ export class WorkItemsService implements OnModuleInit {
    * sont pas du backlog tant que personne ne les a acceptés.
    */
   async epics() {
+    const { epics, childrenOf } = await this.epicsWithChildren();
+
+    const groups = await this.groupByDomain(epics, (epic) => {
+      const own = childrenOf.get(epic.id) ?? [];
+      return { ...epic, children: own, progress: progressOf(own) };
+    });
+
+    return { total: epics.length, groups };
+  }
+
+  /**
+   * Les epics du backlog et ce qu'ils portent, en deux requêtes quel que soit
+   * leur nombre : les enfants sont chargés en une fois et répartis en mémoire.
+   *
+   * Partagé par la vue Epics et par l'arbre du référentiel — deux écrans qui
+   * ne s'accorderaient pas sur « combien de tickets dans ORG-01 » seraient
+   * pires qu'un seul.
+   */
+  private async epicsWithChildren() {
     const epics = await this.repo.find({
       where: { type: 'epic', status: Not('triage' as WorkItemStatus) },
       order: { domainId: 'ASC', priority: 'ASC', id: 'ASC' },
     });
 
-    // Deux requêtes quel que soit le nombre d'epics : les enfants sont
-    // chargés en une fois et répartis en mémoire.
     const children = epics.length
       ? await this.repo.find({
           where: { parentId: In(epics.map((e) => e.id)) },
@@ -240,26 +277,61 @@ export class WorkItemsService implements OnModuleInit {
       if (bucket) bucket.push(child);
       else childrenOf.set(child.parentId!, [child]);
     }
+    return { epics, childrenOf };
+  }
 
-    const groups = await this.groupByDomain(epics, (epic) => {
-      const own = childrenOf.get(epic.id) ?? [];
-      return {
-        ...epic,
-        children: own,
-        /**
-         * L'avancement se lit sur les enfants, pas sur le statut de l'epic.
-         * Un epic sans enfant n'a pas d'avancement à montrer — 0/0 vaut
-         * « rien de découpé », pas « rien de fait ».
-         */
-        progress: {
-          total: own.length,
-          done: own.filter((c) => isDoneStatus(c.status)).length,
-          inProgress: own.filter((c) => c.status === 'in_progress' || c.status === 'review').length,
-        },
-      };
-    });
+  /**
+   * L'arbre du référentiel : Domaine › Capacité › Objectif › Initiative ›
+   * Epic.
+   *
+   * Les cinq niveaux existent en base depuis les lots précédents, mais aucune
+   * vue ne les remontait ensemble : on voyait les epics par domaine, et rien
+   * entre les deux — donc jamais « à quelle capacité sert ce qu'on construit
+   * ce trimestre ».
+   *
+   * Le placement est une fonction pure (`hierarchy.ts`) : ce qui se décide là
+   * — un maillon manquant se referme, rien ne se devine — s'éprouve sur des
+   * tableaux plutôt que sur un schéma.
+   */
+  async hierarchy() {
+    const { epics, childrenOf } = await this.epicsWithChildren();
 
-    return { total: epics.length, groups };
+    const [domains, capabilities, objectives, initiatives] = await Promise.all([
+      this.domains.find({ order: { position: 'ASC' } }),
+      this.capabilities.find({ order: { position: 'ASC' } }),
+      this.objectives.find(),
+      this.projects.find(),
+    ]);
+
+    const rows: HierarchyEpic[] = epics.map((epic) => ({
+      id: epic.id,
+      reference: epic.reference,
+      title: epic.title,
+      domainId: epic.domainId,
+      capabilityId: epic.capabilityId,
+      projectId: epic.projectId,
+      progress: progressOf(childrenOf.get(epic.id) ?? []),
+    }));
+
+    return {
+      total: epics.length,
+      nodes: buildHierarchy(rows, {
+        domains: domains.map((d) => ({ id: d.id, code: d.code, name: d.name, position: d.position })),
+        capabilities: capabilities.map((c) => ({ id: c.id, code: c.code, name: c.name, domainId: c.domainId })),
+        objectives: objectives.map((o) => ({
+          id: o.id,
+          title: o.title,
+          domainId: o.domainId,
+          capabilityId: o.capabilityId,
+        })),
+        initiatives: initiatives.map((i) => ({
+          id: i.id,
+          title: i.title,
+          keyPrefix: i.keyPrefix,
+          objectiveId: i.objectiveId,
+        })),
+      }),
+    };
   }
 
   /**

@@ -56,6 +56,8 @@ export class CreateTaskDto {
   @IsOptional() @IsIn(TASK_PRIORITIES as unknown as string[]) priority?: StudioTaskPriority;
   @IsOptional() @IsUUID() meetingId?: string;
   @IsOptional() @IsInt() @Min(0) position?: number;
+  /** L'estimation, en points — voir `UpdateTaskDto.points`. */
+  @IsOptional() @IsInt() @Min(0) @Max(999) points?: number;
   @IsOptional() @IsNumberString() hoursSpent?: string;
   @IsOptional() @IsInt() @Min(0) @Max(100) progressPercent?: number;
 }
